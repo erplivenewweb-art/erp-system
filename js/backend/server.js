@@ -46,18 +46,25 @@ const PROTECTED_PAGES = new Set([
   "sales-history.html"
 ]);
 
-const ALLOWED_APP_ORIGIN = String(process.env.APP_ORIGIN || "").trim();
+const DEFAULT_ALLOWED_APP_ORIGINS = [
+  "http://localhost:8080",
+  "https://erp-system-production-e223.up.railway.app"
+];
+const ALLOWED_APP_ORIGINS = new Set(
+  [
+    ...DEFAULT_ALLOWED_APP_ORIGINS,
+    ...String(process.env.APP_ORIGIN || "")
+      .split(",")
+      .map((origin) => origin.trim())
+  ].filter(Boolean)
+);
 
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
 
-      if (ALLOWED_APP_ORIGIN && origin === ALLOWED_APP_ORIGIN) {
-        return callback(null, true);
-      }
-
-      if (!ALLOWED_APP_ORIGIN && !isProductionRuntime()) {
+      if (ALLOWED_APP_ORIGINS.has(origin)) {
         return callback(null, true);
       }
 

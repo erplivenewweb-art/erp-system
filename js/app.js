@@ -1,5 +1,4 @@
-﻿const API_BASE =
-  window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+const API_BASE = window.location.origin;
 let lotData = JSON.parse(localStorage.getItem("lotData")) || [];
 let stockItems = JSON.parse(localStorage.getItem("stockItems")) || [];
 let invoiceItems = JSON.parse(localStorage.getItem("invoiceItems")) || [];
@@ -2875,6 +2874,7 @@ function newStickerData() {
   document.getElementById("editStickerBarcode").value = "";
   document.getElementById("stickerBarcode").value = generateBarcode();
 }
+
 
 
 
