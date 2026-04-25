@@ -1,7 +1,7 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="js/auth-guard.js"></script>
+    <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Billing</title>
@@ -175,6 +175,17 @@
     .profile-box i {
       color: #b7791f;
     }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
   </style>
 </head>
 <body>
@@ -277,9 +288,20 @@
           </div>
 
           <div class="sub-card" style="margin-top:16px;">
-            <h3>Billing Summary</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+              <h3>Billing Summary</h3>
+              <button type="button" id="staffSaleToggleBtn" class="secondary-btn" onclick="toggleStaffSaleMode()">Staff Sale</button>
+            </div>
 
             <div class="form-grid">
+              <div class="input-box hidden-box" id="billSalesModeBox">
+                <label>Sales Mode</label>
+                <select id="billSalesMode" onchange="handleSalesModeChange()">
+                  <option value="OWNER">Owner Sale</option>
+                  <option value="STAFF">Staff Sale</option>
+                </select>
+              </div>
+
               <div class="input-box">
                 <label>Bill Type</label>
                 <select id="billType" onchange="calculateBillingTotal()">
@@ -296,34 +318,35 @@
                 </select>
               </div>
 
-              <div class="input-box">
+              <div class="input-box hidden-box" id="billEmployeeNameBox">
                 <label>Employee Name</label>
                 <input type="text" id="billEmployeeName" placeholder="Enter employee name" />
               </div>
 
-              <div class="input-box">
-                <label>Selling Rate / Gram</label>
-                <input type="number" id="billRatePerGram" placeholder="Enter selling rate per gram" oninput="calculateBillingTotal()" />
+              <div class="input-box" id="billSellingRateBox">
+                <label>Metal Rate / Gram</label>
+                <input type="number" id="billRatePerGram" step="0.01" min="0" placeholder="Enter selling rate per gram" oninput="handleSellingRateInput()" />
+                <small style="font-size:12px; color:#64748b;">Metal price per gram (Gold/Silver)</small>
               </div>
 
-              <div class="input-box">
+              <div class="input-box hidden-box" id="billCompanyRateBox">
                 <label>Company Rate / Gram</label>
-                <input type="number" id="billCompanyRatePerGram" placeholder="Enter company rate per gram" oninput="calculateBillingTotal()" />
+                <input type="number" id="billCompanyRatePerGram" step="0.01" min="0" placeholder="Enter company rate per gram" oninput="handleCompanyRateInput()" />
               </div>
 
-              <div class="input-box">
+              <div class="input-box hidden-box" id="billMarginPerGramBox">
                 <label>Margin / Gram</label>
-                <input type="text" id="billMarginPerGram" readonly />
+                <input type="number" id="billMarginPerGram" step="0.01" min="0" placeholder="Enter margin per gram" oninput="handleMarginPerGramInput()" />
               </div>
 
               <div class="input-box">
                 <label>MC (Rs per gram)</label>
-                <input type="number" id="billMcRate" placeholder="Enter MC per gram" oninput="calculateBillingTotal()" />
+                <input type="number" id="billMcRate" step="0.01" min="0" placeholder="Enter MC per gram" oninput="calculateBillingTotal()" />
               </div>
 
               <div class="input-box">
                 <label>Round Off / Adjustment</label>
-                <input type="number" id="billRoundOff" value="0" oninput="calculateBillingTotal()" />
+                <input type="number" id="billRoundOff" step="0.01" value="0" oninput="calculateBillingTotal()" />
               </div>
 
               <div class="input-box">
@@ -351,13 +374,13 @@
                 <input type="text" id="billGrandTotal" readonly />
               </div>
 
-              <div class="input-box">
+              <div class="input-box hidden-box" id="billCompanyTotalBox">
                 <label>Company Total</label>
                 <input type="text" id="billCompanyTotal" readonly />
               </div>
 
-              <div class="input-box">
-                <label>Employee Margin</label>
+              <div class="input-box hidden-box" id="billEmployeeMarginBox">
+                <label>Total Margin</label>
                 <input type="text" id="billEmployeeMargin" readonly />
               </div>
             </div>
@@ -367,10 +390,13 @@
             <h3>Quick Summary</h3>
 
             <div class="summary-chip-row">
+              <div class="summary-chip hidden-box" id="billSalesModeChip">Sales Mode: <span id="billSalesModeText">Owner Sale</span></div>
               <div class="summary-chip">Total Count: <span id="billTotalCount">0</span></div>
               <div class="summary-chip">Total Weight: <span id="billTotalWeight">0.000</span> g</div>
-              <div class="summary-chip">Company Total: Rs <span id="billCompanyTotalText">0.00</span></div>
-              <div class="summary-chip">Employee Margin: Rs <span id="billEmployeeMarginText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billMarginPerGramChip">Margin / Gram: Rs <span id="billMarginPerGramText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billSellingRateChip">Selling Rate: Rs <span id="billSellingRateText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billCompanyTotalChip">Company Total: Rs <span id="billCompanyTotalText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billEmployeeMarginChip">Total Margin: Rs <span id="billEmployeeMarginText">0.00</span></div>
               <div class="summary-chip">Customer Total: Rs <span id="billGrandTotalText">0.00</span></div>
               <div class="summary-chip">Status: <span id="billStatusChip" class="status-chip">Not Selected</span></div>
             </div>
@@ -393,6 +419,7 @@
                     <th>SL</th>
                     <th>Item</th>
                     <th>SKU</th>
+                    <th>Qty</th>
                     <th>Weight</th>
                     <th>Purity</th>
                     <th>Size</th>
@@ -424,13 +451,18 @@
               </div>
 
               <div class="input-box">
+                <label>Quantity</label>
+                <input type="number" min="1" step="1" id="billQuantity" placeholder="Quantity" oninput="syncManualEntryPreview()" />
+              </div>
+
+              <div class="input-box">
                 <label>Weight</label>
-                <input type="number" step="0.001" id="billWeight" placeholder="Weight" />
+                <input type="number" step="0.001" id="billWeight" placeholder="Weight" oninput="syncManualEntryPreview()" />
               </div>
 
               <div class="input-box">
                 <label>Purity</label>
-                <input type="number" step="0.01" id="billPurity" placeholder="Purity %" />
+                <input type="number" step="0.01" id="billPurity" placeholder="Purity %" oninput="syncManualEntryPreview()" />
               </div>
 
               <div class="input-box">
@@ -439,13 +471,14 @@
               </div>
 
               <div class="input-box">
-                <label>Lot</label>
-                <input type="text" id="billLot" placeholder="Lot" />
+                <label>Rate</label>
+                <input type="number" id="billManualRatePreview" step="0.01" min="0" placeholder="Rate" oninput="handleManualRateInput()" />
               </div>
             </div>
 
             <div class="btn-row" style="margin-top:12px;">
               <button class="primary-btn" type="button" onclick="addBillingItem()">Add Item</button>
+              <button class="primary-btn" type="button" onclick="completeManualSale()">Complete Sale</button>
               <button class="secondary-btn" type="button" onclick="clearBillingItemForm()">Clear</button>
             </div>
           </div>
@@ -537,7 +570,7 @@
               </div>
 
               <div class="summary-chip-row">
-                <div class="summary-chip danger-soft">Pending Due: â‚¹ <span id="duePreviewText">0.00</span></div>
+                <div class="summary-chip danger-soft">Pending Due: ₹ <span id="duePreviewText">0.00</span></div>
               </div>
             </div>
 
@@ -584,14 +617,17 @@
   </div>
 
   <script>
-    const API_BASE =
-      window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+    const API_BASE = window.ERP_API_BASE;
 
     let billingItems = [];
     let removedBillingBarcodes = [];
     let qrInstance = null;
     let autoProcessing = false;
     let currentInvoiceDraftId = null;
+    const salesModeMargins = {
+      OWNER: 0,
+      STAFF: 0
+    };
     let erpSettingsCache = {
       ownerEmail: "",
       top_title: "",
@@ -758,16 +794,16 @@
       const mcInput = document.getElementById("billMcRate");
 
       if (rateInput && !rateInput.value && s.default_rate_per_gram !== undefined && s.default_rate_per_gram !== "") {
-        rateInput.value = s.default_rate_per_gram;
+        rateInput.value = formatEditableNumber(s.default_rate_per_gram);
       }
 
       const companyRateInput = document.getElementById("billCompanyRatePerGram");
       if (companyRateInput && !companyRateInput.value && s.default_rate_per_gram !== undefined && s.default_rate_per_gram !== "") {
-        companyRateInput.value = s.default_rate_per_gram;
+        companyRateInput.value = formatEditableNumber(s.default_rate_per_gram);
       }
 
       if (mcInput && !mcInput.value && s.default_mc_rate !== undefined && s.default_mc_rate !== "") {
-        mcInput.value = s.default_mc_rate;
+        mcInput.value = formatEditableNumber(s.default_mc_rate);
       }
     }
 
@@ -861,6 +897,246 @@
       localStorage.setItem(companyScopedKey("removedBillingBarcodes"), JSON.stringify(removedBillingBarcodes));
     }
 
+    function formatEditableNumber(value) {
+      const normalized = num(value);
+      if (!Number.isFinite(normalized) || normalized === 0) return "0";
+      return parseFloat(normalized.toFixed(2)).toString();
+    }
+
+    function syncManualEntryPreview() {
+      const qty = Math.max(1, Math.floor(num(document.getElementById("billQuantity")?.value || 1)));
+      const rate = num(document.getElementById("billRatePerGram")?.value || 0);
+
+      const rateEl = document.getElementById("billManualRatePreview");
+
+      if (document.getElementById("billQuantity")) {
+        document.getElementById("billQuantity").value = qty;
+      }
+      if (rateEl) rateEl.value = formatEditableNumber(rate);
+    }
+
+    function handleManualRateInput() {
+      const manualRateEl = document.getElementById("billManualRatePreview");
+      const sellingRateEl = document.getElementById("billRatePerGram");
+
+      if (!manualRateEl || !sellingRateEl) return;
+
+      sellingRateEl.value = manualRateEl.value;
+      handleSellingRateInput();
+    }
+
+    function getSalesModeLabel(mode) {
+      if (mode === "STAFF") return "Staff Sale";
+      return "Owner Sale";
+    }
+
+    function setBillingSummaryAdvancedVisible(isVisible) {
+      [
+        "billSalesModeBox",
+        "billEmployeeNameBox",
+        "billCompanyRateBox",
+        "billMarginPerGramBox",
+        "billCompanyTotalBox",
+        "billEmployeeMarginBox",
+        "billSalesModeChip",
+        "billMarginPerGramChip",
+        "billSellingRateChip",
+        "billCompanyTotalChip",
+        "billEmployeeMarginChip"
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle("hidden-box", !isVisible);
+      });
+
+      const btn = document.getElementById("staffSaleToggleBtn");
+      if (!btn) return;
+
+      btn.dataset.active = isVisible ? "true" : "false";
+      btn.classList.toggle("primary-btn", isVisible);
+      btn.classList.toggle("secondary-btn", !isVisible);
+    }
+
+    function toggleStaffSaleMode() {
+      const btn = document.getElementById("staffSaleToggleBtn");
+      const salesModeEl = document.getElementById("billSalesMode");
+      const isActive = btn?.dataset.active === "true";
+
+      if (!salesModeEl) return;
+
+      if (isActive) {
+        salesModeEl.value = "OWNER";
+        handleSalesModeChange();
+        setBillingSummaryAdvancedVisible(false);
+      } else {
+        salesModeEl.value = "STAFF";
+        setBillingSummaryAdvancedVisible(true);
+        handleSalesModeChange();
+      }
+
+      updateQuickSummary();
+    }
+
+    function handleSalesModeChange() {
+      const modeEl = document.getElementById("billSalesMode");
+      const employeeNameEl = document.getElementById("billEmployeeName");
+      const companyRateEl = document.getElementById("billCompanyRatePerGram");
+      const sellingRateEl = document.getElementById("billRatePerGram");
+      const marginEl = document.getElementById("billMarginPerGram");
+
+      if (!modeEl || !companyRateEl || !sellingRateEl || !marginEl) return;
+
+      const mode = modeEl.value || "OWNER";
+      const previousMode = modeEl.dataset.previousMode || "OWNER";
+      salesModeMargins[previousMode] = num(marginEl.value);
+
+      const companyRate = num(companyRateEl.value);
+      let nextMargin = salesModeMargins[mode] ?? 0;
+
+      if (mode === "OWNER") {
+        nextMargin = 0;
+      }
+
+      if (employeeNameEl) {
+        employeeNameEl.disabled = mode === "OWNER";
+        if (mode === "OWNER") employeeNameEl.value = "";
+      }
+      marginEl.readOnly = mode === "OWNER";
+      sellingRateEl.readOnly = false;
+      marginEl.value = formatEditableNumber(nextMargin);
+      sellingRateEl.value = formatEditableNumber(companyRate + nextMargin);
+      modeEl.dataset.previousMode = mode;
+
+      calculateBillingTotal();
+    }
+
+    function handleCompanyRateInput() {
+      const mode = document.getElementById("billSalesMode")?.value || "OWNER";
+      const companyRateEl = document.getElementById("billCompanyRatePerGram");
+      const sellingRateEl = document.getElementById("billRatePerGram");
+      const marginEl = document.getElementById("billMarginPerGram");
+
+      if (!companyRateEl || !sellingRateEl || !marginEl) return;
+
+      const companyRate = num(companyRateEl.value);
+      const marginPerGram = mode === "OWNER" ? 0 : num(marginEl.value);
+
+      marginEl.value = formatEditableNumber(marginPerGram);
+      sellingRateEl.value = formatEditableNumber(companyRate + marginPerGram);
+      salesModeMargins[mode] = marginPerGram;
+
+      calculateBillingTotal();
+    }
+
+    function handleSellingRateInput() {
+      const mode = document.getElementById("billSalesMode")?.value || "OWNER";
+      const companyRateEl = document.getElementById("billCompanyRatePerGram");
+      const sellingRateEl = document.getElementById("billRatePerGram");
+      const marginEl = document.getElementById("billMarginPerGram");
+
+      if (!companyRateEl || !sellingRateEl || !marginEl) return;
+
+      if (mode === "OWNER") {
+        companyRateEl.value = formatEditableNumber(sellingRateEl.value);
+        marginEl.value = "0";
+        salesModeMargins.OWNER = 0;
+      } else {
+        const marginPerGram = num(sellingRateEl.value) - num(companyRateEl.value);
+        marginEl.value = formatEditableNumber(marginPerGram);
+        salesModeMargins[mode] = marginPerGram;
+      }
+
+      calculateBillingTotal();
+    }
+
+    function handleMarginPerGramInput() {
+      const modeEl = document.getElementById("billSalesMode");
+      const companyRateEl = document.getElementById("billCompanyRatePerGram");
+      const sellingRateEl = document.getElementById("billRatePerGram");
+      const marginEl = document.getElementById("billMarginPerGram");
+
+      if (!companyRateEl || !sellingRateEl || !marginEl) return;
+
+      const companyRate = num(companyRateEl.value);
+      const mode = modeEl?.value || "OWNER";
+      const marginPerGram = mode === "OWNER" ? 0 : num(marginEl.value);
+      salesModeMargins[mode] = marginPerGram;
+      marginEl.value = formatEditableNumber(marginPerGram);
+      sellingRateEl.value = formatEditableNumber(companyRate + marginPerGram);
+      calculateBillingTotal();
+    }
+
+    function getBillingItemQty(item) {
+      const qty = Math.floor(num(item?.quantity || 1));
+      return qty > 0 ? qty : 1;
+    }
+
+    function getBillingItemMm(item) {
+      return String(item?.mm ?? item?.mmSize ?? item?.mm_size ?? "").trim();
+    }
+
+    function getBillingItemKey(item) {
+      const purity = num(item?.purity);
+      return [
+        String(item?.itemName || item?.productName || "").trim().toLowerCase(),
+        String(item?.size || "").trim().toLowerCase(),
+        getBillingItemMm(item).toLowerCase(),
+        purity > 0 ? purity.toFixed(2) : ""
+      ].join("||");
+    }
+
+    function normalizeBillingItem(item = {}) {
+      const quantity = getBillingItemQty(item);
+      const totalWeight = num(item.weight);
+      const unitWeight = num(item.unitWeight || totalWeight);
+
+      return {
+        ...item,
+        itemName: item.itemName || item.productName || item.product_name || "",
+        quantity,
+        unitWeight,
+        weight: totalWeight,
+        mm: getBillingItemMm(item)
+      };
+    }
+
+    function aggregateBillingItems(items = []) {
+      const grouped = new Map();
+
+      items.forEach((rawItem, index) => {
+        const item = normalizeBillingItem(rawItem);
+        const key = getBillingItemKey(item);
+
+        if (!key.replace(/\|/g, "")) {
+          grouped.set(`__row__${index}`, item);
+          return;
+        }
+
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            ...item,
+            quantity: item.quantity,
+            weight: num(item.weight)
+          });
+          return;
+        }
+
+        const existing = grouped.get(key);
+        const mergedQuantity = getBillingItemQty(existing) + getBillingItemQty(item);
+        const mergedWeight = num(existing.weight) + num(item.weight);
+
+        grouped.set(key, {
+          ...existing,
+          barcode: existing.barcode || item.barcode || "",
+          quantity: mergedQuantity,
+          weight: mergedWeight,
+          unitWeight: num(existing.unitWeight || item.unitWeight || mergedWeight)
+        });
+      });
+
+      return Array.from(grouped.values()).map((item) => normalizeBillingItem(item));
+    }
+
     function getTodayDate() {
       const today = new Date();
       const yyyy = today.getFullYear();
@@ -869,24 +1145,31 @@
       return `${yyyy}-${mm}-${dd}`;
     }
 
+    function generateNextBillingInvoiceNumber() {
+      return `BILL-${Date.now()}`;
+    }
+
     function addBillingItem() {
       const itemName = document.getElementById("billItemName").value.trim();
       const sku = document.getElementById("billSku").value.trim();
+      const quantity = Math.max(1, Math.floor(num(document.getElementById("billQuantity").value || 1)));
       const weight = num(document.getElementById("billWeight").value);
       const purity = num(document.getElementById("billPurity").value);
       const size = document.getElementById("billSize").value.trim();
-      const lot = document.getElementById("billLot").value.trim();
+      const lot = "";
 
       if (!itemName || !weight) {
       showToast("Please enter the item name and weight.", "error");
         return;
       }
 
-      billingItems.push({
+      billingItems = aggregateBillingItems([...billingItems, {
         id: "MANUAL-" + Date.now(),
         barcode: "",
         itemName,
         sku,
+        quantity,
+        unitWeight: weight,
         weight,
         purity,
         size,
@@ -894,7 +1177,7 @@
         pureWeight: 0,
         totalPrice: 0,
         company_id: getCurrentCompanyId()
-      });
+      }]);
 
       renderBillingTable();
       calculateBillingTotal();
@@ -905,10 +1188,38 @@
     function clearBillingItemForm() {
       document.getElementById("billItemName").value = "";
       document.getElementById("billSku").value = "";
+      document.getElementById("billQuantity").value = "";
       document.getElementById("billWeight").value = "";
       document.getElementById("billPurity").value = "";
       document.getElementById("billSize").value = "";
-      document.getElementById("billLot").value = "";
+      syncManualEntryPreview();
+    }
+
+    async function completeManualSale() {
+      const invoiceNumber = document.getElementById("billInvoiceNumber")?.value.trim() || "";
+      const customerName = document.getElementById("billCustomerName")?.value.trim() || "";
+
+      if (!invoiceNumber || !customerName || !billingItems.length) {
+        showToast("Please fill customer details and add items before saving", "error");
+        return;
+      }
+
+      const savedRecord = await saveBillingRecord(false);
+      if (!savedRecord) return;
+
+      clearBillingAll();
+
+      const invoiceInput = document.getElementById("billInvoiceNumber");
+      if (invoiceInput) {
+        invoiceInput.value = generateNextBillingInvoiceNumber();
+      }
+
+      const dateInput = document.getElementById("billDate");
+      if (dateInput) {
+        dateInput.value = getTodayDate();
+      }
+
+      showToast("Sale saved successfully", "success");
     }
 
     function deleteBillingItem(index) {
@@ -957,19 +1268,22 @@
         return true;
       }
 
-      billingItems = readyItems.map((item, index) => ({
+      billingItems = aggregateBillingItems(readyItems.map((item, index) => ({
         id: item.id || item.barcode || ("INV-" + index + "-" + Date.now()),
         barcode: item.barcode || "",
         itemName: item.itemName || item.productName || item.product_name || "",
         sku: item.sku || "",
+        quantity: Math.floor(num(item.quantity || 1)) || 1,
+        unitWeight: num(item.unitWeight || item.weight),
         weight: num(item.weight),
         purity: num(item.purity),
         size: item.size || "",
         lot: item.lot || item.lot_number || "",
+        mm: item.mm || item.mmSize || item.mm_size || "",
         pureWeight: 0,
         totalPrice: 0,
         company_id: item.company_id ?? getCurrentCompanyId()
-      }));
+      })));
 
       const draft = result.draft || {};
       document.getElementById("billCustomerName").value = draft.customerName || "";
@@ -1025,6 +1339,7 @@
         "billPaidAmount",
         "billDueAmount",
         "billEmployeeName",
+        "billSalesMode",
         "billRatePerGram",
         "billCompanyRatePerGram",
         "billMarginPerGram",
@@ -1051,6 +1366,8 @@
         if (!el) return;
         if (id === "billRoundOff") {
           el.value = "0";
+        } else if (id === "billSalesMode") {
+          el.value = "OWNER";
         } else if (id === "billReminderMode") {
           el.value = "Manual";
         } else {
@@ -1060,6 +1377,9 @@
 
       const dateInput = document.getElementById("billDate");
       if (dateInput) dateInput.value = getTodayDate();
+      const salesModeEl = document.getElementById("billSalesMode");
+      if (salesModeEl) salesModeEl.dataset.previousMode = "OWNER";
+      setBillingSummaryAdvancedVisible(false);
 
       if (window.history && typeof window.history.replaceState === "function") {
         window.history.replaceState({}, document.title, "billing.html");
@@ -1067,6 +1387,7 @@
 
       clearQrBox();
       applyCompanySettingsPreview();
+      handleSalesModeChange();
       updateQuickSummary();
       handlePaymentModeChange();
     }
@@ -1080,15 +1401,18 @@
 
       tbody.innerHTML = "";
       let totalWeight = 0;
+      let totalRows = 0;
 
       billingItems.forEach((item, index) => {
         totalWeight += num(item.weight);
+        totalRows += 1;
 
         tbody.innerHTML += `
           <tr>
             <td>${index + 1}</td>
             <td>${item.itemName || ""}</td>
             <td>${item.sku || ""}</td>
+            <td><span>${getBillingItemQty(item)}</span></td>
             <td>${num(item.weight).toFixed(3)}</td>
             <td>${num(item.purity).toFixed(2)}</td>
             <td>${item.size || ""}</td>
@@ -1105,10 +1429,10 @@
       });
 
       if (!billingItems.length) {
-        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;">No billing items found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">No billing items found</td></tr>`;
       }
 
-      if (totalCount) totalCount.textContent = billingItems.length;
+      if (totalCount) totalCount.textContent = totalRows;
       if (totalWeightEl) totalWeightEl.textContent = totalWeight.toFixed(3);
 
       updateQuickSummary();
@@ -1126,8 +1450,14 @@
       document.getElementById("billTotalCount").textContent = totalCount;
       document.getElementById("billTotalWeight").textContent = totalWeight.toFixed(3);
       document.getElementById("billGrandTotalText").textContent = grandTotal.toFixed(2);
+      const salesModeText = document.getElementById("billSalesModeText");
+      const marginPerGramText = document.getElementById("billMarginPerGramText");
+      const sellingRateText = document.getElementById("billSellingRateText");
       const companyTotalText = document.getElementById("billCompanyTotalText");
       const employeeMarginText = document.getElementById("billEmployeeMarginText");
+      if (salesModeText) salesModeText.textContent = getSalesModeLabel(document.getElementById("billSalesMode")?.value || "OWNER");
+      if (marginPerGramText) marginPerGramText.textContent = num(document.getElementById("billMarginPerGram")?.value).toFixed(2);
+      if (sellingRateText) sellingRateText.textContent = num(document.getElementById("billRatePerGram")?.value).toFixed(2);
       if (companyTotalText) companyTotalText.textContent = companyTotal.toFixed(2);
       if (employeeMarginText) employeeMarginText.textContent = employeeMargin.toFixed(2);
 
@@ -1164,11 +1494,12 @@
       let companySubtotal = 0;
 
       billingItems = billingItems.map((item) => {
+        const grossWeight = num(item.weight);
         const purityValue = num(item.purity) > 0 ? num(item.purity) : 100;
-        const pureWeight = (num(item.weight) * purityValue) / 100;
+        const pureWeight = (grossWeight * purityValue) / 100;
         const sellingMetalAmount = pureWeight * sellingRate;
         const companyMetalAmount = pureWeight * companyRate;
-        const mcAmount = pureWeight * mcRate;
+        const mcAmount = grossWeight * mcRate;
         const customerLineAmount = sellingMetalAmount + mcAmount;
         const companyLineAmount = companyMetalAmount + mcAmount;
         const employeeMarginAmount = customerLineAmount - companyLineAmount;
@@ -1179,6 +1510,10 @@
         return {
           ...item,
           pureWeight,
+          grossWeight,
+          metalValue: sellingMetalAmount,
+          companyMetalValue: companyMetalAmount,
+          makingChargeAmount: mcAmount,
           totalPrice: customerLineAmount,
           customerLineAmount,
           companyLineAmount,
@@ -1220,9 +1555,11 @@
       document.getElementById("billCompanyTotal").value = companyTotal.toFixed(2);
       document.getElementById("billEmployeeMargin").value = employeeMargin.toFixed(2);
       document.getElementById("billMarginPerGram").value = marginPerGram.toFixed(2);
+      salesModeMargins[document.getElementById("billSalesMode")?.value || "OWNER"] = marginPerGram;
 
       renderBillingTable();
       saveBillingItems();
+      syncManualEntryPreview();
 
       autoSetAmounts();
       calculateMetalSettlement();
@@ -1482,6 +1819,7 @@
       const grandTotal = num(document.getElementById("billGrandTotal").value);
       const companyTotal = num(document.getElementById("billCompanyTotal").value);
       const employeeMargin = num(document.getElementById("billEmployeeMargin").value);
+      const totalCount = billingItems.length;
       const totalWeight = billingItems.reduce((sum, item) => sum + num(item.weight), 0);
 
       const dueNote = document.getElementById("billDueNote").value.trim() || "";
@@ -1520,7 +1858,7 @@
         customerTotal: grandTotal,
         companyTotal,
         employeeMargin,
-        totalCount: billingItems.length,
+        totalCount,
         totalWeight,
         items: billingItems.map((item) => ({ ...item })),
         dueNote,
@@ -1549,9 +1887,11 @@
         productName: item.itemName || "",
         product_name: item.itemName || "",
         sku: item.sku || "",
+        quantity: getBillingItemQty(item),
         purity: item.purity || "",
         size: item.size || "",
         weight: num(item.weight),
+        unitWeight: num(item.unitWeight || num(item.weight)),
         pureWeight: num(item.pureWeight),
         metalType: item.metalType || item.metal_type || "",
         metal_type: item.metalType || item.metal_type || "",
@@ -1643,227 +1983,576 @@
       }
     }
 
-    function buildBillingPrintHtml() {
-      const record = getBillingRecord();
+    function escapePrintHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatCurrency(value) {
+      return `Rs. ${num(value).toFixed(2)}`;
+    }
+
+    function numberToIndianWords(value) {
+      const numValue = Math.max(0, Math.floor(num(value)));
+      if (numValue === 0) return "Zero";
+
+      const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+      const teens = ["Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+      const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+      function twoDigitToWords(n) {
+        if (n < 10) return ones[n];
+        if (n < 20) return teens[n - 10];
+        const ten = Math.floor(n / 10);
+        const one = n % 10;
+        return `${tens[ten]}${one ? ` ${ones[one]}` : ""}`.trim();
+      }
+
+      function threeDigitToWords(n) {
+        const hundred = Math.floor(n / 100);
+        const rest = n % 100;
+        const hundredPart = hundred ? `${ones[hundred]} Hundred` : "";
+        const restPart = rest ? twoDigitToWords(rest) : "";
+        return `${hundredPart}${hundredPart && restPart ? " " : ""}${restPart}`.trim();
+      }
+
+      const parts = [];
+      const crore = Math.floor(numValue / 10000000);
+      const lakh = Math.floor((numValue % 10000000) / 100000);
+      const thousand = Math.floor((numValue % 100000) / 1000);
+      const remainder = numValue % 1000;
+
+      if (crore) parts.push(`${threeDigitToWords(crore)} Crore`);
+      if (lakh) parts.push(`${threeDigitToWords(lakh)} Lakh`);
+      if (thousand) parts.push(`${threeDigitToWords(thousand)} Thousand`);
+      if (remainder) parts.push(threeDigitToWords(remainder));
+
+      return parts.join(" ").trim();
+    }
+
+    function buildBillingPrintHtml(data = getBillingRecord()) {
+      const record = data;
       if (!record) return "";
 
-      const erpSettings = record.companySettings || getErpSettings();
+      const company = record.companySettings || getErpSettings();
+      const invoiceInput = document.getElementById("billInvoiceNumber");
+      const invoiceNumberValue = invoiceInput ? invoiceInput.value.trim() : (record.invoiceNumber || "");
+      const invoiceNumber = escapePrintHtml(invoiceNumberValue || "-");
+      const date = escapePrintHtml(record.billDate || "-");
+      const customerName = escapePrintHtml(record.customerName || "-");
+      const customerMobile = escapePrintHtml(record.mobile || "-");
+      const shopName = escapePrintHtml(company.company_name || "-");
+      const invoiceTitle = escapePrintHtml(company.top_title || "-");
+      const address = escapePrintHtml(company.address || "-");
+      const gstNumber = escapePrintHtml(company.gstin || "-");
+      const logoSource = escapePrintHtml(company.logo_url || company.logo_data_url || "");
+      const customerNote = escapePrintHtml(company.customer_note || "");
+      const thankYouMessage = escapePrintHtml(company.thank_you_message || "");
+      const customerNoteHtml = customerNote ? customerNote.replace(/\n/g, "<br>") : "";
+      const thankYouHtml = thankYouMessage ? thankYouMessage.replace(/\n/g, "<br>") : "";
+      const signatureLabel = escapePrintHtml(company.signature_label || "");
+      const contact = escapePrintHtml(
+        company.contact ||
+        company.contact_no ||
+        company.mobile ||
+        company.phone ||
+        company.phone_number ||
+        "-"
+      );
 
-      const businessTopTitle = erpSettings.top_title || "Not Configured";
-      const businessName = erpSettings.company_name || "Not Configured";
-      const businessAddress = erpSettings.address || "-";
-      const businessGstin = erpSettings.gstin || "-";
-      const businessAccountNo = erpSettings.account_no || "-";
-      const businessIfsc = erpSettings.ifsc || "-";
-      const businessDeclaration = erpSettings.declaration || "-";
+      const items = Array.isArray(record.items) ? record.items : [];
+      const metalTotal = items.reduce((sum, item) => sum + num(item.metalValue || 0), 0);
+      const makingCharge = items.reduce((sum, item) => sum + num(item.makingChargeAmount || 0), 0);
+      const gstTotal = num(record.cgst) + num(record.sgst) + num(record.igst);
+      const adjustment = num(record.roundOff);
+      const subtotalBase = metalTotal + makingCharge + adjustment;
+      const amountInWords = escapePrintHtml(numberToIndianWords(record.grandTotal));
 
-      const customerName = record.customerName || "";
-      const mobile = record.mobile || "";
-      const gstNo = record.gstNo || "";
-      const invoiceNumber = record.invoiceNumber || "";
-      const billDate = record.billDate || "";
-      const paymentMode = record.paymentMode || "";
-      const paymentStatus = record.paymentStatus || "";
-      const paidAmount = num(record.paidAmount).toFixed(2);
-      const dueAmount = num(record.dueAmount).toFixed(2);
-      const billType = record.billType || "GST";
-      const taxType = record.taxType || "CGST_SGST";
+      const rows = items.map((item) => {
+        const qty = getBillingItemQty(item);
+        const rate = num(item.sellingRatePerGram || record.ratePerGram || 0);
+        const mc = num(record.mcRate || item.mcRate || 0);
+        const amount = num(item.totalPrice || 0);
 
-      const subtotal = num(record.subtotal).toFixed(2);
-      const cgst = num(record.cgst).toFixed(2);
-      const sgst = num(record.sgst).toFixed(2);
-      const igst = num(record.igst).toFixed(2);
-      const roundOff = num(record.roundOff).toFixed(2);
-      const grandTotal = num(record.grandTotal).toFixed(2);
-      const companyTotal = num(record.companyTotal).toFixed(2);
-      const employeeMargin = num(record.employeeMargin).toFixed(2);
-      const employeeName = record.employeeName || "-";
-      const ratePerGram = num(record.ratePerGram).toFixed(2);
-      const companyRatePerGram = num(record.companyRatePerGram).toFixed(2);
-      const mcRate = num(record.mcRate).toFixed(2);
-      const metalPercent = num(record.metalPercent).toFixed(2);
-      const metalPayable = num(record.metalPayable).toFixed(3);
-
-      let rows = "";
-      let totalWeight = 0;
-
-      record.items.forEach((item, index) => {
-        totalWeight += num(item.weight);
-
-        rows += `
-          <tr>
-            <td>${index + 1}</td>
-            <td>${item.itemName || ""}</td>
-            <td>${item.sku || ""}</td>
-            <td>${num(item.weight).toFixed(3)}</td>
-            <td>${item.size || ""}</td>
-            <td>${item.lot || ""}</td>
-            <td>${num(item.purity).toFixed(2)}</td>
-            <td>${ratePerGram}</td>
-            <td>${companyRatePerGram}</td>
-            <td>${mcRate}</td>
-            <td>${num(item.totalPrice).toFixed(2)}</td>
-          </tr>
+        return `
+            <tr>
+              <td>${escapePrintHtml(item.itemName || "")}</td>
+              <td class="num">${qty}</td>
+              <td class="num">${num(item.purity).toFixed(2)}</td>
+              <td class="num">${num(item.weight).toFixed(3)} g</td>
+              <td class="num">${num(item.pureWeight).toFixed(3)} g</td>
+              <td class="rate">${formatCurrency(rate)}</td>
+              <td class="rate">${num(mc).toFixed(2)}</td>
+              <td class="amount">${formatCurrency(amount)}</td>
+            </tr>
         `;
-      });
-
-      const taxRows = billType === "GST"
-        ? (
-            taxType === "CGST_SGST"
-              ? `
-                <tr><td><strong>CGST @ 1.5%</strong></td><td>â‚¹ ${cgst}</td></tr>
-                <tr><td><strong>SGST @ 1.5%</strong></td><td>â‚¹ ${sgst}</td></tr>
-              `
-              : `
-                <tr><td><strong>IGST @ 3%</strong></td><td>â‚¹ ${igst}</td></tr>
-              `
-          )
-        : `<tr><td><strong>GST</strong></td><td>â‚¹ 0.00</td></tr>`;
-
-      const extraPaymentInfo = paymentMode === "Metal"
-        ? `
-          <div><strong>Metal %:</strong> ${metalPercent}%</div>
-          <div><strong>Payable Metal:</strong> ${metalPayable} g</div>
-        `
-        : `
-          <div><strong>Paid Amount:</strong> â‚¹ ${paidAmount}</div>
-          <div><strong>Due Amount:</strong> â‚¹ ${dueAmount}</div>
-        `;
+      }).join("") || `
+            <tr>
+              <td colspan="8" style="text-align:center; color:#7a6d57;">No billing items available</td>
+            </tr>
+      `;
 
       return `
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Billing Print</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Premium Jewellery Invoice</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 18px; color: #111; }
-    .invoice-box { max-width: 1250px; margin: auto; border: 2px solid #111; padding: 12px; }
-    .title-main { text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 16px; }
-    .topline { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; font-size: 14px; margin-bottom: 8px; }
-    .header-box { border: 1px solid #111; display: grid; grid-template-columns: 1fr 2fr 1fr; align-items: center; min-height: 90px; margin-bottom: 10px; }
-    .header-box > div { padding: 10px; font-size: 14px; }
-    .header-center { text-align: center; font-weight: bold; }
-    .deal-box { display: inline-block; background: #111; color: #fff; padding: 8px 14px; margin-top: 8px; font-size: 13px; }
-    .party-box { border: 1px solid #111; padding: 12px; margin-bottom: 10px; min-height: 130px; line-height: 1.9; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #111; padding: 8px; font-size: 13px; text-align: center; }
-    th { background: #111; color: white; }
-    .summary-grid { display: grid; grid-template-columns: 1.3fr 1fr; margin-top: 10px; gap: 0; }
-    .left-summary, .right-summary { border: 1px solid #111; min-height: 170px; }
-    .left-summary { padding: 10px; font-size: 14px; line-height: 2; border-right: none; }
-    .right-summary table { width: 100%; height: 100%; }
-    .right-summary td { font-size: 14px; font-weight: 600; text-align: left; }
-    .bottom-box { display: grid; grid-template-columns: 2fr 0.6fr; margin-top: 10px; }
-    .declaration, .sign-box { border: 1px solid #111; min-height: 90px; padding: 12px; font-size: 14px; display: flex; align-items: end; box-sizing: border-box; }
-    .sign-box { justify-content: center; text-align: center; font-weight: 700; }
+    :root {
+      --paper: #fffdf8;
+      --surface: #fffaf0;
+      --surface-strong: #fff5db;
+      --ink: #2f2a22;
+      --muted: #7a6d57;
+      --line: #e8dcc0;
+      --line-soft: #f1e8d5;
+      --gold: #d4af37;
+      --gold-deep: #b89224;
+      --shadow: 0 18px 45px rgba(92, 70, 22, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f6f1e7;
+      color: var(--ink);
+      font-family: "Georgia", "Times New Roman", serif;
+    }
+    body { padding: 28px; }
+    .invoice-sheet {
+      width: 210mm;
+      min-height: 297mm;
+      max-width: 100%;
+      margin: 0 auto;
+      background: linear-gradient(180deg, #fffefb 0%, #fffaf2 100%);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 22mm 18mm 18mm;
+      position: relative;
+      overflow: hidden;
+    }
+    .invoice-sheet::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.12), transparent 24%),
+        radial-gradient(circle at bottom left, rgba(212, 175, 55, 0.08), transparent 20%);
+      pointer-events: none;
+    }
+    .content { position: relative; z-index: 1; }
+    .brand-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .brand-copy {
+      flex: 1;
+      min-width: 0;
+    }
+    .invoice-logo {
+      width: 66px;
+      height: 66px;
+      object-fit: contain;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+      padding: 6px;
+      flex-shrink: 0;
+    }
+    .top-band {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { max-width: 62%; }
+    .brand-mark {
+      display: inline-block;
+      padding: 6px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: linear-gradient(180deg, #fffaf0 0%, #fff4d8 100%);
+      color: var(--gold-deep);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .shop-name {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #3b3124;
+    }
+    .tagline {
+      margin: 8px 0 14px;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+    }
+    .shop-meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+    .invoice-badge {
+      min-width: 210px;
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-strong) 100%);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px 18px 16px;
+      text-align: center;
+    }
+    .invoice-badge .label {
+      font-size: 12px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      margin-bottom: 10px;
+    }
+    .invoice-badge .title {
+      font-size: 28px;
+      line-height: 1.15;
+      font-weight: 700;
+      color: #352d22;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 22px;
+    }
+    .info-card {
+      background: rgba(255, 255, 255, 0.68);
+      border: 1px solid var(--line-soft);
+      border-radius: 18px;
+      padding: 18px;
+    }
+    .info-card h3,
+    .note-card h4,
+    .total-card h4 {
+      margin: 0 0 14px;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 700;
+    }
+    .info-table,
+    .items-table,
+    .totals-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .info-table td {
+      padding: 7px 0;
+      vertical-align: top;
+      font-size: 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .info-table tr:last-child td,
+    .items-table tbody tr:last-child td,
+    .totals-table tr:last-child td {
+      border-bottom: none;
+    }
+    .info-table td:first-child,
+    .totals-table td:first-child {
+      width: 42%;
+      color: var(--muted);
+    }
+    .info-table td:last-child,
+    .totals-table td:last-child {
+      font-weight: 600;
+      color: #3a3227;
+      text-align: right;
+    }
+    .items-wrap {
+      margin-top: 24px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.8);
+    }
+    .items-table thead th {
+      background: linear-gradient(180deg, #fff7e1 0%, #f9edc7 100%);
+      color: #6d5718;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+    .items-table tbody td {
+      padding: 15px 12px;
+      font-size: 14px;
+      border-bottom: 1px solid var(--line-soft);
+      color: #352f26;
+    }
+    .items-table thead th:last-child,
+    .items-table tbody td:last-child {
+      text-align: right;
+    }
+    .num,
+    .amount,
+    .rate,
+    .totals-table td:last-child,
+    .items-table td:last-child {
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-variant-numeric: tabular-nums lining-nums;
+      letter-spacing: 0.03em;
+    }
+    .summary-row {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+      margin-top: 22px;
+      align-items: start;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .note-card,
+    .total-card {
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+      padding: 18px;
+    }
+    .note-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .totals-table td {
+      padding: 9px 0;
+      font-size: 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .grand-total {
+      margin-top: 14px;
+      background: linear-gradient(135deg, #fff5d9 0%, #f2ddb4 100%);
+      border: 1px solid #e1c36a;
+      border-radius: 16px;
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+    .grand-total .label {
+      font-size: 13px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #7a6117;
+      font-weight: 700;
+    }
+    .grand-total .value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #3a2f18;
+      font-variant-numeric: tabular-nums;
+    }
+    .amount-words {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #6b4e36;
+      font-style: italic;
+    }
+    .footer {
+      margin-top: 20px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      gap: 20px;
+      align-items: end;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .thanks {
+      font-size: 15px;
+      color: #4a4031;
+      line-height: 1.8;
+    }
+    .thanks strong {
+      color: var(--gold-deep);
+      letter-spacing: 0.04em;
+    }
+    .signature-box { text-align: center; }
+    .signature-area {
+      height: 64px;
+      border: 1px dashed #d8c38c;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #fffdf6 0%, #fff7e5 100%);
+    }
+    .signature-label {
+      margin-top: 10px;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 700;
+    }
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+    @media print {
+      html, body {
+        background: #ffffff;
+        padding: 0;
+      }
+      .invoice-sheet {
+        width: auto;
+        min-height: auto;
+        border-radius: 0;
+        box-shadow: none;
+        border: 1px solid #d9ccb1;
+        margin: 0;
+        padding: 14mm 12mm 10mm;
+      }
+      .summary-row,
+      .total-card,
+      .footer,
+      .signature-box {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="invoice-box">
-    <div class="title-main">${businessName}</div>
+  <div class="invoice-sheet">
+    <div class="content">
+      <header class="top-band">
+        <div class="brand">
+          <div class="brand-head">
+            ${logoSource ? `<img class="invoice-logo" src="${logoSource}" alt="Company logo" />` : ""}
+            <div class="brand-copy">
+              <div class="brand-mark">Premium Jewellery Invoice</div>
+              <h1 class="shop-name">${shopName}</h1>
+              <div class="tagline">${invoiceTitle}</div>
+              <p class="shop-meta">
+                ${address}<br>
+                GST No: ${gstNumber}<br>
+                Contact: ${contact}
+              </p>
+            </div>
+          </div>
+        </div>
 
-    <div class="topline">
-      <div><strong>GSTIN :</strong> ${businessGstin}</div>
-      <div><strong>${businessTopTitle}</strong></div>
-      <div><strong>Sln/Ivn :</strong> ${invoiceNumber}</div>
-    </div>
+        <div class="invoice-badge">
+          <div class="label">Invoice</div>
+          <div class="title">${invoiceTitle}</div>
+        </div>
+      </header>
 
-    <div class="header-box">
-      <div><strong>A/c No:</strong> ${businessAccountNo}</div>
-      <div class="header-center">
-        ${businessName}<br>
-        ${businessAddress}<br>
-        <span class="deal-box">Deals In: All types of Gold & silver Sankha Trading.</span>
-      </div>
-      <div><strong>IFSC CODE :</strong> ${businessIfsc}</div>
-    </div>
+      <section class="info-grid">
+        <div class="info-card">
+          <h3>Invoice Info</h3>
+          <table class="info-table">
+            <tr><td>Invoice Number</td><td>${invoiceNumber}</td></tr>
+            <tr><td>Date</td><td>${date}</td></tr>
+          </table>
+        </div>
 
-    <div class="party-box">
-      <div><strong>Name:</strong> ${customerName}</div>
-      <div><strong>Regd Name:</strong> ${customerName}</div>
-      <div><strong>Party's GSTIN/Unique ID:</strong> ${gstNo}</div>
-      <div><strong>Mob:</strong> ${mobile}</div>
-    </div>
+        <div class="info-card">
+          <h3>Customer Details</h3>
+          <table class="info-table">
+            <tr><td>Customer Name</td><td>${customerName}</td></tr>
+            <tr><td>Mobile Number</td><td>${customerMobile}</td></tr>
+          </table>
+        </div>
+      </section>
 
-    <table>
-      <thead>
-        <tr>
-          <th>SL. No.</th>
-          <th>Item Name</th>
-          <th>SKU</th>
-          <th>Weight (gms)</th>
-          <th>Size</th>
-          <th>Lot</th>
-          <th>Purity</th>
-          <th>â‚¹ / Gram</th>
-          <th>Company Rs / Gram</th>
-          <th>MC</th>
-          <th>Customer Total</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows}
-        <tr>
-          <td colspan="3"><strong>Total</strong></td>
-          <td><strong>${totalWeight.toFixed(3)}</strong></td>
-          <td colspan="6">--</td>
-          <td><strong>${subtotal}</strong></td>
-        </tr>
-      </tbody>
-    </table>
-
-      <div style="margin-top:8px; font-size:14px; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-        <div><strong>Payment (${paymentStatus || "-"})</strong></div>
-        <div><strong>Payment Mode:</strong> ${paymentMode || "-"}</div>
-        <div><strong>Bill Type:</strong> ${billType}</div>
-        <div><strong>Employee:</strong> ${employeeName}</div>
-      </div>
-
-    <div class="summary-grid">
-      <div class="left-summary">
-        <div><strong>DATE:</strong> ${billDate}</div>
-        ${extraPaymentInfo}
-        <div><strong>Address:</strong> ${businessAddress}</div>
-      </div>
-
-      <div class="right-summary">
-        <table>
-          <tr><td><strong>SUBTOTAL</strong></td><td>â‚¹ ${subtotal}</td></tr>
-          ${taxRows}
-          <tr><td><strong>ROUND OFF / ADJUSTMENT</strong></td><td>â‚¹ ${roundOff}</td></tr>
-          <tr><td><strong>GRAND TOTAL</strong></td><td><strong>â‚¹ ${grandTotal}</strong></td></tr>
+      <section class="items-wrap">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Qty</th>
+              <th>Purity</th>
+              <th>Weight</th>
+              <th>Pure Weight</th>
+              <th>Metal Rate (₹/g)</th>
+              <th>Making Charge (₹/g)</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
         </table>
-      </div>
-    </div>
+      </section>
 
-    <div class="bottom-box">
-      <div class="declaration">${businessDeclaration}</div>
-      <div class="sign-box">
-        for ${businessName}
-      </div>
+      <section class="summary-row">
+        <div class="note-card">
+          <h4>Customer Note</h4>
+          <p>
+            ${customerNoteHtml ? `${customerNoteHtml}<br><br>` : ""}
+            Metal Value: ${formatCurrency(metalTotal)}<br>
+            Making Charge: ${formatCurrency(makingCharge)}<br>
+            ${adjustment ? `Adjustment: ${formatCurrency(adjustment)}<br>` : ""}
+          </p>
+        </div>
+
+        <div class="total-card">
+          <h4>Bill Summary</h4>
+          <table class="totals-table">
+            <tr><td>Subtotal</td><td>${formatCurrency(subtotalBase)}</td></tr>
+            <tr><td>GST (3%)</td><td>${formatCurrency(gstTotal)}</td></tr>
+          </table>
+
+          <div class="grand-total">
+            <div class="label">Grand Total</div>
+            <div class="value amount">${formatCurrency(record.grandTotal)}</div>
+          </div>
+          <div class="amount-words">
+            Amount in Words: Rupees <span id="amountWords">${amountInWords}</span> Only
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="thanks">
+          ${thankYouHtml}
+        </div>
+
+        <div class="signature-box">
+          <div class="signature-area"></div>
+          <div class="signature-label">${signatureLabel || ""}</div>
+        </div>
+      </footer>
     </div>
   </div>
-  <script src="js/toast.js"><\/script>
 </body>
 </html>`;
     }
 
-    function printBillingInvoice(saveBeforePrint = true) {
-      if (!billingItems.length) {
-      showToast("There are no items in the billing table.", "error");
-        return;
-      }
-
-      if (saveBeforePrint) {
-        saveBillingRecord(false);
-      }
-
-      const html = buildBillingPrintHtml();
+    function printInvoice(data) {
+      const html = buildBillingPrintHtml(data);
       if (!html) return;
 
-      const printWindow = window.open("", "_blank", "width=1400,height=900");
+      const printWindow = window.open("", "_blank", "width=1200,height=900");
       if (!printWindow) {
-      showToast("The popup was blocked.", "error");
+        showToast("The popup was blocked. Please allow popups in your browser.", "error");
         return;
       }
 
@@ -1876,8 +2565,21 @@
           };
         <\/script>
       `);
-
       printWindow.document.close();
+    }
+
+    function printBillingInvoice(saveBeforePrint = true) {
+      if (!billingItems.length) {
+      showToast("There are no items in the billing table.", "error");
+        return;
+      }
+
+      if (saveBeforePrint) {
+        saveBillingRecord(false);
+      }
+
+      const record = getBillingRecord();
+      printInvoice(record);
     }
 
     function downloadBillingInvoice() {
@@ -1928,8 +2630,17 @@
         dateInput.value = getTodayDate();
       }
 
+      const salesModeEl = document.getElementById("billSalesMode");
+      if (salesModeEl && !salesModeEl.value) {
+        salesModeEl.value = "OWNER";
+      }
+      if (salesModeEl && !salesModeEl.dataset.previousMode) {
+        salesModeEl.dataset.previousMode = salesModeEl.value || "OWNER";
+      }
+      setBillingSummaryAdvancedVisible(false);
+
       const savedBillingItems = JSON.parse(localStorage.getItem(companyScopedKey("billingItems")) || "[]");
-      billingItems = Array.isArray(savedBillingItems) ? savedBillingItems : [];
+      billingItems = Array.isArray(savedBillingItems) ? aggregateBillingItems(savedBillingItems) : [];
 
       removedBillingBarcodes = JSON.parse(localStorage.getItem(companyScopedKey("removedBillingBarcodes")) || "[]");
       if (!Array.isArray(removedBillingBarcodes)) {
@@ -1938,7 +2649,7 @@
 
       renderBillingTable();
       applyCompanySettingsPreview();
-      calculateBillingTotal();
+      handleSalesModeChange();
 
       if (!billingItems.length) {
         try {
@@ -1969,6 +2680,7 @@
   </script>
 </body>
 </html>
+
 
 
 

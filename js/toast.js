@@ -6,16 +6,18 @@
   const ICON_MAP = {
     success: "fa-check",
     error: "fa-xmark",
-    info: "fa-circle-info"
+    info: "fa-circle-info",
+    warning: "fa-triangle-exclamation"
   };
   const TITLE_MAP = {
     success: "Success",
     error: "Error",
-    info: "Information"
+    info: "Information",
+    warning: "Warning"
   };
 
   function getSafeType(type) {
-    return ["success", "error", "info"].includes(type) ? type : "info";
+    return ["success", "error", "info", "warning"].includes(type) ? type : "info";
   }
 
   function getToastPosition() {

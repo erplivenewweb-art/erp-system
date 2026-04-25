@@ -1346,282 +1346,515 @@ function printGSTInvoice() {
   const roundOff = document.getElementById("invoiceRoundOff")?.value || "0.00";
   const grandTotal = document.getElementById("invoiceGrandTotal")?.value || "0.00";
 
-  let rows = "";
-  invoiceItems.forEach((item, index) => {
-    rows += `
-      <tr>
-        <td>${index + 1}</td>
-        <td>${item.productName || ""}</td>
-        <td>${item.sku || ""}</td>
-        <td>${num(item.weight).toFixed(3)}</td>
-        <td>${item.size || ""}</td>
-        <td>${item.lot || ""}</td>
-        <td>${num(item.purity).toFixed(2)}</td>
-        <td>${num(item.rate_per_gram).toFixed(2)}</td>
-        <td>${num(item.mc_amount).toFixed(2)}</td>
-        <td>${num(item.total_price).toFixed(2)}</td>
-      </tr>
-    `;
-  });
-
-  const taxRows = billType === "GST"
-    ? (
-        taxType === "CGST_SGST"
-          ? `
-            <tr>
-              <td><strong>CGST @ 1.5%</strong></td>
-              <td>â‚¹ ${cgstAmount}</td>
-            </tr>
-            <tr>
-              <td><strong>SGST @ 1.5%</strong></td>
-              <td>â‚¹ ${sgstAmount}</td>
-            </tr>
-          `
-          : `
-            <tr>
-              <td><strong>IGST @ 3%</strong></td>
-              <td>â‚¹ ${igstAmount}</td>
-            </tr>
-          `
-      )
-    : `
-      <tr>
-        <td><strong>GST</strong></td>
-        <td>â‚¹ 0.00</td>
-      </tr>
-    `;
-
-  const totalWeight = invoiceItems.reduce((a, b) => a + num(b.weight), 0).toFixed(3);
-
   const printWindow = window.open("", "_blank", "width=1400,height=900");
   if (!printWindow) {
     alert("The popup was blocked. Please allow popups in your browser.");
     return;
   }
 
+  const escapeHtml = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const formatCurrency = (value) => `Rs. ${num(value).toFixed(2)}`;
+
+  const items = invoiceItems.map((item) => {
+    const quantity = Math.max(1, Math.floor(num(item.quantity || 1)));
+    const grossWeight = num(item.weight);
+    const netWeight = num(item.pure_weight || ((grossWeight * num(item.purity || 100)) / 100));
+    const rate = quantity > 0 ? num(item.total_price) / quantity : num(item.total_price);
+    const amount = quantity * rate;
+    const makingRate = grossWeight > 0 ? num(item.mc_amount) / grossWeight : 0;
+
+    return {
+      productName: item.productName || "",
+      quantity,
+      weight: grossWeight,
+      rate,
+      amount,
+      lot: item.lot || "",
+      barcode: item.barcode || "",
+      metalValue: netWeight * num(item.rate_per_gram || 0),
+      makingCharge: grossWeight * makingRate
+    };
+  });
+
+  const rows = items.map((item) => `
+            <tr>
+              <td>${escapeHtml(item.productName)}</td>
+              <td>${item.quantity}</td>
+              <td>${item.weight.toFixed(3)} g</td>
+              <td>${formatCurrency(item.rate)}</td>
+              <td>${formatCurrency(item.amount)}</td>
+            </tr>
+  `).join("");
+
+  const metalValue = items.reduce((sum, item) => sum + item.metalValue, 0);
+  const makingCharge = items.reduce((sum, item) => sum + item.makingCharge, 0);
+  const gstTotal = num(cgstAmount) + num(sgstAmount) + num(igstAmount);
+  const subtotalBase = metalValue + makingCharge + num(roundOff);
+
   printWindow.document.write(`
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Invoice Print</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Premium Jewellery Invoice</title>
   <style>
+    :root {
+      --paper: #fffdf8;
+      --surface: #fffaf0;
+      --surface-strong: #fff5db;
+      --ink: #2f2a22;
+      --muted: #7a6d57;
+      --line: #e8dcc0;
+      --line-soft: #f1e8d5;
+      --gold: #d4af37;
+      --gold-deep: #b89224;
+      --shadow: 0 18px 45px rgba(92, 70, 22, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
     body {
-      font-family: Arial, sans-serif;
-      padding: 18px;
-      color: #111;
+      margin: 0;
+      padding: 0;
+      background: #f6f1e7;
+      color: var(--ink);
+      font-family: "Georgia", "Times New Roman", serif;
     }
-    .invoice-box {
-      max-width: 1250px;
-      margin: auto;
-      border: 2px solid #111;
-      padding: 12px;
+
+    body {
+      padding: 28px;
     }
-    .title-main {
-      text-align: center;
-      font-size: 28px;
-      font-weight: 700;
-      margin-bottom: 16px;
+
+    .invoice-sheet {
+      width: 210mm;
+      min-height: 297mm;
+      max-width: 100%;
+      margin: 0 auto;
+      background: linear-gradient(180deg, #fffefb 0%, #fffaf2 100%);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 22mm 18mm 18mm;
+      position: relative;
+      overflow: hidden;
     }
-    .topline {
+
+    .invoice-sheet::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.12), transparent 24%),
+        radial-gradient(circle at bottom left, rgba(212, 175, 55, 0.08), transparent 20%);
+      pointer-events: none;
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .top-band {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      text-align: center;
-      font-size: 14px;
-      margin-bottom: 8px;
+      grid-template-columns: 1fr auto;
+      gap: 24px;
+      align-items: start;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
     }
-    .header-box {
-      border: 1px solid #111;
-      display: grid;
-      grid-template-columns: 1fr 2fr 1fr;
-      align-items: center;
-      min-height: 90px;
-      margin-bottom: 10px;
-    }
-    .header-box > div {
-      padding: 10px;
-      font-size: 14px;
-    }
-    .header-center {
-      text-align: center;
-      font-weight: bold;
-    }
-    .deal-box {
+
+    .brand-mark {
       display: inline-block;
-      background: #111;
-      color: #fff;
-      padding: 8px 14px;
-      margin-top: 8px;
+      padding: 6px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: linear-gradient(180deg, #fffaf0 0%, #fff4d8 100%);
+      color: var(--gold-deep);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .shop-name {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #3b3124;
+    }
+
+    .tagline {
+      margin: 8px 0 14px;
       font-size: 13px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
     }
-    .party-box {
-      border: 1px solid #111;
-      padding: 12px;
-      margin-bottom: 10px;
-      min-height: 130px;
-      line-height: 1.9;
+
+    .shop-meta {
+      margin: 0;
+      color: var(--muted);
       font-size: 14px;
+      line-height: 1.75;
     }
-    table {
+
+    .invoice-badge {
+      min-width: 210px;
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-strong) 100%);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 18px 18px 16px;
+      text-align: center;
+    }
+
+    .invoice-badge .label {
+      font-size: 12px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      margin-bottom: 10px;
+    }
+
+    .invoice-badge .title {
+      font-size: 28px;
+      line-height: 1.15;
+      font-weight: 700;
+      color: #352d22;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .info-card,
+    .note-card,
+    .total-card {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid var(--line-soft);
+      border-radius: 18px;
+      padding: 18px;
+    }
+
+    .info-card h3,
+    .note-card h4,
+    .total-card h4 {
+      margin: 0 0 14px;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 700;
+    }
+
+    .info-table,
+    .items-table,
+    .totals-table {
       width: 100%;
       border-collapse: collapse;
     }
-    th, td {
-      border: 1px solid #111;
-      padding: 8px;
-      font-size: 13px;
-      text-align: center;
-    }
-    th {
-      background: #111;
-      color: white;
-    }
-    .summary-grid {
-      display: grid;
-      grid-template-columns: 1.3fr 1fr;
-      margin-top: 10px;
-      gap: 0;
-    }
-    .left-summary, .right-summary {
-      border: 1px solid #111;
-      min-height: 170px;
-    }
-    .left-summary {
-      padding: 10px;
+
+    .info-table td {
+      padding: 7px 0;
+      vertical-align: top;
       font-size: 14px;
-      line-height: 2;
-      border-right: none;
+      border-bottom: 1px solid var(--line-soft);
     }
-    .right-summary table {
-      width: 100%;
-      height: 100%;
+
+    .info-table tr:last-child td,
+    .items-table tbody tr:last-child td,
+    .totals-table tr:last-child td {
+      border-bottom: none;
     }
-    .right-summary td {
-      font-size: 14px;
+
+    .info-table td:first-child,
+    .totals-table td:first-child {
+      width: 42%;
+      color: var(--muted);
+    }
+
+    .info-table td:last-child,
+    .totals-table td:last-child {
+      text-align: right;
       font-weight: 600;
+      color: #3a3227;
+    }
+
+    .items-wrap {
+      margin-top: 24px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    .items-table thead th {
+      background: linear-gradient(180deg, #fff7e1 0%, #f9edc7 100%);
+      color: #6d5718;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--line);
       text-align: left;
     }
-    .bottom-box {
-      display: grid;
-      grid-template-columns: 2fr 0.6fr;
-      margin-top: 10px;
-    }
-    .declaration, .sign-box {
-      border: 1px solid #111;
-      min-height: 90px;
-      padding: 12px;
+
+    .items-table tbody td {
+      padding: 15px 12px;
       font-size: 14px;
-      display: flex;
-      align-items: end;
-      box-sizing: border-box;
+      border-bottom: 1px solid var(--line-soft);
+      color: #352f26;
     }
-    .sign-box {
-      justify-content: center;
-      text-align: center;
+
+    .items-table thead th:last-child,
+    .items-table tbody td:last-child {
+      text-align: right;
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 18px;
+      margin-top: 22px;
+      align-items: start;
+    }
+
+    .note-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .totals-table td {
+      padding: 9px 0;
+      font-size: 14px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .grand-total {
+      margin-top: 14px;
+      background: linear-gradient(135deg, #fff5d9 0%, #f2ddb4 100%);
+      border: 1px solid #e1c36a;
+      border-radius: 16px;
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .grand-total .label {
+      font-size: 13px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #7a6117;
       font-weight: 700;
     }
+
+    .grand-total .value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #3a2f18;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .footer {
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      gap: 20px;
+      align-items: end;
+    }
+
+    .thanks {
+      font-size: 15px;
+      color: #4a4031;
+      line-height: 1.8;
+    }
+
+    .thanks strong {
+      color: var(--gold-deep);
+      letter-spacing: 0.04em;
+    }
+
+    .signature-box {
+      text-align: center;
+    }
+
+    .signature-area {
+      height: 82px;
+      border: 1px dashed #d8c38c;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #fffdf6 0%, #fff7e5 100%);
+    }
+
+    .signature-label {
+      margin-top: 10px;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 700;
+    }
+
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
     @media print {
+      html,
       body {
+        background: #ffffff;
         padding: 0;
+      }
+
+      .invoice-sheet {
+        width: auto;
+        min-height: auto;
+        border-radius: 0;
+        box-shadow: none;
+        border: 1px solid #d9ccb1;
+        margin: 0;
+        padding: 16mm 14mm 14mm;
       }
     }
   </style>
 </head>
 <body>
-  <div class="invoice-box">
-    <div class="title-main">${businessName}</div>
+  <div class="invoice-sheet">
+    <div class="content">
+      <header class="top-band">
+        <div class="brand">
+          <div class="brand-mark">Premium Jewellery Invoice</div>
+          <h1 class="shop-name">${escapeHtml(businessName)}</h1>
+          <div class="tagline">Fine Gold, Silver, Sankha and Ornaments</div>
+          <p class="shop-meta">
+            ${escapeHtml(businessAddress)}<br>
+            GST No: ${escapeHtml(businessGstin)}<br>
+            Contact: ${escapeHtml(mobile || "-")}
+          </p>
+        </div>
 
-    <div class="topline">
-      <div><strong>GSTIN :</strong> ${businessGstin}</div>
-      <div><strong>TAX INVOICE</strong></div>
-      <div><strong>Sln/Ivn :</strong> ${invoiceNumber}</div>
-    </div>
+        <div class="invoice-badge">
+          <div class="label">Invoice</div>
+          <div class="title">Tax Bill</div>
+        </div>
+      </header>
 
-    <div class="header-box">
-      <div><strong>A/c No:</strong> 25050400005430</div>
-      <div class="header-center">
-        RAJPATI ENTERPRISE<br>
-        JHINKIRIA ,42 MOUJA,CUTTACK-112<br>
-        <span class="deal-box">Deals In: All types of Gold & silver Sankha Trading.</span>
-      </div>
-      <div><strong>IFSC CODE :</strong> BARB0CUTMAN</div>
-    </div>
+      <section class="info-grid">
+        <div class="info-card">
+          <h3>Invoice Info</h3>
+          <table class="info-table">
+            <tr>
+              <td>Invoice Number</td>
+              <td>${escapeHtml(invoiceNumber)}</td>
+            </tr>
+            <tr>
+              <td>Date</td>
+              <td>${escapeHtml(invoiceDate)}</td>
+            </tr>
+          </table>
+        </div>
 
-    <div class="party-box">
-      <div><strong>Name:</strong> ${customerName}</div>
-      <div><strong>Address:</strong> ${customerName ? "Customer Address" : ""}</div>
-      <div><strong>Regd Name:</strong> ${customerName}</div>
-      <div><strong>Party's GSTIN/Unique ID:</strong> ${gstNo}</div>
-      <div><strong>Mob:</strong> ${mobile}</div>
-    </div>
+        <div class="info-card">
+          <h3>Customer Details</h3>
+          <table class="info-table">
+            <tr>
+              <td>Customer Name</td>
+              <td>${escapeHtml(customerName)}</td>
+            </tr>
+            <tr>
+              <td>Mobile Number</td>
+              <td>${escapeHtml(mobile)}</td>
+            </tr>
+          </table>
+        </div>
+      </section>
 
-    <table>
-      <thead>
-        <tr>
-          <th>SL. No.</th>
-          <th>Item Name</th>
-          <th>SKU</th>
-          <th>Weight (gms)</th>
-          <th>Size</th>
-          <th>Lot</th>
-          <th>Purity</th>
-          <th>â‚¹ / Gram</th>
-          <th>MC</th>
-          <th>Total Price</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows}
-        <tr>
-          <td colspan="3"><strong>Total</strong></td>
-          <td><strong>${totalWeight}</strong></td>
-          <td colspan="5">--</td>
-          <td><strong>${subtotal}</strong></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div style="margin-top:8px; font-size:14px; display:flex; justify-content:space-between;">
-      <div><strong>Payment (${paymentStatus || "-"})</strong></div>
-      <div><strong>Payment Mode:</strong> ${paymentMode || "-"}</div>
-      <div><strong>Bill Type:</strong> ${billType}</div>
-    </div>
-
-    <div class="summary-grid">
-      <div class="left-summary">
-        <div><strong>RUPPEES IN WORDS ONLY</strong></div>
-        <div><strong>DATE:</strong> ${invoiceDate}</div>
-        <div><strong>Paid Amount:</strong> â‚¹ ${paidAmount}</div>
-        <div><strong>Due Amount:</strong> â‚¹ ${dueAmount}</div>
-        <div><strong>Address:</strong> ${businessAddress}</div>
-      </div>
-
-      <div class="right-summary">
-        <table>
-          <tr>
-            <td><strong>SUBTOTAL</strong></td>
-            <td>â‚¹ ${subtotal}</td>
-          </tr>
-          ${taxRows}
-          <tr>
-            <td><strong>ROUND OFF / ADJUSTMENT</strong></td>
-            <td>â‚¹ ${roundOff}</td>
-          </tr>
-          <tr>
-            <td><strong>GRAND TOTAL</strong></td>
-            <td><strong>â‚¹ ${grandTotal}</strong></td>
-          </tr>
+      <section class="items-wrap">
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 40%;">Product Name</th>
+              <th style="width: 12%;">Qty</th>
+              <th style="width: 16%;">Weight</th>
+              <th style="width: 16%;">Rate</th>
+              <th style="width: 16%;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
         </table>
-      </div>
-    </div>
+      </section>
 
-    <div class="bottom-box">
-      <div class="declaration">
-        Declaration : The Registration certificate is valid on the date of issue of invoice.
-        Subject to JHINKIRIA ,42 MOUJA,CUTTACK-112 Jurisdiction only.
-      </div>
-      <div class="sign-box">
-        for RAJPATI<br>ENTERPRISE
-      </div>
+      <section class="summary-row">
+        <div class="note-card">
+          <h4>Customer Note</h4>
+          <p>
+            Metal Value: ${formatCurrency(metalValue)}<br>
+            Making Charge: ${formatCurrency(makingCharge)}<br>
+            GST (3%): ${formatCurrency(gstTotal)}<br>
+            Payment Mode: ${escapeHtml(paymentMode || "-")}<br>
+            Payment Status: ${escapeHtml(paymentStatus || "-")}
+          </p>
+        </div>
+
+        <div class="total-card">
+          <h4>Bill Summary</h4>
+          <table class="totals-table">
+            <tr>
+              <td>Subtotal</td>
+              <td>${formatCurrency(subtotalBase)}</td>
+            </tr>
+            <tr>
+              <td>GST (3%)</td>
+              <td>${formatCurrency(gstTotal)}</td>
+            </tr>
+            <tr>
+              <td>Adjustment</td>
+              <td>${formatCurrency(roundOff)}</td>
+            </tr>
+          </table>
+
+          <div class="grand-total">
+            <div class="label">Grand Total</div>
+            <div class="value">${formatCurrency(grandTotal)}</div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="thanks">
+          <strong>Thank you for your purchase.</strong><br>
+          We value your trust and look forward to serving you again with timeless jewellery and refined craftsmanship.
+        </div>
+
+        <div class="signature-box">
+          <div class="signature-area"></div>
+          <div class="signature-label">Authorized Signature / Stamp</div>
+        </div>
+      </footer>
     </div>
   </div>
 

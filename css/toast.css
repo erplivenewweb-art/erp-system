@@ -71,6 +71,10 @@
   background: linear-gradient(90deg, #4268b1, #7aa3ff);
 }
 
+.erp-toast.warning::before {
+  background: linear-gradient(90deg, #d28a11, #f3c463);
+}
+
 .erp-toast-icon {
   width: 42px;
   height: 42px;
@@ -96,6 +100,11 @@
 .erp-toast.info .erp-toast-icon {
   background: #eef4ff;
   color: #4268b1;
+}
+
+.erp-toast.warning .erp-toast-icon {
+  background: #fff8e8;
+  color: #c47d0a;
 }
 
 .erp-toast-content {
@@ -167,6 +176,10 @@
 
 .erp-toast.info .erp-toast-progress-bar {
   background: linear-gradient(90deg, #4268b1, #7aa3ff);
+}
+
+.erp-toast.warning .erp-toast-progress-bar {
+  background: linear-gradient(90deg, #d28a11, #f3c463);
 }
 
 .erp-toast.toast-paused .erp-toast-progress-bar {

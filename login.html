@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -6,6 +6,7 @@
   <title>ERP Login</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="icons/icon-192.png">
+  <script src="js/auth-guard.js"></script>
   <script src="js/pwa.js" defer></script>
   <link rel="stylesheet" href="css/toast.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -306,6 +307,160 @@
       margin-top: 10px;
     }
 
+    .forgot-shell {
+      position: relative;
+      border: 1px solid rgba(197, 139, 43, 0.16);
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at top right, rgba(232, 189, 115, 0.18), transparent 36%),
+        linear-gradient(180deg, #ffffff, #f8fafc);
+      padding: 22px;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.85),
+        0 16px 36px rgba(15, 23, 42, 0.06);
+    }
+
+    .forgot-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .forgot-top-copy {
+      flex: 1;
+    }
+
+    .forgot-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(197, 139, 43, 0.1);
+      color: #9a6b19;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .forgot-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }
+
+    .forgot-subtitle {
+      color: #64748b;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .forgot-escape {
+      border: 1px solid #e2e8f0;
+      background: rgba(255,255,255,0.92);
+      color: #475569;
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .forgot-escape:hover {
+      background: #f8fafc;
+      color: #1e293b;
+    }
+
+    .forgot-steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .forgot-step {
+      border: 1px solid #e7edf4;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.88);
+      padding: 14px 14px 13px;
+      min-height: 92px;
+    }
+
+    .forgot-step strong {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #1e293b;
+      margin-bottom: 6px;
+    }
+
+    .forgot-step span {
+      display: block;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .forgot-grid {
+      gap: 18px;
+    }
+
+    .forgot-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .forgot-actions .primary-btn,
+    .forgot-actions .secondary-btn {
+      margin: 0;
+    }
+
+    .ghost-btn {
+      border-style: dashed;
+      background: rgba(255,255,255,0.72);
+    }
+
+    .forgot-tip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.04);
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .forgot-tip i {
+      color: #c58b2b;
+      font-size: 15px;
+    }
+
+    .btn-loading {
+      opacity: 0.82;
+      cursor: wait;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    .forgot-status-legacy {
+      display: none !important;
+    }
+
     .status-box {
       margin-top: 14px;
       border-radius: 14px;
@@ -356,6 +511,23 @@
       }
 
       .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .forgot-shell {
+        padding: 18px;
+      }
+
+      .forgot-top {
+        flex-direction: column;
+      }
+
+      .forgot-escape {
+        width: 100%;
+      }
+
+      .forgot-steps,
+      .forgot-actions {
         grid-template-columns: 1fr;
       }
     }
@@ -598,68 +770,106 @@
 
         <!-- FORGOT -->
         <div id="forgotPanel" class="auth-panel">
-          <div class="auth-title">Reset your password</div>
+          <div class="forgot-shell">
+            <div class="forgot-top">
+              <div class="forgot-top-copy">
+                <div class="forgot-kicker">
+                  <i class="fas fa-shield-halved"></i>
+                  <span>Secure Recovery</span>
+                </div>
+                <div class="forgot-title">Reset your password</div>
+                <div class="forgot-subtitle">Enter your registered email, verify the code from your inbox, and create a fresh password without leaving the page.</div>
+              </div>
 
-          <div class="auth-note">
-            <i class="fas fa-key"></i>
-            <span>Enter your registered email, verify the code sent to your inbox, and set a new password.</span>
+              <button
+                type="button"
+                class="forgot-escape"
+                onclick="switchAuthTab('login')"
+                title="Back to login"
+                aria-label="Back to login"
+              >
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
+
+            <div class="forgot-steps">
+              <div class="forgot-step">
+                <strong><i class="fas fa-envelope-open-text"></i> Step 1</strong>
+                <span>Send a one-time verification code to your registered email address.</span>
+              </div>
+
+              <div class="forgot-step">
+                <strong><i class="fas fa-shield-halved"></i> Step 2</strong>
+                <span>Verify the code instantly and unlock the password reset fields.</span>
+              </div>
+
+              <div class="forgot-step">
+                <strong><i class="fas fa-key"></i> Step 3</strong>
+                <span>Set your new password and return to login with the updated credentials.</span>
+              </div>
+            </div>
+
+            <div class="form-grid forgot-grid">
+              <div class="input-box full">
+                <label>Registered Email</label>
+                <div class="input-wrap">
+                  <i class="fas fa-envelope left-icon"></i>
+                  <input type="email" id="forgotEmail" class="no-right" placeholder="Enter registered email" />
+                </div>
+              </div>
+
+              <div class="input-box full">
+                <label>Verification Code</label>
+                <div class="input-wrap">
+                  <i class="fas fa-shield-halved left-icon"></i>
+                  <input type="text" id="forgotOtp" class="no-right" placeholder="Enter the 6-digit code" inputmode="numeric" autocomplete="one-time-code" />
+                </div>
+              </div>
+
+              <div class="input-box">
+                <label>New Password</label>
+                <div class="input-wrap">
+                  <i class="fas fa-lock left-icon"></i>
+                  <input type="password" id="forgotNewPassword" placeholder="Enter new password" />
+                  <i class="fas fa-eye toggle-password" onclick="togglePassword('forgotNewPassword', this)"></i>
+                </div>
+              </div>
+
+              <div class="input-box">
+                <label>Confirm New Password</label>
+                <div class="input-wrap">
+                  <i class="fas fa-lock left-icon"></i>
+                  <input type="password" id="forgotConfirmPassword" placeholder="Confirm new password" />
+                  <i class="fas fa-eye toggle-password" onclick="togglePassword('forgotConfirmPassword', this)"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="forgot-actions">
+              <button id="forgotSendBtn" class="primary-btn" onclick="requestForgotPasswordCode()">
+                <i class="fas fa-paper-plane"></i> <span>Send Code</span>
+              </button>
+
+              <button id="forgotVerifyBtn" class="secondary-btn" onclick="verifyForgotPasswordCode()">
+                <i class="fas fa-circle-check"></i> <span>Verify Code</span>
+              </button>
+
+              <button id="forgotResetBtn" class="secondary-btn" onclick="resetForgotPassword()">
+                <i class="fas fa-key"></i> <span>Reset Password</span>
+              </button>
+
+              <button class="secondary-btn ghost-btn" onclick="switchAuthTab('login')">
+                <i class="fas fa-arrow-left"></i> <span>Back to Login</span>
+              </button>
+            </div>
+
+            <div class="forgot-tip">
+              <i class="fas fa-circle-info"></i>
+              <span>Tip: press <strong>Enter</strong> to verify the code or complete the reset faster. Press <strong>Esc</strong> to return to login.</span>
+            </div>
+
+            <div id="forgotStatus" class="status-box forgot-status-legacy"></div>
           </div>
-
-          <div class="form-grid">
-            <div class="input-box full">
-              <label>Registered Email</label>
-              <div class="input-wrap">
-                <i class="fas fa-envelope left-icon"></i>
-                <input type="email" id="forgotEmail" class="no-right" placeholder="Enter registered email" />
-              </div>
-            </div>
-
-            <div class="input-box full">
-              <label>Verification Code</label>
-              <div class="input-wrap">
-                <i class="fas fa-shield-halved left-icon"></i>
-                <input type="text" id="forgotOtp" class="no-right" placeholder="Enter the 6-digit code" />
-              </div>
-            </div>
-
-            <div class="input-box">
-              <label>New Password</label>
-              <div class="input-wrap">
-                <i class="fas fa-lock left-icon"></i>
-                <input type="password" id="forgotNewPassword" placeholder="Enter new password" />
-                <i class="fas fa-eye toggle-password" onclick="togglePassword('forgotNewPassword', this)"></i>
-              </div>
-            </div>
-
-            <div class="input-box">
-              <label>Confirm New Password</label>
-              <div class="input-wrap">
-                <i class="fas fa-lock left-icon"></i>
-                <input type="password" id="forgotConfirmPassword" placeholder="Confirm new password" />
-                <i class="fas fa-eye toggle-password" onclick="togglePassword('forgotConfirmPassword', this)"></i>
-              </div>
-            </div>
-          </div>
-
-          <div class="action-stack" style="margin-top:18px;">
-            <button class="primary-btn" onclick="requestForgotPasswordCode()">
-              <i class="fas fa-paper-plane"></i> Send Code
-            </button>
-
-            <button class="secondary-btn" onclick="verifyForgotPasswordCode()">
-              Verify Code
-            </button>
-
-            <button class="secondary-btn" onclick="resetForgotPassword()">
-              Reset Password
-            </button>
-
-            <button class="secondary-btn" onclick="switchAuthTab('login')">
-              Back to Login
-            </button>
-          </div>
-
-          <div id="forgotStatus" class="status-box"></div>
         </div>
 
         <div class="auth-footer">
@@ -670,9 +880,14 @@
   </div>
 
   <script>
-    const API_BASE =
-      window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+    const API_BASE = window.ERP_API_BASE;
     let forgotPasswordResetToken = "";
+    const FORGOT_BUTTON_LABELS = {
+      forgotSendBtn: '<i class="fas fa-paper-plane"></i> <span>Send Code</span>',
+      forgotVerifyBtn: '<i class="fas fa-circle-check"></i> <span>Verify Code</span>',
+      forgotResetBtn: '<i class="fas fa-key"></i> <span>Reset Password</span>'
+    };
+
     function switchAuthTab(tabName) {
       document.querySelectorAll(".auth-tab").forEach((tab) => tab.classList.remove("active"));
       document.querySelectorAll(".auth-panel").forEach((panel) => panel.classList.remove("active"));
@@ -692,6 +907,12 @@
       }
 
       clearStatusBoxes();
+
+      if (tabName === "forgot") {
+        setTimeout(() => {
+          document.getElementById("forgotEmail")?.focus();
+        }, 40);
+      }
     }
 
     function clearStatusBoxes() {
@@ -709,6 +930,59 @@
       if (!box) return;
       box.textContent = message;
       box.className = `status-box show status-${type}`;
+    }
+
+    function showToastMessage(message, type = "info", title = "") {
+      const safeType = ["success", "error", "info", "warning"].includes(type) ? type : "info";
+
+      if (typeof window.showToast === "function") {
+        window.showToast(message, safeType, title);
+        return;
+      }
+
+      if (safeType === "error") {
+        console.error(message);
+      } else {
+        console.log(message);
+      }
+    }
+
+    function focusField(fieldId) {
+      const field = document.getElementById(fieldId);
+      if (!field) return;
+      setTimeout(() => field.focus(), 40);
+    }
+
+    function setButtonLoading(buttonId, isLoading, loadingText) {
+      const button = document.getElementById(buttonId);
+      if (!button) return;
+
+      if (isLoading) {
+        button.disabled = true;
+        button.classList.add("btn-loading");
+        button.dataset.originalHtml = button.innerHTML;
+        button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span>${loadingText}</span>`;
+        return;
+      }
+
+      button.disabled = false;
+      button.classList.remove("btn-loading");
+      button.innerHTML = button.dataset.originalHtml || FORGOT_BUTTON_LABELS[buttonId] || button.innerHTML;
+    }
+
+    function setForgotFlowLoading(activeButtonId = "") {
+      const forgotButtons = ["forgotSendBtn", "forgotVerifyBtn", "forgotResetBtn"];
+
+      forgotButtons.forEach((buttonId) => {
+        if (buttonId === activeButtonId) return;
+        const button = document.getElementById(buttonId);
+        if (!button) return;
+        button.disabled = Boolean(activeButtonId);
+        button.classList.toggle("btn-loading", false);
+        if (!activeButtonId) {
+          button.innerHTML = button.dataset.originalHtml || FORGOT_BUTTON_LABELS[buttonId] || button.innerHTML;
+        }
+      });
     }
 
     function togglePassword(inputId, iconEl) {
@@ -748,6 +1022,21 @@
       };
     }
 
+    function resolveAuthApiUrl(pathname) {
+      if (typeof window.buildErpApiUrl === "function") {
+        return window.buildErpApiUrl(pathname);
+      }
+
+      const protocol = String(window.location.protocol || "").toLowerCase();
+      if (protocol !== "http:" && protocol !== "https:") {
+        throw new Error(
+          "Open the ERP through the Express server URL, such as http://localhost:8080/login.html. Direct file access is not supported."
+        );
+      }
+
+      return new URL(String(pathname || "").replace(/^\//, ""), `${window.location.origin}/`).toString();
+    }
+
     async function loginUser() {
       const email = document.getElementById("loginEmail").value.trim().toLowerCase();
       const password = document.getElementById("loginPassword").value.trim();
@@ -758,27 +1047,63 @@
       }
 
       try {
-        const res = await fetch(`${API_BASE}/login`, {
+        if (typeof window.assertErpApiAvailable === "function") {
+          window.assertErpApiAvailable();
+        }
+
+        const loginUrl = resolveAuthApiUrl("/login");
+        const res = await fetch(loginUrl, {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({
+          success: false,
+          message: `Login request failed with status ${res.status}`
+        }));
+
+        if (!res.ok) {
+          showStatus("loginStatus", data.message || "Login failed", "error");
+          return;
+        }
 
         if (!data.success) {
           showStatus("loginStatus", data.message || "Login failed", "error");
           return;
         }
 
+        if (!String(data.token || "").trim()) {
+          showStatus("loginStatus", "Login token missing", "error");
+          return;
+        }
+
         const user = normalizeLoggedInUser(data.user || {});
-        localStorage.setItem("erpLoggedInUser", JSON.stringify(user));
-        document.cookie = `erp_user_id=${encodeURIComponent(String(user.id ?? ""))}; path=/; SameSite=Lax`;
+        if (typeof window.setErpLoggedInUser === "function") {
+          window.setErpLoggedInUser(user);
+        } else {
+          localStorage.setItem("erpLoggedInUser", JSON.stringify(user));
+        }
+
+        if (typeof window.setErpAuthToken === "function") {
+          window.setErpAuthToken(String(data.token || "").trim());
+        } else {
+          localStorage.setItem("erpAuthToken", String(data.token || "").trim());
+        }
 
         if (document.getElementById("rememberMe")?.checked) {
-          localStorage.setItem("erpRememberedEmail", email);
+          if (typeof window.setErpRememberedEmail === "function") {
+            window.setErpRememberedEmail(email);
+          } else {
+            localStorage.setItem("erpRememberedEmail", email);
+          }
         } else {
-          localStorage.removeItem("erpRememberedEmail");
+          if (typeof window.clearErpRememberedEmail === "function") {
+            window.clearErpRememberedEmail();
+          } else {
+            localStorage.removeItem("erpRememberedEmail");
+          }
         }
 
         showStatus("loginStatus", "Login successful. Redirecting...", "success");
@@ -788,7 +1113,7 @@
         }, 700);
       } catch (error) {
         console.log("Login error:", error);
-        showStatus("loginStatus", "Server error", "error");
+        showStatus("loginStatus", error?.message || "Unable to reach the ERP server.", "error");
       }
     }
 
@@ -816,8 +1141,9 @@
       }
 
       try {
-        const res = await fetch(`${API_BASE}/requestCompanySignup`, {
+        const res = await fetch(resolveAuthApiUrl("/requestCompanySignup"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             companyName,
@@ -828,7 +1154,15 @@
           })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({
+          success: false,
+          message: `Company signup request failed with status ${res.status}`
+        }));
+
+        if (!res.ok) {
+          showStatus("registerStatus", data.message || "Request failed", "error");
+          return;
+        }
 
         if (!data.success) {
           showStatus("registerStatus", data.message || "Request failed", "error");
@@ -849,7 +1183,7 @@
         document.getElementById("regConfirmPassword").value = "";
       } catch (error) {
         console.log("Company signup request error:", error);
-        showStatus("registerStatus", "Server error", "error");
+        showStatus("registerStatus", error?.message || "Unable to reach the ERP server.", "error");
       }
     }
 
@@ -879,8 +1213,9 @@
       }
 
       try {
-        const res = await fetch(`${API_BASE}/requestStaffJoin`, {
+        const res = await fetch(resolveAuthApiUrl("/requestStaffJoin"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             companyName,
@@ -893,7 +1228,15 @@
           })
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => ({
+          success: false,
+          message: `Staff signup request failed with status ${res.status}`
+        }));
+
+        if (!res.ok) {
+          showStatus("staffStatus", data.message || "Staff request failed", "error");
+          return;
+        }
 
         if (!data.success) {
           showStatus("staffStatus", data.message || "Staff request failed", "error");
@@ -912,7 +1255,7 @@
         document.getElementById("staffConfirmPassword").value = "";
       } catch (error) {
         console.log("Staff join request error:", error);
-        showStatus("staffStatus", "Server error", "error");
+        showStatus("staffStatus", error?.message || "Unable to reach the ERP server.", "error");
       }
     }
 
@@ -920,13 +1263,18 @@
       const email = document.getElementById("forgotEmail").value.trim().toLowerCase();
 
       if (!email) {
-        showStatus("forgotStatus", "Please enter your registered email.", "error");
+        showToastMessage("Please enter your registered email.", "warning", "Forgot Password");
+        focusField("forgotEmail");
         return;
       }
 
       try {
-        const res = await fetch(`${API_BASE}/otp/request`, {
+        setButtonLoading("forgotSendBtn", true, "Sending...");
+        setForgotFlowLoading("forgotSendBtn");
+
+        const res = await fetch(resolveAuthApiUrl("/otp/request"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             purpose: "PASSWORD_RESET",
@@ -940,10 +1288,18 @@
         }
 
         forgotPasswordResetToken = "";
-        showStatus("forgotStatus", data.message || "If the email is registered, a verification code has been sent.", "info");
+        showToastMessage(
+          data.message || "If the email is registered, a verification code has been sent.",
+          "info",
+          "Code Sent"
+        );
+        focusField("forgotOtp");
       } catch (error) {
         console.log("Forgot password request error:", error);
-        showStatus("forgotStatus", error.message || "Failed to send verification code", "error");
+        showToastMessage(error.message || "Failed to send verification code", "error", "Send Failed");
+      } finally {
+        setButtonLoading("forgotSendBtn", false, "");
+        setForgotFlowLoading("");
       }
     }
 
@@ -952,13 +1308,18 @@
       const otp = document.getElementById("forgotOtp").value.trim();
 
       if (!email || !otp) {
-        showStatus("forgotStatus", "Please enter your email and verification code.", "error");
+        showToastMessage("Please enter your email and verification code.", "warning", "Verification Needed");
+        focusField(!email ? "forgotEmail" : "forgotOtp");
         return;
       }
 
       try {
-        const res = await fetch(`${API_BASE}/otp/verify`, {
+        setButtonLoading("forgotVerifyBtn", true, "Verifying...");
+        setForgotFlowLoading("forgotVerifyBtn");
+
+        const res = await fetch(resolveAuthApiUrl("/otp/verify"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             purpose: "PASSWORD_RESET",
@@ -973,10 +1334,18 @@
         }
 
         forgotPasswordResetToken = data.sessionToken || "";
-        showStatus("forgotStatus", data.message || "Verification successful. You can now reset your password.", "success");
+        showToastMessage(
+          data.message || "Verification successful. You can now reset your password.",
+          "success",
+          "Verified"
+        );
+        focusField("forgotNewPassword");
       } catch (error) {
         console.log("Forgot password verify error:", error);
-        showStatus("forgotStatus", error.message || "Verification failed", "error");
+        showToastMessage(error.message || "Verification failed", "error", "Verification Failed");
+      } finally {
+        setButtonLoading("forgotVerifyBtn", false, "");
+        setForgotFlowLoading("");
       }
     }
 
@@ -986,28 +1355,36 @@
       const confirmPassword = document.getElementById("forgotConfirmPassword").value.trim();
 
       if (!email || !newPassword || !confirmPassword) {
-        showStatus("forgotStatus", "Please fill in all required fields.", "error");
+        showToastMessage("Please fill in all required fields.", "warning", "Incomplete Form");
+        focusField(!email ? "forgotEmail" : !newPassword ? "forgotNewPassword" : "forgotConfirmPassword");
         return;
       }
 
       if (!forgotPasswordResetToken) {
-        showStatus("forgotStatus", "Please verify the code before resetting your password.", "error");
+        showToastMessage("Please verify the code before resetting your password.", "warning", "Verification Required");
+        focusField("forgotOtp");
         return;
       }
 
       if (newPassword.length < 4) {
-        showStatus("forgotStatus", "Password must be at least 4 characters long.", "error");
+        showToastMessage("Password must be at least 4 characters long.", "warning", "Password Too Short");
+        focusField("forgotNewPassword");
         return;
       }
 
       if (newPassword !== confirmPassword) {
-        showStatus("forgotStatus", "Password and confirm password do not match.", "error");
+        showToastMessage("Password and confirm password do not match.", "error", "Passwords Do Not Match");
+        focusField("forgotConfirmPassword");
         return;
       }
 
       try {
-        const res = await fetch(`${API_BASE}/auth/reset-password`, {
+        setButtonLoading("forgotResetBtn", true, "Resetting...");
+        setForgotFlowLoading("forgotResetBtn");
+
+        const res = await fetch(resolveAuthApiUrl("/auth/reset-password"), {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email,
@@ -1025,10 +1402,20 @@
         document.getElementById("forgotOtp").value = "";
         document.getElementById("forgotNewPassword").value = "";
         document.getElementById("forgotConfirmPassword").value = "";
-        showStatus("forgotStatus", data.message || "Password has been reset successfully.", "success");
+        showToastMessage(
+          data.message || "Password has been reset successfully.",
+          "success",
+          "Password Updated"
+        );
+        switchAuthTab("login");
+        document.getElementById("loginEmail").value = email;
+        focusField("loginPassword");
       } catch (error) {
         console.log("Forgot password reset error:", error);
-        showStatus("forgotStatus", error.message || "Password reset failed", "error");
+        showToastMessage(error.message || "Password reset failed", "error", "Reset Failed");
+      } finally {
+        setButtonLoading("forgotResetBtn", false, "");
+        setForgotFlowLoading("");
       }
     }
 
@@ -1048,6 +1435,55 @@
 
     document.getElementById("loginEmail")?.addEventListener("keydown", function(e) {
       if (e.key === "Enter") loginUser();
+    });
+
+    document.getElementById("regConfirmPassword")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        registerCompanyRequest();
+      }
+    });
+
+    document.getElementById("staffConfirmPassword")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        requestStaffJoin();
+      }
+    });
+
+    document.getElementById("forgotEmail")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        requestForgotPasswordCode();
+      }
+    });
+
+    document.getElementById("forgotOtp")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        verifyForgotPasswordCode();
+      }
+    });
+
+    document.getElementById("forgotNewPassword")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        focusField("forgotConfirmPassword");
+      }
+    });
+
+    document.getElementById("forgotConfirmPassword")?.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        resetForgotPassword();
+      }
+    });
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key !== "Escape") return;
+      const forgotPanel = document.getElementById("forgotPanel");
+      if (!forgotPanel || !forgotPanel.classList.contains("active")) return;
+      switchAuthTab("login");
     });
   </script>
   <script src="js/toast.js"></script>

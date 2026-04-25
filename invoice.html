@@ -1,7 +1,7 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="js/auth-guard.js"></script>
+    <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Invoice</title>
@@ -615,6 +615,7 @@
                       <th>Barcode</th>
                       <th>Product</th>
                       <th>SKU</th>
+                      <th>Qty</th>
                       <th>Weight</th>
                       <th>Size</th>
                       <th>Lot</th>
@@ -635,8 +636,7 @@
   <script src="https://unpkg.com/html5-qrcode"></script>
 
   <script>
-    const API_BASE =
-      window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+    const API_BASE = window.ERP_API_BASE;
 
     let stockItems = [];
     let invoiceItems = [];
@@ -1074,6 +1074,51 @@
       return summary;
     }
 
+    function getInvoiceItemMm(item) {
+      return String(item?.mm ?? item?.mmSize ?? item?.mm_size ?? "").trim();
+    }
+
+    function getInvoiceGroupKey(item) {
+      return [
+        String(item?.productName || item?.product_name || "").trim().toLowerCase(),
+        String(item?.size || "").trim().toLowerCase(),
+        getInvoiceItemMm(item).toLowerCase(),
+        String(item?.lot || item?.lot_number || "").trim().toLowerCase()
+      ].join("||");
+    }
+
+    function getGroupedInvoiceItems(items = []) {
+      const groups = new Map();
+
+      (Array.isArray(items) ? items : []).forEach((item) => {
+        const key = getInvoiceGroupKey(item);
+        const barcode = String(item.barcode || "").trim();
+        const weight = num(item.weight);
+
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            barcode,
+            productName: item.productName || item.product_name || "",
+            sku: item.sku || "",
+            size: item.size || "",
+            lot: item.lot || item.lot_number || "",
+            mm: getInvoiceItemMm(item),
+            quantity: 0,
+            weight: 0,
+            barcodes: []
+          });
+        }
+
+        const group = groups.get(key);
+        group.quantity += 1;
+        group.weight += weight;
+        if (barcode) group.barcodes.push(barcode);
+      });
+
+      return Array.from(groups.values());
+    }
+
     function renderSummary() {
       const totalCountEl = document.getElementById("totalCount");
       const totalWeightEl = document.getElementById("totalWeight");
@@ -1125,7 +1170,7 @@
           const sizeInfo = product.sizes[sizeName];
           html += `
             <div class="size-pill">
-              ${sizeName} Ã— ${sizeInfo.count}
+              ${sizeName} × ${sizeInfo.count}
             </div>
           `;
         });
@@ -1144,14 +1189,29 @@
       if (!tbody) return;
 
       tbody.innerHTML = "";
+      const groupedItems = getGroupedInvoiceItems(invoiceItems);
 
-      invoiceItems.forEach((item) => {
-        const safeBarcode = String(item.barcode || "").replace(/'/g, "\\'");
+      groupedItems.forEach((item) => {
+        const safeKey = encodeURIComponent(item.key);
+        const barcodeText = item.quantity > 1
+          ? `${item.barcode || ""} +${item.quantity - 1} more`
+          : (item.barcode || "");
+
         tbody.innerHTML += `
           <tr>
-            <td>${item.barcode || ""}</td>
+            <td>${barcodeText}</td>
             <td>${item.productName || ""}</td>
             <td>${item.sku || ""}</td>
+            <td>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value="${item.quantity}"
+                oninput="updateInvoiceGroupQuantity('${safeKey}', this.value)"
+                style="width:72px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:8px;"
+              />
+            </td>
             <td>${num(item.weight).toFixed(3)}</td>
             <td>${item.size || ""}</td>
             <td>${item.lot || ""}</td>
@@ -1159,7 +1219,7 @@
               <button
                 type="button"
                 class="delete-row-btn"
-                onclick="deleteInvoiceItem('${safeBarcode}')"
+                onclick="deleteInvoiceItemGroup('${safeKey}')"
                 title="Delete"
               >
                 <i class="fas fa-trash"></i>
@@ -1172,7 +1232,7 @@
       if (!invoiceItems.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="7" style="text-align:center;">No pending invoice items</td>
+            <td colspan="8" style="text-align:center;">No pending invoice items</td>
           </tr>
         `;
       }
@@ -1190,6 +1250,79 @@
       } catch (error) {
         console.log("Delete invoice item error:", error);
         showToast(error.message || "Invoice item delete failed", "error");
+      }
+    }
+
+    async function deleteInvoiceItemGroup(encodedKey) {
+      const key = decodeURIComponent(encodedKey || "");
+      const group = getGroupedInvoiceItems(invoiceItems).find((item) => item.key === key);
+      if (!group) return;
+
+      try {
+        for (const barcode of group.barcodes) {
+          await removeDraftItem(barcode);
+        }
+        renderInvoiceTable();
+        focusInvoiceScanner();
+      } catch (error) {
+        console.log("Delete grouped invoice item error:", error);
+        showToast(error.message || "Invoice item delete failed", "error");
+      }
+    }
+
+    async function updateInvoiceGroupQuantity(encodedKey, value) {
+      const key = decodeURIComponent(encodedKey || "");
+      const targetQty = Math.max(1, Math.floor(num(value || 1)));
+      const groupedItems = getGroupedInvoiceItems(invoiceItems);
+      const group = groupedItems.find((item) => item.key === key);
+      if (!group) return;
+
+      const currentQty = group.quantity;
+      if (targetQty === currentQty) return;
+
+      try {
+        if (targetQty < currentQty) {
+          const removeCount = currentQty - targetQty;
+          const removable = group.barcodes.slice(-removeCount);
+          for (const barcode of removable) {
+            await removeDraftItem(barcode);
+          }
+        } else {
+          await loadFromServer();
+
+          const usedBarcodes = new Set([
+            ...invoiceItems.map((item) => String(item.barcode || "").trim()),
+            ...processedInvoiceItems.map((item) => String(item.barcode || "").trim())
+          ]);
+
+          const addCount = targetQty - currentQty;
+          const availableMatches = stockItems.filter((item) => {
+            const barcode = String(item.barcode || "").trim();
+            return (
+              barcode &&
+              !usedBarcodes.has(barcode) &&
+              String(item.status || "IN_STOCK").toUpperCase() === "IN_STOCK" &&
+              getInvoiceGroupKey(item) === key
+            );
+          });
+
+          if (availableMatches.length < addCount) {
+            showToast("Not enough matching stock is available to increase quantity.", "error");
+            renderInvoiceTable();
+            return;
+          }
+
+          for (let i = 0; i < addCount; i += 1) {
+            await addDraftItem(String(availableMatches[i].barcode || "").trim());
+          }
+        }
+
+        renderInvoiceTable();
+        focusInvoiceScanner();
+      } catch (error) {
+        console.log("Invoice quantity update error:", error);
+        showToast(error.message || "Invoice quantity update failed", "error");
+        renderInvoiceTable();
       }
     }
 
@@ -1426,8 +1559,9 @@
 
       let rows = "";
       let totalWeight = 0;
+      const groupedItems = getGroupedInvoiceItems(sourceItems);
 
-      sourceItems.forEach((item, index) => {
+      groupedItems.forEach((item, index) => {
         totalWeight += num(item.weight);
 
         rows += `
@@ -1436,6 +1570,7 @@
             <td>${item.barcode || ""}</td>
             <td>${item.productName || ""}</td>
             <td>${item.sku || ""}</td>
+            <td>${item.quantity}</td>
             <td>${item.size || ""}</td>
             <td>${item.lot || ""}</td>
             <td>${num(item.weight).toFixed(3)}</td>
@@ -1519,6 +1654,7 @@
           <th>Barcode</th>
           <th>Product</th>
           <th>SKU</th>
+          <th>Qty</th>
           <th>Size</th>
           <th>Lot</th>
           <th>Weight</th>
@@ -1530,7 +1666,7 @@
     </table>
 
     <div class="footer-summary">
-      <div>Total Items: ${sourceItems.length}</div>
+      <div>Total Items: ${groupedItems.reduce((sum, item) => sum + item.quantity, 0)}</div>
       <div>Total Weight: ${totalWeight.toFixed(3)} g</div>
     </div>
   </div>

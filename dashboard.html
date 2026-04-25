@@ -1,7 +1,7 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="js/auth-guard.js"></script>
+    <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ERP Dashboard</title>
@@ -12,6 +12,10 @@
   <link rel="stylesheet" href="css/toast.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <style>
+    body {
+      font-family: "Segoe UI", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+    }
+
     .summary-row.summary-row-6 {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -80,6 +84,7 @@
         inset 0 1px 0 rgba(255,255,255,0.9);
       position: relative;
       overflow: hidden;
+      font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
     }
 
     .summary-icon::before {
@@ -321,7 +326,7 @@
           </div>
 
           <div class="summary-card">
-            <div class="summary-icon">💰</div>
+            <div class="summary-icon">🛒</div>
             <div class="summary-content">
               <h4>Sold</h4>
               <p id="soldCount">0</p>
@@ -330,7 +335,7 @@
           </div>
 
           <div class="summary-card">
-            <div class="summary-icon">🔁</div>
+            <div class="summary-icon">🔄</div>
             <div class="summary-content">
               <h4>Total Returns</h4>
               <p id="totalReturnCount">0</p>
@@ -339,7 +344,7 @@
           </div>
 
           <div class="summary-card">
-            <div class="summary-icon">✅</div>
+            <div class="summary-icon">♻️</div>
             <div class="summary-content">
               <h4>Normal Return</h4>
               <p id="normalReturnCount">0</p>
@@ -507,8 +512,7 @@
   </div>
 
   <script>
-    const API_BASE =
-      window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+    const API_BASE = window.ERP_API_BASE;
 
     let dashboardRefreshTimer = null;
     let dashboardLoadPromise = null;

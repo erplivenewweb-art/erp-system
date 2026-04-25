@@ -1,8 +1,7 @@
-﻿<!DOCTYPE html>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script src="js/auth-guard.js"></script>
+    <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Return Management</title>
@@ -432,8 +431,7 @@
   </div>
 
   <script>
-    const API_BASE =
-      window.location.hostname === "localhost" ? "http://localhost:8080" : window.location.origin;
+    const API_BASE = window.ERP_API_BASE;
     let selectedReturnItem = null;
 
     function getLoggedInUser() {

@@ -3,22 +3,22 @@
 // =============================
 
 const ERP_PAGE_PERMISSION_MAP = {
-  dashboard: ["SuperAdmin", "Admin", "Billing", "Invoice", "Stock", "Sticker", "Process", "Expense", "Transaction"],
-  "admin-approval": ["SuperAdmin", "Admin"],
-  sticker: ["SuperAdmin", "Admin", "Sticker"],
-  stock: ["SuperAdmin", "Admin", "Stock", "Sticker", "Billing", "Invoice"],
-  "material-stock": ["SuperAdmin", "Admin", "Stock", "Process"],
-  "daily-report": ["SuperAdmin", "Admin", "Billing", "Invoice", "Stock", "Expense", "Transaction", "Process"],
-  "sales-history": ["SuperAdmin", "Admin", "Billing", "Invoice", "Stock"],
-  invoice: ["SuperAdmin", "Admin", "Invoice"],
-  billing: ["SuperAdmin", "Admin", "Billing"],
-  return: ["SuperAdmin", "Admin", "Billing", "Invoice", "Stock"],
-  process: ["SuperAdmin", "Admin", "Process"],
-  "staff-management": ["SuperAdmin", "Admin"],
-  "expense-manager": ["SuperAdmin", "Admin", "Expense"],
-  transaction: ["SuperAdmin", "Admin", "Transaction"],
-  "transaction-reports": ["SuperAdmin", "Admin", "Transaction"],
-  settings: ["SuperAdmin", "Admin"]
+  dashboard: ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "admin-approval": ["SUPERADMIN", "OWNER"],
+  sticker: ["SUPERADMIN", "OWNER", "STAFF"],
+  stock: ["SUPERADMIN", "OWNER", "STAFF"],
+  "material-stock": ["SUPERADMIN", "OWNER", "STAFF"],
+  "daily-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "sales-history": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  invoice: ["SUPERADMIN", "OWNER", "STAFF"],
+  billing: ["SUPERADMIN", "OWNER", "STAFF"],
+  return: ["SUPERADMIN", "OWNER", "STAFF"],
+  process: ["SUPERADMIN", "OWNER", "STAFF"],
+  "staff-management": ["SUPERADMIN", "OWNER"],
+  "expense-manager": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  transaction: ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  settings: ["SUPERADMIN", "OWNER"]
 };
 
 const ERP_MENU_PAGE_BY_HREF = {
@@ -40,9 +40,13 @@ const ERP_MENU_PAGE_BY_HREF = {
   "settings.html": "settings"
 };
 
-const ERP_AUTH_COOKIE_NAME = "erp_user_id";
+const ERP_AUTH_TOKEN_STORAGE_KEY = "erpAuthToken";
 
 function getLoggedInUser() {
+  if (typeof window.getErpLoggedInUser === "function") {
+    return window.getErpLoggedInUser();
+  }
+
   try {
     return JSON.parse(localStorage.getItem("erpLoggedInUser")) || null;
   } catch (_) {
@@ -50,32 +54,60 @@ function getLoggedInUser() {
   }
 }
 
-function setAuthCookie(user = null) {
-  const targetUser = user || getLoggedInUser();
-  const rawUserId = targetUser?.id ?? targetUser?.user_id ?? targetUser?.userId ?? "";
-  const userId = String(rawUserId || "").trim();
-
-  if (!userId) return;
-
-  document.cookie = `${ERP_AUTH_COOKIE_NAME}=${encodeURIComponent(userId)}; path=/; SameSite=Lax`;
-}
-
-function clearAuthCookie() {
-  document.cookie = `${ERP_AUTH_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
-}
-
-function syncAuthCookie() {
-  const user = getLoggedInUser();
-  if (user) {
-    setAuthCookie(user);
-  } else {
-    clearAuthCookie();
+function getAuthToken() {
+  if (typeof window.getErpAuthToken === "function") {
+    return window.getErpAuthToken();
   }
+
+  return String(localStorage.getItem(ERP_AUTH_TOKEN_STORAGE_KEY) || "").trim();
+}
+
+function setAuthToken(token) {
+  const cleanToken = String(token || "").trim();
+  if (!cleanToken) return;
+
+  if (typeof window.setErpAuthToken === "function") {
+    window.setErpAuthToken(cleanToken);
+    return;
+  }
+
+  localStorage.setItem(ERP_AUTH_TOKEN_STORAGE_KEY, cleanToken);
+}
+
+function clearAuthToken() {
+  if (typeof window.clearErpAuthToken === "function") {
+    window.clearErpAuthToken();
+    return;
+  }
+
+  localStorage.removeItem(ERP_AUTH_TOKEN_STORAGE_KEY);
 }
 
 function clearAuthSession() {
-  localStorage.removeItem("erpLoggedInUser");
-  clearAuthCookie();
+  const token = getAuthToken();
+
+  if (typeof window.clearErpLoggedInUser === "function") {
+    window.clearErpLoggedInUser();
+  } else {
+    localStorage.removeItem("erpLoggedInUser");
+  }
+
+  clearAuthToken();
+
+  try {
+    const logoutUrl =
+      typeof window.buildErpApiUrl === "function" ? window.buildErpApiUrl("/auth/logout") : "/auth/logout";
+
+    fetch(logoutUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: token
+        ? {
+            Authorization: `Bearer ${token}`
+          }
+        : {}
+    }).catch(() => {});
+  } catch (_) {}
 }
 
 function getCurrentCompanyId() {
@@ -100,7 +132,13 @@ function getCurrentUserId() {
 
 function getNormalizedRole(user = null) {
   const targetUser = user || getLoggedInUser();
-  return String(targetUser?.role || "").trim().toLowerCase();
+  const raw = String(targetUser?.role || "").trim().toLowerCase();
+
+  if (raw === "admin") return "owner";
+  if (["billing", "invoice", "sticker", "stock", "process"].includes(raw)) return "staff";
+  if (["transaction", "expense"].includes(raw)) return "accounts";
+
+  return raw;
 }
 
 function normalizeAllowedRoles(roles = []) {
@@ -117,18 +155,13 @@ function isSuperAdmin(user = null) {
 
 function isAdminUser(user = null) {
   const targetUser = user || getLoggedInUser();
-  return getNormalizedRole(targetUser) === "admin";
+  return getNormalizedRole(targetUser) === "owner";
 }
 
 function buildProtectedQueryString({ includeCompany = false, companyId = null } = {}) {
   const params = new URLSearchParams();
-  const userId = getCurrentUserId();
   const resolvedCompanyId =
     companyId === null || companyId === undefined ? getCurrentCompanyId() : Number(companyId);
-
-  if (userId !== null && !Number.isNaN(userId)) {
-    params.set("actingUserId", String(userId));
-  }
 
   if (includeCompany && resolvedCompanyId !== null && !Number.isNaN(resolvedCompanyId)) {
     params.set("companyId", String(resolvedCompanyId));
@@ -147,15 +180,14 @@ function showAccessMessage(message) {
 
 function requireLogin() {
   const user = getLoggedInUser();
+  const token = getAuthToken();
 
-  if (!user) {
-    clearAuthCookie();
+  if (!user || !token) {
+    clearAuthSession();
     showAccessMessage("Login required");
     window.location.href = "login.html";
     return false;
   }
-
-  syncAuthCookie();
 
   return true;
 }
@@ -245,16 +277,25 @@ function patchFetchWithAuthHeader() {
   if (typeof originalFetch !== "function") return;
 
   window.fetch = function (input, init = {}) {
-    const user = getLoggedInUser();
-    const userId = user?.id ?? user?.user_id ?? user?.userId ?? "";
+    const token = getAuthToken();
+    const inputUrl = typeof input === "string" ? input : input?.url || "";
+    const apiBase =
+      typeof window.ERP_API_BASE === "string" ? String(window.ERP_API_BASE || "").trim() : "";
+    const resolvedUrl =
+      typeof window.buildErpApiUrl === "function" && typeof inputUrl === "string" && inputUrl.startsWith("/")
+        ? window.buildErpApiUrl(inputUrl)
+        : input;
+    const requestUrl = typeof resolvedUrl === "string" ? resolvedUrl : resolvedUrl?.url || inputUrl || "";
+    const isApiRequest = Boolean(apiBase) && String(requestUrl || "").startsWith(apiBase);
     const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined) || {});
 
-    if (userId && !headers.has("x-user")) {
-      headers.set("x-user", String(userId));
+    if (token && isApiRequest && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
     }
 
-    return originalFetch(input, {
+    return originalFetch(resolvedUrl, {
       ...init,
+      credentials: init.credentials || (isApiRequest ? "include" : "same-origin"),
       headers
     });
   };
@@ -262,5 +303,4 @@ function patchFetchWithAuthHeader() {
   window.__erpFetchAuthPatched = true;
 }
 
-syncAuthCookie();
 patchFetchWithAuthHeader();

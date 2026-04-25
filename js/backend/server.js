@@ -4,6 +4,17 @@ require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
+const rateLimit = require("express-rate-limit");
+const {
+  AUTH_COOKIE_NAME,
+  attachUserIfPresent,
+  authMiddleware,
+  checkRole,
+  normalizeRoleValue,
+  requirePageAuth,
+  signAuthToken
+} = require("./authMiddleware");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
 
@@ -35,9 +46,29 @@ const PROTECTED_PAGES = new Set([
   "sales-history.html"
 ]);
 
-app.use(cors());
+const ALLOWED_APP_ORIGIN = String(process.env.APP_ORIGIN || "").trim();
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+
+      if (ALLOWED_APP_ORIGIN && origin === ALLOWED_APP_ORIGIN) {
+        return callback(null, true);
+      }
+
+      if (!ALLOWED_APP_ORIGIN && !isProductionRuntime()) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS origin not allowed"));
+    },
+    credentials: true
+  })
+);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(attachUserIfPresent);
 
 const MYSQL_ENV_KEYS = [
   "MYSQLHOST",
@@ -123,7 +154,7 @@ function logEnvStatus() {
     );
   } else if (missingSuperAdminPassword) {
     console.warn(
-      "[CONFIG] SUPERADMIN_PASSWORD is missing. Local startup will use the built-in fallback password only in local runtime."
+      "[CONFIG] SUPERADMIN_PASSWORD is missing. Startup will fail safely until it is set."
     );
   }
 
@@ -193,12 +224,117 @@ function validateDbStartupEnv() {
 function validateSuperAdminStartupEnv() {
   const configuredSuperAdminPassword = String(process.env.SUPERADMIN_PASSWORD || "").trim();
 
-  if (!configuredSuperAdminPassword && isProductionRuntime()) {
+  if (!configuredSuperAdminPassword) {
     throw new Error(
-      "Missing required environment variable: SUPERADMIN_PASSWORD. Production startup is blocked for safety."
+      "Missing required environment variable: SUPERADMIN_PASSWORD. Startup is blocked for safety."
     );
   }
 }
+
+function validateJwtStartupEnv() {
+  const jwtSecret = String(process.env.JWT_SECRET || "").trim();
+
+  if (!jwtSecret) {
+    throw new Error("Missing required environment variable: JWT_SECRET");
+  }
+}
+
+function getErrorDetail(error) {
+  if (isProductionRuntime()) return undefined;
+  return error?.message || String(error || "Unknown error");
+}
+
+function getSafeErrorMessage(error, fallback = "Internal server error") {
+  const message = String(error?.message || "").trim();
+
+  if (!message) {
+    return fallback;
+  }
+
+  if (message === "CORS origin not allowed") {
+    return "Origin not allowed";
+  }
+
+  return isProductionRuntime() ? fallback : message;
+}
+
+function getRequestIpAddress(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").trim();
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+
+  return String(
+    req.ip ||
+      req.socket?.remoteAddress ||
+      req.connection?.remoteAddress ||
+      ""
+  ).trim();
+}
+
+function safeJsonStringify(value) {
+  try {
+    if (value === undefined) return null;
+    return JSON.stringify(value);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function writeAuditLogSafe(connection, req, audit) {
+  try {
+    await connection.query(
+      `
+      INSERT INTO audit_log
+      (
+        company_id,
+        user_id,
+        action_type,
+        entity_type,
+        entity_id,
+        before_data,
+        after_data,
+        ip_address,
+        user_agent,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [
+        audit.companyId ?? null,
+        audit.userId ?? null,
+        String(audit.actionType || "").trim(),
+        String(audit.entityType || "").trim(),
+        String(audit.entityId || "").trim(),
+        safeJsonStringify(audit.beforeData),
+        safeJsonStringify(audit.afterData),
+        getRequestIpAddress(req),
+        String(req.headers["user-agent"] || "").trim()
+      ]
+    );
+  } catch (error) {
+    console.error("Audit log write failed:", error);
+  }
+}
+
+async function hashPassword(password) {
+  return bcrypt.hash(String(password || "").trim(), 10);
+}
+
+function looksLikeBcryptHash(value) {
+  return /^\$2[aby]\$\d{2}\$/.test(String(value || ""));
+}
+
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many login attempts. Please try again later."
+  }
+});
 
 process.on("uncaughtException", (err) => {
   console.error("UNCAUGHT EXCEPTION:", err);
@@ -208,34 +344,8 @@ process.on("unhandledRejection", (reason) => {
   console.error("UNHANDLED REJECTION:", reason);
 });
 
-function parseCookies(cookieHeader = "") {
-  return String(cookieHeader || "")
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce((acc, part) => {
-      const separatorIndex = part.indexOf("=");
-      if (separatorIndex === -1) return acc;
-      const key = part.slice(0, separatorIndex).trim();
-      const value = part.slice(separatorIndex + 1).trim();
-      if (key) {
-        acc[key] = decodeURIComponent(value || "");
-      }
-      return acc;
-    }, {});
-}
-
 function requireAuthPage(req, res, next) {
-  const headerUser = String(req.headers["x-user"] || "").trim();
-  const cookies = parseCookies(req.headers.cookie || "");
-  const cookieUser = String(cookies.erp_user_id || "").trim();
-  const user = headerUser || cookieUser;
-
-  if (!user) {
-    return res.redirect("/login.html");
-  }
-
-  next();
+  return requirePageAuth(req, res, next);
 }
 
 function format3(value) {
@@ -655,12 +765,7 @@ function getRequestedCompanyId(req) {
 }
 
 function getRequestedUserId(req) {
-  const raw =
-    req.body.userId ??
-    req.body.user_id ??
-    req.body.createdBy ??
-    req.query.userId ??
-    null;
+  const raw = req.user?.userId ?? null;
 
   if (raw === null || raw === undefined || raw === "") return null;
 
@@ -669,13 +774,7 @@ function getRequestedUserId(req) {
 }
 
 function getActingUserId(req) {
-  const raw =
-    req.body.actingUserId ??
-    req.body.userId ??
-    req.body.user_id ??
-    req.query.actingUserId ??
-    req.query.userId ??
-    null;
+  const raw = req.user?.userId ?? null;
 
   if (raw === null || raw === undefined || raw === "") return null;
 
@@ -694,7 +793,7 @@ function isSuperAdminUser(user) {
 function isApprovedAdminUser(user) {
   if (!user) return false;
   return (
-    String(user.role || "").trim().toLowerCase() === "admin" &&
+    normalizeRoleValue(user.role || "").toLowerCase() === "owner" &&
     String(user.status || "").trim().toLowerCase() === "approved"
   );
 }
@@ -750,7 +849,7 @@ async function resolveAccessContext(
     return {
       ok: false,
       status: 401,
-      message: "actingUserId or userId is required"
+      message: "Authentication required"
     };
   }
 
@@ -1848,6 +1947,10 @@ async function ensureSchema() {
       company_total_amount DECIMAL(12,2) DEFAULT 0.00,
       employee_margin_amount DECIMAL(12,2) DEFAULT 0.00,
       status VARCHAR(50) DEFAULT 'ACTIVE',
+      is_deleted TINYINT(1) DEFAULT 0,
+      deleted_at DATETIME DEFAULT NULL,
+      deleted_by INT DEFAULT NULL,
+      delete_reason VARCHAR(255) DEFAULT '',
       company_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -1873,6 +1976,10 @@ async function ensureSchema() {
       company_line_amount DECIMAL(12,2) DEFAULT 0.00,
       employee_margin_amount DECIMAL(12,2) DEFAULT 0.00,
       employee_name VARCHAR(255) DEFAULT '',
+      is_deleted TINYINT(1) DEFAULT 0,
+      deleted_at DATETIME DEFAULT NULL,
+      deleted_by INT DEFAULT NULL,
+      delete_reason VARCHAR(255) DEFAULT '',
       company_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -2316,6 +2423,25 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      user_id INT DEFAULT NULL,
+      action_type VARCHAR(80) DEFAULT '',
+      entity_type VARCHAR(80) DEFAULT '',
+      entity_id VARCHAR(255) DEFAULT '',
+      before_data JSON DEFAULT NULL,
+      after_data JSON DEFAULT NULL,
+      ip_address VARCHAR(120) DEFAULT '',
+      user_agent TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_audit_company_created (company_id, created_at),
+      INDEX idx_audit_entity (entity_type, entity_id),
+      INDEX idx_audit_action (action_type)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS otp_verifications (
       id INT AUTO_INCREMENT PRIMARY KEY,
       email VARCHAR(255) NOT NULL,
@@ -2409,6 +2535,10 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_history", "company_subtotal", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_history", "company_total_amount", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_history", "employee_margin_amount", "DECIMAL(12,2) DEFAULT 0.00");
+    await addColumnIfMissing("sales_history", "is_deleted", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("sales_history", "deleted_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("sales_history", "deleted_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("sales_history", "delete_reason", "VARCHAR(255) DEFAULT ''");
   }
 
   if (await tableExists("sales_items")) {
@@ -2426,6 +2556,10 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_items", "company_line_amount", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_items", "employee_margin_amount", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_items", "employee_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("sales_items", "is_deleted", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("sales_items", "deleted_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("sales_items", "deleted_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("sales_items", "delete_reason", "VARCHAR(255) DEFAULT ''");
   }
 
   if (await tableExists("return_history")) {
@@ -2575,6 +2709,19 @@ async function ensureSchema() {
     await addColumnIfMissing("company_settings", "updated_by", "INT DEFAULT NULL");
     await addColumnIfMissing("company_settings", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("company_settings", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("audit_log")) {
+    await addColumnIfMissing("audit_log", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("audit_log", "user_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("audit_log", "action_type", "VARCHAR(80) DEFAULT ''");
+    await addColumnIfMissing("audit_log", "entity_type", "VARCHAR(80) DEFAULT ''");
+    await addColumnIfMissing("audit_log", "entity_id", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("audit_log", "before_data", "JSON DEFAULT NULL");
+    await addColumnIfMissing("audit_log", "after_data", "JSON DEFAULT NULL");
+    await addColumnIfMissing("audit_log", "ip_address", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("audit_log", "user_agent", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("audit_log", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
   if (await tableExists("otp_verifications")) {
@@ -3594,26 +3741,6 @@ async function postBillingToTransactionFoundation(connection, payload) {
   };
 }
 
-async function findUserByEmailAndPassword(email, password) {
-  const [rows] = await pool.query(
-    `
-    SELECT 
-      u.*,
-      c.company_name,
-      c.owner_name AS company_owner_name,
-      c.owner_email AS company_owner_email,
-      c.status AS company_status
-    FROM users u
-    LEFT JOIN companies c ON c.id = u.company_id
-    WHERE LOWER(u.email) = LOWER(?) AND u.password = ?
-    LIMIT 1
-    `,
-    [email, password]
-  );
-
-  return rows.length ? rows[0] : null;
-}
-
 async function findUserById(userId) {
   const [rows] = await pool.query(
     `
@@ -3634,30 +3761,49 @@ async function findUserById(userId) {
   return rows.length ? rows[0] : null;
 }
 
+async function verifyPasswordForUser(user, password) {
+  const storedPassword = String(user?.password || "");
+  const cleanPassword = String(password || "").trim();
+
+  if (!storedPassword || !cleanPassword) {
+    return false;
+  }
+
+  if (looksLikeBcryptHash(storedPassword)) {
+    return bcrypt.compare(cleanPassword, storedPassword);
+  }
+
+  if (storedPassword !== cleanPassword) {
+    return false;
+  }
+
+  const upgradedHash = await hashPassword(cleanPassword);
+  await pool.query(
+    `
+    UPDATE users
+    SET password = ?
+    WHERE id = ?
+    `,
+    [upgradedHash, user.id]
+  );
+  user.password = upgradedHash;
+
+  return true;
+}
+
 async function ensureSuperAdminExists() {
   try {
     const superAdminEmail = "grudrapratap0@gmail.com";
     const configuredSuperAdminPassword = String(process.env.SUPERADMIN_PASSWORD || "").trim();
-    const shouldUseLocalFallbackPassword =
-      !configuredSuperAdminPassword && canUseLocalDbDefaults();
-
-    if (!configuredSuperAdminPassword && !shouldUseLocalFallbackPassword) {
+    if (!configuredSuperAdminPassword) {
       throw new Error(
-        "SUPERADMIN_PASSWORD is required for non-local startup. Refusing to use the built-in fallback password."
+        "SUPERADMIN_PASSWORD is required. Refusing to use any built-in fallback password."
       );
     }
 
-    const superAdminPassword = shouldUseLocalFallbackPassword
-      ? "@ownerofshagoon"
-      : configuredSuperAdminPassword;
-
-    if (shouldUseLocalFallbackPassword) {
-      console.warn(
-        "[STARTUP] SUPERADMIN_PASSWORD is missing. Using the built-in fallback password for local startup only."
-      );
-    } else {
-      console.log("[STARTUP] SUPERADMIN_PASSWORD detected. Syncing SuperAdmin account.");
-    }
+    const superAdminPassword = configuredSuperAdminPassword;
+    const superAdminPasswordHash = await hashPassword(superAdminPassword);
+    console.log("[STARTUP] SUPERADMIN_PASSWORD detected. Syncing SuperAdmin account.");
 
     const [rows] = await pool.query(
       `SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
@@ -3671,7 +3817,7 @@ async function ensureSuperAdminExists() {
         SET password = ?, role = 'SuperAdmin', status = 'approved', company_id = NULL
         WHERE LOWER(email) = LOWER(?)
         `,
-        [superAdminPassword, superAdminEmail]
+        [superAdminPasswordHash, superAdminEmail]
       );
       console.log("SuperAdmin synced ✅");
       return;
@@ -3687,7 +3833,7 @@ async function ensureSuperAdminExists() {
         "Super Admin",
         "",
         superAdminEmail,
-        superAdminPassword,
+        superAdminPasswordHash,
         "SuperAdmin",
         "approved",
         null
@@ -3771,7 +3917,7 @@ app.get("/health", async (req, res) => {
       db: "failed",
       smtp: startupStatus.smtp,
       port: startupStatus.port,
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -3779,7 +3925,7 @@ app.get("/health", async (req, res) => {
 /* =========================
    DASHBOARD
 ========================= */
-app.get("/api/dashboard", async (req, res) => {
+app.get("/api/dashboard", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -3870,7 +4016,7 @@ app.get("/api/dashboard", async (req, res) => {
 /* =========================
    COMPANY SETTINGS
 ========================= */
-app.get("/settings/company", async (req, res) => {
+app.get("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -3900,7 +4046,7 @@ app.get("/settings/company", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Company settings fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -4031,7 +4177,7 @@ app.post("/otp/request", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "OTP request failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -4188,7 +4334,7 @@ app.post("/otp/verify", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "OTP verification failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -4245,13 +4391,15 @@ app.post("/auth/reset-password", async (req, res) => {
 
     await connection.beginTransaction();
 
+    const newPasswordHash = await hashPassword(newPassword);
+
     await connection.query(
       `
       UPDATE users
       SET password = ?
       WHERE id = ?
       `,
-      [newPassword, user.id]
+      [newPasswordHash, user.id]
     );
 
     await connection.query(
@@ -4281,14 +4429,14 @@ app.post("/auth/reset-password", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Password reset failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post("/settings/company", async (req, res) => {
+app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   let connection;
 
   try {
@@ -4452,6 +4600,20 @@ app.post("/settings/company", async (req, res) => {
     }
 
     const savedRow = await getCompanySettingsForCompany(connection, companyId);
+    await writeAuditLogSafe(connection, req, {
+      companyId,
+      userId: createdBy ?? null,
+      actionType: "SETTINGS_CHANGE",
+      entityType: "SETTINGS",
+      entityId: String(companyId),
+      beforeData: existingRow || null,
+      afterData: savedRow || {
+        company_id: companyId,
+        ...payload,
+        updated_by: createdBy ?? null
+      }
+    });
+
     return res.json({
       success: true,
       message: "Settings saved successfully",
@@ -4462,7 +4624,7 @@ app.post("/settings/company", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Company settings save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -4519,12 +4681,12 @@ app.get("/expenses", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Expense fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.post("/expenses", async (req, res) => {
+app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
 
   try {
@@ -4610,14 +4772,14 @@ app.post("/expenses", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Expense save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.put("/expenses/:id", async (req, res) => {
+app.put("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
 
   try {
@@ -4724,14 +4886,14 @@ app.put("/expenses/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Expense update failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.delete("/expenses/:id", async (req, res) => {
+app.delete("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   try {
     const expenseId = Number(req.params.id);
     const access = await resolveAccessContext(req, {
@@ -4775,7 +4937,7 @@ app.delete("/expenses/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Expense delete failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -4783,7 +4945,7 @@ app.delete("/expenses/:id", async (req, res) => {
 /* =========================
    DAILY REPORT
 ========================= */
-app.get("/getDailyReport", async (req, res) => {
+app.get("/getDailyReport", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -5158,7 +5320,7 @@ app.get("/getDailyReport", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Daily report fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -5166,7 +5328,7 @@ app.get("/getDailyReport", async (req, res) => {
 /* =========================
    GET ALL STOCK
 ========================= */
-app.get("/getStock", async (req, res) => {
+app.get("/getStock", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -5201,7 +5363,7 @@ app.get("/getStock", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Stock fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -5257,12 +5419,12 @@ app.get("/process/data", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Process data fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.post("/process/lots", async (req, res) => {
+app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -5354,14 +5516,14 @@ app.post("/process/lots", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Process lot save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post("/process/karigar-work", async (req, res) => {
+app.post("/process/karigar-work", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -5465,7 +5627,7 @@ app.post("/process/karigar-work", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Karigar work save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -5524,7 +5686,7 @@ app.get("/getSticker/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -5607,7 +5769,7 @@ app.get("/getReturnItem/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Return item fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -5615,7 +5777,7 @@ app.get("/getReturnItem/:barcode", async (req, res) => {
 /* =========================
    RETURN MANAGEMENT
 ========================= */
-app.post("/saveReturn", async (req, res) => {
+app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -5888,14 +6050,14 @@ app.post("/saveReturn", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Return save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.get("/getReturns", async (req, res) => {
+app.get("/getReturns", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -5935,12 +6097,12 @@ app.get("/getReturns", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Returns fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.get("/getReturnSummary", async (req, res) => {
+app.get("/getReturnSummary", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -5964,7 +6126,7 @@ app.get("/getReturnSummary", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Return summary fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -5972,7 +6134,7 @@ app.get("/getReturnSummary", async (req, res) => {
 /* =========================
    MATERIAL STOCK
 ========================= */
-app.post("/materialStock/items", async (req, res) => {
+app.post("/materialStock/items", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -6088,14 +6250,14 @@ app.post("/materialStock/items", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material item save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.put("/materialStock/items/:id", async (req, res) => {
+app.put("/materialStock/items/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -6252,7 +6414,7 @@ app.put("/materialStock/items/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material item update failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -6315,12 +6477,12 @@ app.get("/materialStock/items", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material items fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.post("/materialStock/movements", async (req, res) => {
+app.post("/materialStock/movements", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -6438,7 +6600,7 @@ app.post("/materialStock/movements", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material movement save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -6495,7 +6657,7 @@ app.get("/materialStock/movements", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material movements fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -6524,7 +6686,7 @@ app.get("/materialStock/summary", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Material stock summary fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -6532,7 +6694,7 @@ app.get("/materialStock/summary", async (req, res) => {
 /* =========================
    ADD STICKER
 ========================= */
-app.post("/addSticker", async (req, res) => {
+app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -6666,7 +6828,7 @@ app.post("/addSticker", async (req, res) => {
 /* =========================
    UPDATE STICKER
 ========================= */
-app.put("/updateSticker/:barcode", async (req, res) => {
+app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -6839,14 +7001,14 @@ app.put("/updateSticker/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 /* =========================
    DELETE STICKER (SOFT DELETE)
 ========================= */
-app.delete("/deleteSticker/:barcode", async (req, res) => {
+app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
     const access = await resolveAccessContext(req, {
@@ -6894,7 +7056,7 @@ app.delete("/deleteSticker/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -6902,7 +7064,7 @@ app.delete("/deleteSticker/:barcode", async (req, res) => {
 /* =========================
    RESTORE STICKER
 ========================= */
-app.put("/restoreSticker/:barcode", async (req, res) => {
+app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
     const access = await resolveAccessContext(req, {
@@ -6958,7 +7120,7 @@ app.put("/restoreSticker/:barcode", async (req, res) => {
 /* =========================
    INVOICE DRAFTS
 ========================= */
-app.get("/invoice-drafts/current", async (req, res) => {
+app.get("/invoice-drafts/current", authMiddleware, async (req, res) => {
   let connection;
 
   try {
@@ -6992,14 +7154,14 @@ app.get("/invoice-drafts/current", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Current invoice draft fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post("/invoice-drafts/current/header", async (req, res) => {
+app.post("/invoice-drafts/current/header", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7050,14 +7212,14 @@ app.post("/invoice-drafts/current/header", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft header save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post("/invoice-drafts/current/items", async (req, res) => {
+app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7171,14 +7333,14 @@ app.post("/invoice-drafts/current/items", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft item add failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.delete("/invoice-drafts/current/items/:barcode", async (req, res) => {
+app.delete("/invoice-drafts/current/items/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7227,14 +7389,14 @@ app.delete("/invoice-drafts/current/items/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft item delete failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.post("/invoice-drafts/current/apply-details", async (req, res) => {
+app.post("/invoice-drafts/current/apply-details", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7340,14 +7502,14 @@ app.post("/invoice-drafts/current/apply-details", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft update failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.delete("/invoice-drafts/current", async (req, res) => {
+app.delete("/invoice-drafts/current", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7406,14 +7568,14 @@ app.delete("/invoice-drafts/current", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft clear failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.get("/invoice-drafts/:id/billing", async (req, res) => {
+app.get("/invoice-drafts/:id/billing", authMiddleware, async (req, res) => {
   let connection;
 
   try {
@@ -7499,7 +7661,7 @@ app.get("/invoice-drafts/:id/billing", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice draft billing fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -7509,7 +7671,12 @@ app.get("/invoice-drafts/:id/billing", async (req, res) => {
 /* =========================
    SAVE INVOICE
 ========================= */
-app.post("/saveInvoice", async (req, res) => {
+app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: "Legacy invoice save is disabled. Use the secured billing save flow."
+  });
+
   let connection;
 
   try {
@@ -7661,7 +7828,7 @@ app.post("/saveInvoice", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Invoice save failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -7671,7 +7838,7 @@ app.post("/saveInvoice", async (req, res) => {
 /* =========================
    SAVE BILLING
 ========================= */
-app.post("/saveBilling", async (req, res) => {
+app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
   try {
@@ -7943,6 +8110,28 @@ app.post("/saveBilling", async (req, res) => {
       );
     }
 
+    await writeAuditLogSafe(connection, req, {
+      companyId: finalCompanyId,
+      userId: access.actingUserId ?? getRequestedUserId(req) ?? null,
+      actionType: "CREATE",
+      entityType: "SALE",
+      entityId: cleanInvoiceNumber,
+      beforeData: null,
+      afterData: {
+        saleId,
+        invoiceNumber: cleanInvoiceNumber,
+        customerName: String(customerName || "").trim(),
+        mobile: String(mobile || "").trim(),
+        paymentMode: String(paymentMode || "").trim(),
+        paymentStatus: String(paymentStatus || "").trim(),
+        paidAmount: Number(paidAmount || 0),
+        dueAmount: Number(dueAmount || 0),
+        totalAmount: Number(totalAmount || customerTotal || 0),
+        totalItems: finalTotalItems,
+        totalWeight: Number(finalTotalWeight || 0)
+      }
+    });
+
     await connection.commit();
 
     return res.json({
@@ -7960,7 +8149,7 @@ app.post("/saveBilling", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
@@ -7970,7 +8159,7 @@ app.post("/saveBilling", async (req, res) => {
 /* =========================
    SALES HISTORY
 ========================= */
-app.get("/getSalesHistory", async (req, res) => {
+app.get("/getSalesHistory", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -7990,7 +8179,7 @@ app.get("/getSalesHistory", async (req, res) => {
         sh.*,
         (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id) AS total_items
       FROM sales_history sh
-      ${companyId !== null ? "WHERE sh.company_id = ?" : ""}
+      ${companyId !== null ? "WHERE sh.company_id = ? AND COALESCE(sh.is_deleted, 0) = 0" : "WHERE COALESCE(sh.is_deleted, 0) = 0"}
       ORDER BY sh.id DESC
       `,
       companyId !== null ? [companyId] : []
@@ -8009,7 +8198,7 @@ app.get("/getSalesHistory", async (req, res) => {
   }
 });
 
-app.get("/sales-history", async (req, res) => {
+app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -8022,6 +8211,7 @@ app.get("/sales-history", async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    const showDeleted = String(req.query.deleted || "").trim() === "1";
 
     const [sales] = await pool.query(
       `
@@ -8029,7 +8219,9 @@ app.get("/sales-history", async (req, res) => {
         sh.*,
         (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id) AS total_items
       FROM sales_history sh
-      ${companyId !== null ? "WHERE sh.company_id = ?" : ""}
+      ${companyId !== null
+        ? `WHERE sh.company_id = ? AND COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`
+        : `WHERE COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`}
       ORDER BY sh.id DESC
       `,
       companyId !== null ? [companyId] : []
@@ -8065,6 +8257,7 @@ app.get("/getInvoiceItems/:invoiceNumber", async (req, res) => {
       SELECT *
       FROM sales_items
       WHERE invoice_number = ?
+      AND COALESCE(is_deleted, 0) = 0
       ${companyId !== null ? "AND company_id = ?" : ""}
       ORDER BY id DESC
       `,
@@ -8084,12 +8277,7 @@ app.get("/getInvoiceItems/:invoiceNumber", async (req, res) => {
   }
 });
 
-/* =========================
-   DELETE / RESTORE SALE
-========================= */
-app.put("/deleteSale/:invoiceNumber", async (req, res) => {
-  let connection;
-
+app.get("/sales-history/payment-history/:invoiceNumber", async (req, res) => {
   try {
     const invoiceNumber = String(req.params.invoiceNumber || "").trim();
     const access = await resolveAccessContext(req, {
@@ -8102,41 +8290,335 @@ app.put("/deleteSale/:invoiceNumber", async (req, res) => {
       return sendAccessError(res, access);
     }
 
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-
-    const result = await setSaleStatusAndSyncStock(
-      connection,
-      invoiceNumber,
-      access.companyScope,
-      "DELETED"
-    );
-
-    if (!result.ok) {
-      await connection.rollback();
-      return res.status(result.status || 400).json({
+    if (!invoiceNumber) {
+      return res.status(400).json({
         success: false,
-        message: result.message
+        message: "Invoice number is required"
       });
     }
 
+    const companyId = access.companyScope;
+    const [rows] = await pool.query(
+      `
+      SELECT
+        tm.id,
+        tm.voucher_no,
+        tm.voucher_date,
+        tm.payment_mode,
+        COALESCE(ts.cash_amount, 0) AS amount,
+        COALESCE(tm.note, tm.remarks, '') AS note
+      FROM invoice_transaction_link itl
+      INNER JOIN transaction_master tm ON tm.id = itl.transaction_id
+      LEFT JOIN transaction_settlements ts ON ts.transaction_id = tm.id
+      WHERE itl.company_id = ?
+        AND itl.invoice_no = ?
+        AND tm.transaction_type = 'PAYMENT_RECEIVED'
+      ORDER BY tm.id DESC
+      `,
+      [companyId, invoiceNumber]
+    );
+
+    return res.json({
+      success: true,
+      history: rows.map((row) => ({
+        id: row.id,
+        voucherNo: row.voucher_no || "",
+        paymentDate: row.voucher_date || "",
+        paymentMode: row.payment_mode || "",
+        amount: toNumber(row.amount),
+        note: String(row.note || "").trim()
+      }))
+    });
+  } catch (error) {
+    console.error("Sales history payment history error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Payment history fetch failed"
+    });
+  }
+});
+
+app.post("/sales-history/update-payment", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const createdBy = access.actingUserId ?? getRequestedUserId(req);
+    const invoiceNumber = String(req.body.invoiceNo || req.body.invoice_number || "").trim();
+    const paymentMode = String(req.body.paymentMode || req.body.payment_mode || "").trim();
+    const note = String(req.body.note || "").trim();
+    const paymentAmount = toNumber(req.body.amount);
+    const paymentDate = getTodayDateOnly();
+
+    if (!invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number is required"
+      });
+    }
+
+    if (!(paymentAmount > 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount must be greater than zero"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [salesRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ? AND company_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    const saleRow = salesRows[0];
+    if (!saleRow) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Sale record not found"
+      });
+    }
+
+    if (Number(saleRow.is_deleted || 0) === 1) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Cannot update payment for deleted sale"
+      });
+    }
+
+    const currentPaid = toNumber(saleRow.paid_amount);
+    const currentDue = toNumber(saleRow.due_amount);
+    if (currentDue <= 0.009) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "This invoice is already fully paid"
+      });
+    }
+
+    if (paymentAmount - currentDue > 0.009) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount cannot exceed due amount"
+      });
+    }
+
+    const saleTxn = await findExistingSaleInvoiceTransaction(connection, companyId, invoiceNumber);
+    if (!saleTxn?.id) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Original sale transaction not found"
+      });
+    }
+
+    const [saleTxnRows] = await connection.query(
+      `
+      SELECT id, voucher_no, party_id, party_type
+      FROM transaction_master
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [saleTxn.id, companyId]
+    );
+
+    const saleTxnRow = saleTxnRows[0];
+    if (!saleTxnRow?.party_id) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Customer transaction party not found"
+      });
+    }
+
+    const party = await getPartyByIdForCompany(connection, companyId, saleTxnRow.party_id);
+    if (!party) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Customer party record not found"
+      });
+    }
+
+    const [paymentCountRows] = await connection.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM invoice_transaction_link itl
+      INNER JOIN transaction_master tm ON tm.id = itl.transaction_id
+      WHERE itl.company_id = ?
+        AND itl.invoice_no = ?
+        AND tm.transaction_type = 'PAYMENT_RECEIVED'
+      `,
+      [companyId, invoiceNumber]
+    );
+    const paymentCount = Number(paymentCountRows[0]?.total || 0);
+    const paymentVoucherNo = `PAY-${invoiceNumber}-${paymentCount + 1}`;
+
+    const newDue = Math.max(currentDue - paymentAmount, 0);
+    const newPaid = currentPaid + paymentAmount;
+    const newStatus = newDue <= 0.009 ? "PAID" : "PARTIAL";
+
+    const [paymentTxnInsert] = await connection.query(
+      `
+      INSERT INTO transaction_master
+      (
+        company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+        status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+        remarks, note, created_by
+      )
+      VALUES (?, ?, ?, 'PAYMENT_RECEIVED', ?, ?, 'POSTED', ?, ?, 'sales-history', ?, ?, ?, ?, ?)
+      `,
+      [
+        companyId,
+        paymentVoucherNo,
+        paymentDate,
+        party.id,
+        saleTxnRow.party_type || party.party_type || "CUSTOMER",
+        invoiceNumber,
+        invoiceNumber,
+        paymentMode || "Cash",
+        newStatus,
+        "Due payment received from sales history",
+        note || `Additional receipt ${paymentAmount.toFixed(2)}`,
+        createdBy
+      ]
+    );
+
+    const paymentTransactionId = paymentTxnInsert.insertId;
+
+    await connection.query(
+      `
+      INSERT INTO transaction_settlements
+      (
+        company_id, transaction_id, settlement_type, against_transaction_id,
+        against_invoice_no, against_voucher_no, cash_amount, settlement_date,
+        remarks, created_by
+      )
+      VALUES (?, ?, 'CASH', ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        companyId,
+        paymentTransactionId,
+        saleTxn.id,
+        invoiceNumber,
+        saleTxn.voucher_no || invoiceNumber,
+        paymentAmount,
+        paymentDate,
+        note || "Sales history due settlement",
+        createdBy
+      ]
+    );
+
+    await connection.query(
+      `
+      INSERT INTO invoice_transaction_link
+      (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, 'PAYMENT_RECEIVED', ?, ?)
+      `,
+      [companyId, invoiceNumber, paymentTransactionId, "Sales history payment posting", createdBy]
+    );
+
+    await createCashLedgerEntry(connection, {
+      companyId,
+      partyId: party.id,
+      transactionId: paymentTransactionId,
+      entryDate: paymentDate,
+      entryType: "CREDIT",
+      debitAmount: 0,
+      creditAmount: paymentAmount,
+      referenceType: "PAYMENT_RECEIVED",
+      referenceNo: paymentVoucherNo,
+      remarks: note || "Sales history payment received",
+      createdBy
+    });
+
+    await connection.query(
+      `
+      UPDATE sales_history
+      SET paid_amount = ?, due_amount = ?, payment_status = ?, payment_mode = ?
+      WHERE id = ?
+      `,
+      [newPaid, newDue, newStatus, paymentMode || saleRow.payment_mode || "Cash", saleRow.id]
+    );
+
+    await writeAuditLogSafe(connection, req, {
+      companyId,
+      userId: createdBy ?? null,
+      actionType: "PAYMENT_UPDATE",
+      entityType: "PAYMENT",
+      entityId: invoiceNumber,
+      beforeData: {
+        id: saleRow.id,
+        invoice_number: saleRow.invoice_number,
+        payment_mode: saleRow.payment_mode,
+        payment_status: saleRow.payment_status,
+        paid_amount: toNumber(saleRow.paid_amount),
+        due_amount: toNumber(saleRow.due_amount),
+        total_amount: toNumber(saleRow.total_amount)
+      },
+      afterData: {
+        id: saleRow.id,
+        invoice_number: invoiceNumber,
+        payment_mode: paymentMode || saleRow.payment_mode || "Cash",
+        payment_status: newStatus,
+        paid_amount: newPaid,
+        due_amount: newDue,
+        total_amount: toNumber(saleRow.total_amount),
+        payment_received: paymentAmount,
+        transaction_id: paymentTransactionId,
+        note
+      }
+    });
+
+    await recalcPartyBalanceSummary(connection, companyId, party.id, paymentTransactionId);
     await connection.commit();
 
-    return res.json({ success: true });
+    return res.json({
+      success: true,
+      message: "Payment updated successfully",
+      paidAmount: newPaid,
+      dueAmount: newDue,
+      paymentStatus: newStatus,
+      transactionId: paymentTransactionId,
+      settlementCreated: true
+    });
   } catch (error) {
     if (connection) {
       try {
         await connection.rollback();
       } catch (_) {}
     }
-    console.error("Delete sale error:", error);
-    return res.status(500).json({ success: false });
+    console.error("Sales history payment update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Payment update failed"
+    });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.put("/restoreSale/:invoiceNumber", async (req, res) => {
+app.delete("/sales-history/:invoiceNumber", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   let connection;
 
   try {
@@ -8151,27 +8633,191 @@ app.put("/restoreSale/:invoiceNumber", async (req, res) => {
       return sendAccessError(res, access);
     }
 
-    connection = await pool.getConnection();
-    await connection.beginTransaction();
-
-    const result = await setSaleStatusAndSyncStock(
-      connection,
-      invoiceNumber,
-      access.companyScope,
-      "ACTIVE"
-    );
-
-    if (!result.ok) {
-      await connection.rollback();
-      return res.status(result.status || 400).json({
+    if (!invoiceNumber) {
+      return res.status(400).json({
         success: false,
-        message: result.message
+        message: "Invoice number is required"
       });
     }
 
-    await connection.commit();
+    const companyId = access.companyScope;
+    const deletedBy = access.actingUserId ?? getRequestedUserId(req) ?? null;
+    const deleteReason = String(req.body?.reason || req.query?.reason || "").trim().slice(0, 255);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    return res.json({ success: true });
+    const [saleRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ? AND company_id = ? AND COALESCE(is_deleted, 0) = 0
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    if (!saleRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Sale record not found"
+      });
+    }
+
+    await writeAuditLogSafe(connection, req, {
+      companyId,
+      userId: deletedBy,
+      actionType: "DELETE",
+      entityType: "SALE",
+      entityId: invoiceNumber,
+      beforeData: {
+        sale: saleRows[0]
+      },
+      afterData: {
+        deleted: true,
+        invoiceNumber,
+        deletedBy,
+        deleteReason
+      }
+    });
+
+    await connection.query(
+      `
+      UPDATE sales_items
+      SET is_deleted = 1,
+          deleted_at = NOW(),
+          deleted_by = ?,
+          delete_reason = ?
+      WHERE invoice_number = ? AND company_id = ?
+      `,
+      [deletedBy, deleteReason, invoiceNumber, companyId]
+    );
+
+    await connection.query(
+      `
+      UPDATE sales_history
+      SET is_deleted = 1,
+          deleted_at = NOW(),
+          deleted_by = ?,
+          delete_reason = ?
+      WHERE invoice_number = ? AND company_id = ?
+      `,
+      [deletedBy, deleteReason, invoiceNumber, companyId]
+    );
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Sale deleted successfully"
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+    console.error("Permanent sales delete error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Permanent delete failed"
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/sales-history/:invoiceNumber/restore", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
+  let connection;
+
+  try {
+    const invoiceNumber = String(req.params.invoiceNumber || "").trim();
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (!invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number is required"
+      });
+    }
+
+    const companyId = access.companyScope;
+    const restoredBy = access.actingUserId ?? getRequestedUserId(req) ?? null;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [saleRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ? AND company_id = ? AND COALESCE(is_deleted, 0) = 1
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    if (!saleRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Deleted sale record not found"
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE sales_items
+      SET is_deleted = 0,
+          deleted_at = NULL,
+          deleted_by = NULL,
+          delete_reason = ''
+      WHERE invoice_number = ? AND company_id = ?
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    await connection.query(
+      `
+      UPDATE sales_history
+      SET is_deleted = 0,
+          deleted_at = NULL,
+          deleted_by = NULL,
+          delete_reason = ''
+      WHERE invoice_number = ? AND company_id = ?
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    await writeAuditLogSafe(connection, req, {
+      companyId,
+      userId: restoredBy,
+      actionType: "RESTORE",
+      entityType: "SALE",
+      entityId: invoiceNumber,
+      beforeData: {
+        sale: saleRows[0]
+      },
+      afterData: {
+        restored: true,
+        invoiceNumber,
+        restoredBy
+      }
+    });
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Sale restored successfully"
+    });
   } catch (error) {
     if (connection) {
       try {
@@ -8179,7 +8825,10 @@ app.put("/restoreSale/:invoiceNumber", async (req, res) => {
       } catch (_) {}
     }
     console.error("Restore sale error:", error);
-    return res.status(500).json({ success: false });
+    return res.status(500).json({
+      success: false,
+      message: "Restore failed"
+    });
   } finally {
     if (connection) connection.release();
   }
@@ -8188,7 +8837,7 @@ app.put("/restoreSale/:invoiceNumber", async (req, res) => {
 /* =========================
    RETURN ITEM
 ========================= */
-app.put("/returnItem/:barcode", async (req, res) => {
+app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
     const access = await resolveAccessContext(req, {
@@ -8230,7 +8879,7 @@ app.put("/returnItem/:barcode", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Return failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8291,13 +8940,15 @@ app.post("/requestCompanySignup", async (req, res) => {
       });
     }
 
+    const passwordHash = await hashPassword(cleanPassword);
+
     await pool.query(
       `
       INSERT INTO company_signup_requests
       (company_name, owner_name, mobile, owner_email, password, status)
       VALUES (?, ?, ?, ?, ?, ?)
       `,
-      [cleanCompanyName, cleanOwnerName, cleanMobile, cleanEmail, cleanPassword, "pending"]
+      [cleanCompanyName, cleanOwnerName, cleanMobile, cleanEmail, passwordHash, "pending"]
     );
 
     return res.json({
@@ -8309,7 +8960,7 @@ app.post("/requestCompanySignup", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Company signup request failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8335,12 +8986,12 @@ app.get("/pendingCompanyRequests", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Pending company requests fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.put("/approveCompanyRequest/:id", async (req, res) => {
+app.put("/approveCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
   let connection;
 
   try {
@@ -8420,6 +9071,9 @@ app.put("/approveCompanyRequest/:id", async (req, res) => {
     );
 
     const companyId = companyInsert.insertId;
+    const approvedPasswordHash = looksLikeBcryptHash(requestData.password)
+      ? String(requestData.password)
+      : await hashPassword(requestData.password);
 
     await connection.query(
       `
@@ -8430,7 +9084,7 @@ app.put("/approveCompanyRequest/:id", async (req, res) => {
         requestData.owner_name,
         requestData.mobile || "",
         requestData.owner_email,
-        requestData.password,
+        approvedPasswordHash,
         "Admin",
         "approved",
         companyId
@@ -8464,14 +9118,14 @@ app.put("/approveCompanyRequest/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approve company request failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.put("/rejectCompanyRequest/:id", async (req, res) => {
+app.put("/rejectCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
   try {
     const access = await requireSuperAdminAccess(req, res);
     if (!access) return;
@@ -8521,7 +9175,7 @@ app.put("/rejectCompanyRequest/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Reject company request failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8546,7 +9200,7 @@ app.get("/approvedCompanies", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approved companies fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8597,7 +9251,7 @@ app.get("/companyUsers", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Company users fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8648,12 +9302,14 @@ app.post("/registerUser", async (req, res) => {
       });
     }
 
+    const passwordHash = await hashPassword(cleanPassword);
+
     await pool.query(
       `
       INSERT INTO users (name, mobile, email, password, role, status, company_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
-      [cleanName, cleanMobile, cleanEmail, cleanPassword, "", "pending", finalCompanyId]
+      [cleanName, cleanMobile, cleanEmail, passwordHash, "", "pending", finalCompanyId]
     );
 
     return res.json({
@@ -8665,7 +9321,7 @@ app.post("/registerUser", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Register failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8737,12 +9393,14 @@ app.post("/requestStaffJoin", async (req, res) => {
       });
     }
 
+    const passwordHash = await hashPassword(cleanPassword);
+
     await pool.query(
       `
       INSERT INTO users (name, mobile, email, password, role, status, company_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
-      [cleanName, cleanMobile, cleanEmail, cleanPassword, cleanRequestedRole, "pending", companyId]
+      [cleanName, cleanMobile, cleanEmail, passwordHash, cleanRequestedRole, "pending", companyId]
     );
 
     return res.json({
@@ -8754,7 +9412,7 @@ app.post("/requestStaffJoin", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Staff request failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8803,7 +9461,7 @@ app.get("/pendingUsers", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Pending users fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8852,7 +9510,7 @@ app.get("/pendingStaffRequests", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Pending staff fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8901,12 +9559,12 @@ app.get("/approvedUsers", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approved users fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.put("/approveUser/:id", async (req, res) => {
+app.put("/approveUser/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     return await handleUserApprovalAction(req, res, {
       action: "approve",
@@ -8917,12 +9575,12 @@ app.put("/approveUser/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approve failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.put("/approveStaffRequest/:id", async (req, res) => {
+app.put("/approveStaffRequest/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     return await handleUserApprovalAction(req, res, {
       action: "approve",
@@ -8933,12 +9591,12 @@ app.put("/approveStaffRequest/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Approve failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.put("/rejectUser/:id", async (req, res) => {
+app.put("/rejectUser/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     return await handleUserApprovalAction(req, res, {
       action: "reject",
@@ -8949,12 +9607,12 @@ app.put("/rejectUser/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Reject failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.put("/rejectStaffRequest/:id", async (req, res) => {
+app.put("/rejectStaffRequest/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     return await handleUserApprovalAction(req, res, {
       action: "reject",
@@ -8965,7 +9623,7 @@ app.put("/rejectStaffRequest/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Reject failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -8973,7 +9631,7 @@ app.put("/rejectStaffRequest/:id", async (req, res) => {
 /* =========================
    LOGIN
 ========================= */
-app.post("/login", async (req, res) => {
+app.post("/login", loginRateLimiter, async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "").trim();
@@ -8985,9 +9643,14 @@ app.post("/login", async (req, res) => {
       });
     }
 
-    const user = await findUserByEmailAndPassword(email, password);
+    const user = await findUserByEmail(email);
 
     if (!user) {
+      return res.json({ success: false, message: "Invalid login" });
+    }
+
+    const passwordMatches = await verifyPasswordForUser(user, password);
+    if (!passwordMatches) {
       return res.json({ success: false, message: "Invalid login" });
     }
 
@@ -9007,8 +9670,19 @@ app.post("/login", async (req, res) => {
       return res.json({ success: false, message: "Role not assigned yet" });
     }
 
+    const token = signAuthToken(user);
+
+    res.cookie(AUTH_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: isProductionRuntime(),
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 12 * 60 * 60 * 1000
+    });
+
     return res.json({
       success: true,
+      token,
       user: {
         id: user.id,
         name: user.name,
@@ -9028,9 +9702,22 @@ app.post("/login", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
+});
+
+app.post("/auth/logout", (_req, res) => {
+  res.clearCookie(AUTH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProductionRuntime(),
+    sameSite: "Lax",
+    path: "/"
+  });
+
+  return res.json({
+    success: true
+  });
 });
 
 app.get("/userByEmail", async (req, res) => {
@@ -9064,7 +9751,7 @@ app.get("/userByEmail", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -9072,7 +9759,7 @@ app.get("/userByEmail", async (req, res) => {
 /* =========================
    TRANSACTION FOUNDATION
 ========================= */
-app.post("/transaction/parties", async (req, res) => {
+app.post("/transaction/parties", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
 
   try {
@@ -9184,14 +9871,14 @@ app.post("/transaction/parties", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Party create failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.get("/transaction/parties", async (req, res) => {
+app.get("/transaction/parties", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9252,12 +9939,12 @@ app.get("/transaction/parties", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Party fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.post("/transaction/transactions", async (req, res) => {
+app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
 
   try {
@@ -9576,14 +10263,14 @@ app.post("/transaction/transactions", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Transaction create failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-app.get("/transaction/transactions", async (req, res) => {
+app.get("/transaction/transactions", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9649,12 +10336,12 @@ app.get("/transaction/transactions", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Transaction fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.get("/transaction/open-context", async (req, res) => {
+app.get("/transaction/open-context", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9773,12 +10460,12 @@ app.get("/transaction/open-context", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Transaction open context fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.get("/transaction/cash-ledger", async (req, res) => {
+app.get("/transaction/cash-ledger", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9832,12 +10519,12 @@ app.get("/transaction/cash-ledger", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Cash ledger fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
 
-app.get("/transaction/metal-ledger", async (req, res) => {
+app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9897,7 +10584,7 @@ app.get("/transaction/metal-ledger", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Metal ledger fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -10093,7 +10780,7 @@ app.get("/transaction/reports/party-ledger", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Party ledger report fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -10230,7 +10917,7 @@ app.get("/transaction/reports/customer-due", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Customer due report fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -10383,7 +11070,7 @@ app.get("/transaction/reports/metal-ledger", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Metal ledger report fetch failed",
-      error: error.message
+      error: getErrorDetail(error)
     });
   }
 });
@@ -10405,8 +11092,8 @@ app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   return res.status(500).json({
     success: false,
-    message: "Internal server error",
-    error: err.message
+    message: getSafeErrorMessage(err),
+    error: getErrorDetail(err)
   });
 });
 
@@ -10424,6 +11111,7 @@ async function bootstrapServer() {
   try {
     validateDbStartupEnv();
     validateSuperAdminStartupEnv();
+    validateJwtStartupEnv();
     console.log("[STARTUP] Verifying MySQL connection...");
     await testDbConnection();
     startupStatus.db = "connected";
@@ -10471,4 +11159,5 @@ bootstrapServer().catch((error) => {
   console.error("[STARTUP] Unhandled bootstrap failure:", error);
   process.exit(1);
 });
+
 
