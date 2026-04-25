@@ -3900,20 +3900,30 @@ app.get("/api/test", (req, res) => {
 });
 
 app.get("/health", async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    app: "ok",
+    status: "live"
+  });
+});
+
+app.get("/ready", async (req, res) => {
   try {
     await testDbConnection();
     return res.status(200).json({
       success: true,
       app: "ok",
+      status: "ready",
       db: startupStatus.db,
       smtp: startupStatus.smtp,
       port: startupStatus.port
     });
   } catch (error) {
-    console.error("Health check error:", error);
+    console.error("Readiness check error:", error);
     return res.status(500).json({
       success: false,
       app: "ok",
+      status: "not_ready",
       db: "failed",
       smtp: startupStatus.smtp,
       port: startupStatus.port,
@@ -11102,12 +11112,7 @@ app.use((err, req, res, next) => {
 ========================= */
 let server = null;
 
-async function bootstrapServer() {
-  logPortStartupConfig();
-  logDbStartupConfig();
-  logSmtpStartupConfig();
-  logEnvStatus();
-
+async function runBackgroundStartupTasks() {
   try {
     validateDbStartupEnv();
     validateSuperAdminStartupEnv();
@@ -11130,7 +11135,6 @@ async function bootstrapServer() {
     startupStatus.db = "failed";
     console.error("[STARTUP] Fatal DB/schema startup failure:", error);
     console.error("[STARTUP] Fatal DB/schema error message:", error?.message || error);
-    process.exit(1);
     return;
   }
 
@@ -11143,9 +11147,20 @@ async function bootstrapServer() {
     console.error("[STARTUP] SMTP connection failed:", error);
     console.error("[STARTUP] SMTP error message:", error?.message || error);
   }
+}
+
+async function bootstrapServer() {
+  logPortStartupConfig();
+  logDbStartupConfig();
+  logSmtpStartupConfig();
+  logEnvStatus();
 
   server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[STARTUP] Server running on port ${PORT}`);
+    runBackgroundStartupTasks().catch((error) => {
+      startupStatus.db = "failed";
+      console.error("[STARTUP] Unhandled background startup failure:", error);
+    });
   });
 
   server.on("error", (error) => {
