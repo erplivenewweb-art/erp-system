@@ -170,6 +170,133 @@
             </div>
           </div>
 
+          <div class="sub-card" style="margin-top:16px;">
+            <h3>Process-wise Loss Tracking</h3>
+            <p>Track each process step input, output, and loss for a saved lot.</p>
+
+            <div class="form-grid">
+              <div class="input-box">
+                <label for="stepLotNo">Lot No</label>
+                <input id="stepLotNo" type="text" placeholder="Enter saved Lot No" onblur="loadProcessStepContext()" />
+              </div>
+
+              <div class="input-box">
+                <label for="stepProcessName">Process Name</label>
+                <input id="stepProcessName" type="text" placeholder="Example: Cutting / Polish" />
+              </div>
+
+              <div class="input-box">
+                <label for="stepKarigarName">Karigar</label>
+                <input id="stepKarigarName" type="text" placeholder="Karigar Name" />
+              </div>
+
+              <div class="input-box">
+                <label for="stepInputWeight">Input Weight</label>
+                <input id="stepInputWeight" type="number" step="0.001" readonly />
+              </div>
+
+              <div class="input-box">
+                <label for="stepOutputWeight">Output Weight</label>
+                <input id="stepOutputWeight" type="number" step="0.001" placeholder="Returned/output weight" />
+              </div>
+
+              <div class="input-box">
+                <label for="stepLossWeight">Loss Weight</label>
+                <input id="stepLossWeight" type="number" step="0.001" readonly />
+              </div>
+
+              <div class="input-box">
+                <label for="stepLossReason">Loss Reason</label>
+                <input id="stepLossReason" type="text" placeholder="Optional note" />
+              </div>
+            </div>
+
+            <div class="btn-row" style="margin-top:12px;">
+              <button class="primary-btn" type="button" onclick="saveOrCompleteProcessStep()">Save/Complete Step</button>
+              <button class="secondary-btn" type="button" onclick="clearProcessStepForm()">Clear</button>
+              <button class="secondary-btn" type="button" onclick="loadProcessStepContext()">Refresh</button>
+            </div>
+
+            <div id="processStepHint" class="summary" style="margin-top:16px;">
+              <h3>Next Input</h3>
+              <p>Select a saved lot to auto-load the next process input weight.</p>
+            </div>
+
+            <div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>Process</th>
+                    <th>Karigar</th>
+                    <th>Input</th>
+                    <th>Output</th>
+                    <th>Loss</th>
+                    <th>Status</th>
+                    <th>Completed</th>
+                  </tr>
+                </thead>
+                <tbody id="processStepTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="process-two-col">
+            <div class="sub-card">
+              <h3>Lot-wise Process Loss</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Lot No</th>
+                      <th>Steps</th>
+                      <th>Total Input</th>
+                      <th>Total Output</th>
+                      <th>Total Loss</th>
+                    </tr>
+                  </thead>
+                  <tbody id="processLotSummaryBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="sub-card">
+              <h3>Karigar-wise Process Loss</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Karigar</th>
+                      <th>Steps</th>
+                      <th>Total Input</th>
+                      <th>Total Output</th>
+                      <th>Total Loss</th>
+                    </tr>
+                  </thead>
+                  <tbody id="processKarigarSummaryBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-card" style="margin-top:16px;">
+            <h3>Process-wise Loss Summary</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Process</th>
+                    <th>Steps</th>
+                    <th>Total Input</th>
+                    <th>Total Output</th>
+                    <th>Total Loss</th>
+                  </tr>
+                </thead>
+                <tbody id="processNameSummaryBody"></tbody>
+              </table>
+            </div>
+          </div>
+
           <div class="process-two-col">
             <div class="sub-card">
               <h3>Karigar Work Entry</h3>
@@ -297,6 +424,8 @@
     let stockItems = [];
     let lotData = [];
     let karigarData = [];
+    let processStepData = [];
+    let currentOpenProcessStep = null;
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -449,6 +578,38 @@
         labour: Number(item?.labour ?? item?.labourAmount ?? item?.labour_amount ?? 0),
         company_id: item?.company_id ?? getCurrentCompanyId(),
         time: item?.time ?? item?.work_time ?? item?.created_at ?? ""
+      };
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatProcessWeight(value) {
+      const num = Number(value || 0);
+      return Number.isFinite(num) ? num.toFixed(3) : "0.000";
+    }
+
+    function normalizeProcessStep(item) {
+      return {
+        id: item?.id ?? null,
+        lotNo: String(item?.lotNo ?? item?.lot_no ?? "").trim(),
+        stepNo: Number(item?.stepNo ?? item?.step_no ?? 0),
+        processName: String(item?.processName ?? item?.process_name ?? "").trim(),
+        karigarId: item?.karigarId ?? item?.karigar_id ?? null,
+        karigarName: String(item?.karigarName ?? item?.karigar_name ?? "").trim(),
+        inputWeight: Number(item?.inputWeight ?? item?.input_weight ?? 0),
+        outputWeight: Number(item?.outputWeight ?? item?.output_weight ?? 0),
+        lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
+        lossReason: String(item?.lossReason ?? item?.loss_reason ?? "").trim(),
+        status: String(item?.status || "COMPLETED").toUpperCase(),
+        completedAt: item?.completedAt ?? item?.completed_at ?? "",
+        createdAt: item?.createdAt ?? item?.created_at ?? ""
       };
     }
 
@@ -627,6 +788,269 @@
       });
     }
 
+    function setProcessStepHint(message) {
+      const hint = document.getElementById("processStepHint");
+      if (!hint) return;
+      hint.innerHTML = `
+        <h3>Next Input</h3>
+        <p>${escapeHtml(message || "Select a saved lot to auto-load the next process input weight.")}</p>
+      `;
+    }
+
+    function updateProcessStepLoss() {
+      const input = Number(document.getElementById("stepInputWeight")?.value || 0);
+      const outputRaw = document.getElementById("stepOutputWeight")?.value;
+      const lossInput = document.getElementById("stepLossWeight");
+
+      if (!lossInput) return;
+
+      if (outputRaw === "" || outputRaw === null || outputRaw === undefined) {
+        lossInput.value = "";
+        return;
+      }
+
+      const output = Number(outputRaw || 0);
+      lossInput.value = (input - output).toFixed(3);
+    }
+
+    function fillProcessStepFormFromOpenStep(step) {
+      currentOpenProcessStep = step || null;
+      document.getElementById("stepLotNo").value = step?.lotNo || "";
+      document.getElementById("stepProcessName").value = step?.processName || "";
+      document.getElementById("stepKarigarName").value = step?.karigarName || "";
+      document.getElementById("stepInputWeight").value = formatProcessWeight(step?.inputWeight || 0);
+      document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepLossWeight").value = "";
+      document.getElementById("stepLossReason").value = step?.lossReason || "";
+    }
+
+    function renderProcessStepTable() {
+      const tbody = document.getElementById("processStepTableBody");
+      if (!tbody) return;
+
+      if (!processStepData.length) {
+        tbody.innerHTML = `<tr><td colspan="8">No process steps found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = processStepData.map((step) => {
+        const isOpen = step.status === "OPEN";
+        return `
+          <tr>
+            <td>${step.stepNo || ""}</td>
+            <td>${escapeHtml(step.processName || "")}</td>
+            <td>${escapeHtml(step.karigarName || "")}</td>
+            <td>${formatProcessWeight(step.inputWeight)}</td>
+            <td>${isOpen ? "-" : formatProcessWeight(step.outputWeight)}</td>
+            <td>${isOpen ? "-" : formatProcessWeight(step.lossWeight)}</td>
+            <td>${escapeHtml(step.status || "")}</td>
+            <td>${escapeHtml(step.completedAt || "")}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadProcessSteps(lotNo) {
+      const params = buildAuthParams();
+      if (lotNo) params.set("lotNo", lotNo);
+
+      try {
+        const res = await fetch(`${API_BASE}/process/steps${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Process steps fetch failed");
+        }
+
+        processStepData = Array.isArray(data?.steps) ? data.steps.map(normalizeProcessStep) : [];
+      } catch (error) {
+        console.log("Process steps load error:", error);
+        processStepData = [];
+      }
+
+      renderProcessStepTable();
+    }
+
+    async function loadNextProcessInput(lotNo) {
+      if (!lotNo) {
+        currentOpenProcessStep = null;
+        document.getElementById("stepInputWeight").value = "";
+        setProcessStepHint();
+        return;
+      }
+
+      const params = buildAuthParams();
+      params.set("lotNo", lotNo);
+
+      try {
+        const res = await fetch(`${API_BASE}/process/next-input?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          const openStep = data?.openStep ? normalizeProcessStep(data.openStep) : null;
+          if (openStep) {
+            fillProcessStepFormFromOpenStep(openStep);
+            setProcessStepHint(`Step ${openStep.stepNo} is open. Enter output weight to complete it.`);
+            return;
+          }
+          throw new Error(data?.message || "Next input fetch failed");
+        }
+
+        currentOpenProcessStep = null;
+        document.getElementById("stepInputWeight").value = formatProcessWeight(data?.inputWeight || 0);
+        document.getElementById("stepOutputWeight").value = "";
+        document.getElementById("stepLossWeight").value = "";
+        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g`);
+      } catch (error) {
+        console.log("Next process input error:", error);
+        currentOpenProcessStep = null;
+        document.getElementById("stepInputWeight").value = "";
+        setProcessStepHint(error.message || "Unable to load next input weight.");
+      }
+    }
+
+    async function loadProcessStepContext() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      await loadProcessSteps(lotNo);
+      await loadProcessLossSummary();
+      await loadNextProcessInput(lotNo);
+    }
+
+    async function saveOrCompleteProcessStep() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const processName = document.getElementById("stepProcessName")?.value?.trim() || "";
+      const karigarName = document.getElementById("stepKarigarName")?.value?.trim() || "";
+      const outputRaw = document.getElementById("stepOutputWeight")?.value;
+      const lossReason = document.getElementById("stepLossReason")?.value?.trim() || "";
+      const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
+
+      if (!lotNo) {
+        showToast("Please enter the lot number.", "error", "Missing Field");
+        return;
+      }
+
+      if (!currentOpenProcessStep && !processName) {
+        showToast("Please enter the process name.", "error", "Missing Field");
+        return;
+      }
+
+      try {
+        let res;
+        if (currentOpenProcessStep) {
+          if (!hasOutput) {
+            showToast("Please enter output weight to complete the open step.", "error", "Missing Field");
+            return;
+          }
+
+          res = await fetch(`${API_BASE}/process/steps/${currentOpenProcessStep.id}/complete`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(buildAuthPayload({
+              outputWeight: Number(outputRaw),
+              lossReason
+            }))
+          });
+        } else {
+          res = await fetch(`${API_BASE}/process/steps`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(buildAuthPayload({
+              lotNo,
+              processName,
+              karigarName,
+              outputWeight: hasOutput ? Number(outputRaw) : undefined,
+              lossReason,
+              status: hasOutput ? "COMPLETED" : "OPEN"
+            }))
+          });
+        }
+
+        const data = await res.json();
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Process step save failed");
+        }
+
+        showToast(data?.message || "Process step saved successfully", "success", "Saved");
+        clearProcessStepForm(false);
+        document.getElementById("stepLotNo").value = lotNo;
+        await loadProcessStepContext();
+      } catch (error) {
+        console.log("Save process step error:", error);
+        showToast(error.message || "Process step save failed", "error", "Save Failed");
+      }
+    }
+
+    function clearProcessStepForm(clearLot = true) {
+      if (clearLot) document.getElementById("stepLotNo").value = "";
+      document.getElementById("stepProcessName").value = "";
+      document.getElementById("stepKarigarName").value = "";
+      document.getElementById("stepInputWeight").value = "";
+      document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepLossWeight").value = "";
+      document.getElementById("stepLossReason").value = "";
+      currentOpenProcessStep = null;
+      setProcessStepHint();
+    }
+
+    function renderSummaryTable(bodyId, rows, emptyText, labelKey) {
+      const tbody = document.getElementById(bodyId);
+      if (!tbody) return;
+
+      if (!Array.isArray(rows) || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="5">${emptyText}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((row) => {
+        const label = row?.[labelKey] || row?.label || "Unassigned";
+        return `
+          <tr>
+            <td>${escapeHtml(label)}</td>
+            <td>${Number(row?.step_count || row?.stepCount || 0)}</td>
+            <td>${formatProcessWeight(row?.total_input ?? row?.totalInput)}</td>
+            <td>${formatProcessWeight(row?.total_output ?? row?.totalOutput)}</td>
+            <td>${formatProcessWeight(row?.total_loss ?? row?.totalLoss)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderProcessLossSummary(data = {}) {
+      renderSummaryTable("processLotSummaryBody", data.lotSummary || [], "No lot-wise process loss found", "lot_no");
+      renderSummaryTable("processKarigarSummaryBody", data.karigarSummary || [], "No karigar-wise process loss found", "karigar_name");
+      renderSummaryTable("processNameSummaryBody", data.processSummary || [], "No process-wise loss found", "process_name");
+    }
+
+    async function loadProcessLossSummary() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const params = buildAuthParams();
+      if (lotNo) params.set("lotNo", lotNo);
+
+      try {
+        const res = await fetch(`${API_BASE}/process/loss-summary${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Process loss summary fetch failed");
+        }
+
+        renderProcessLossSummary(data);
+      } catch (error) {
+        console.log("Process loss summary error:", error);
+        renderProcessLossSummary();
+      }
+    }
+
     function loadKarigarLotDropdown() {
       const lotSelect = document.getElementById("karigarLot");
       if (!lotSelect) return;
@@ -780,6 +1204,7 @@
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
 
     window.addEventListener("load", async function () {
       renderProfileBox();
@@ -789,6 +1214,8 @@
       loadKarigarLotDropdown();
       renderKarigarList();
       renderKarigarLossReport();
+      renderProcessStepTable();
+      await loadProcessLossSummary();
       updateProcessCalculations();
     });
   </script>

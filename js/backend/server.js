@@ -649,6 +649,23 @@ function normalizeKarigarWorkRow(row) {
   };
 }
 
+function normalizeProcessStepStatus(value) {
+  const clean = String(value || "").trim().toUpperCase();
+  if (clean === "OPEN") return "OPEN";
+  if (clean === "CANCELLED") return "CANCELLED";
+  return "COMPLETED";
+}
+
+function normalizeProcessStepRow(row) {
+  return {
+    ...row,
+    step_no: Number(row.step_no || 0),
+    input_weight: toNumber(row.input_weight),
+    output_weight: toNumber(row.output_weight),
+    loss_weight: toNumber(row.loss_weight)
+  };
+}
+
 function normalizeExpenseRow(row) {
   return {
     ...row,
@@ -2412,6 +2429,29 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_steps (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_lot_id INT DEFAULT NULL,
+      lot_no VARCHAR(120) NOT NULL,
+      step_no INT NOT NULL,
+      process_name VARCHAR(255) NOT NULL,
+      karigar_id INT DEFAULT NULL,
+      karigar_name VARCHAR(255) DEFAULT '',
+      input_weight DECIMAL(14,3) DEFAULT 0.000,
+      output_weight DECIMAL(14,3) DEFAULT 0.000,
+      loss_weight DECIMAL(14,3) DEFAULT 0.000,
+      loss_reason VARCHAR(255) DEFAULT '',
+      status VARCHAR(30) DEFAULT 'COMPLETED',
+      started_at DATETIME DEFAULT NULL,
+      completed_at DATETIME DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS karigar_work (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -2715,6 +2755,26 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_steps")) {
+    await addColumnIfMissing("process_steps", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "lot_no", "VARCHAR(120) NOT NULL");
+    await addColumnIfMissing("process_steps", "step_no", "INT NOT NULL");
+    await addColumnIfMissing("process_steps", "process_name", "VARCHAR(255) NOT NULL");
+    await addColumnIfMissing("process_steps", "karigar_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "karigar_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_steps", "input_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "output_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "loss_reason", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_steps", "status", "VARCHAR(30) DEFAULT 'COMPLETED'");
+    await addColumnIfMissing("process_steps", "started_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "completed_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_steps", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_steps", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("karigar_work")) {
     await addColumnIfMissing("karigar_work", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("karigar_work", "karigar_name", "VARCHAR(255) NOT NULL");
@@ -2854,6 +2914,14 @@ async function ensureSchema() {
     await addIndexIfMissing("return_history", "idx_returns_company_created", "(company_id, created_at)");
     await addIndexIfMissing("return_history", "idx_returns_company_date", "(company_id, return_date)");
     await addIndexIfMissing("return_history", "idx_returns_company_invoice", "(company_id, invoice_number)");
+  }
+
+  if (await tableExists("process_steps")) {
+    await addIndexIfMissing("process_steps", "idx_process_steps_lot_step", "(company_id, lot_no, step_no)");
+    await addIndexIfMissing("process_steps", "idx_process_steps_lot_status", "(company_id, lot_no, status)");
+    await addIndexIfMissing("process_steps", "idx_process_steps_karigar", "(company_id, karigar_id)");
+    await addIndexIfMissing("process_steps", "idx_process_steps_process_lot", "(process_lot_id)");
+    await addIndexIfMissing("process_steps", "idx_process_steps_completed", "(company_id, completed_at)");
   }
 
   if (await tableExists("transaction_master")) {
@@ -5583,6 +5651,512 @@ app.get("/process/data", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Process data fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+async function getProcessLotForSteps(connection, companyId, lotNo) {
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM process_lots
+    WHERE company_id = ? AND lot_no = ?
+    LIMIT 1
+    `,
+    [companyId, lotNo]
+  );
+  return rows.length ? normalizeProcessLotRow(rows[0]) : null;
+}
+
+async function getOpenProcessStep(connection, companyId, lotNo, excludeStepId = null) {
+  const params = [companyId, lotNo];
+  let excludeSql = "";
+  if (excludeStepId) {
+    excludeSql = "AND id <> ?";
+    params.push(Number(excludeStepId));
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM process_steps
+    WHERE company_id = ?
+      AND lot_no = ?
+      AND status = 'OPEN'
+      ${excludeSql}
+    ORDER BY step_no ASC, id ASC
+    LIMIT 1
+    `,
+    params
+  );
+  return rows.length ? normalizeProcessStepRow(rows[0]) : null;
+}
+
+async function getLastCompletedProcessStep(connection, companyId, lotNo) {
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM process_steps
+    WHERE company_id = ?
+      AND lot_no = ?
+      AND status = 'COMPLETED'
+    ORDER BY step_no DESC, id DESC
+    LIMIT 1
+    `,
+    [companyId, lotNo]
+  );
+  return rows.length ? normalizeProcessStepRow(rows[0]) : null;
+}
+
+async function getNextProcessStepContext(connection, companyId, lotNo, excludeStepId = null) {
+  const processLot = await getProcessLotForSteps(connection, companyId, lotNo);
+  if (!processLot) {
+    return {
+      ok: false,
+      message: "Process lot must be saved before process-wise steps can be tracked"
+    };
+  }
+
+  const openStep = await getOpenProcessStep(connection, companyId, lotNo, excludeStepId);
+  if (openStep) {
+    return {
+      ok: false,
+      message: "Previous process step is still OPEN. Complete it before starting the next step.",
+      processLot,
+      openStep
+    };
+  }
+
+  const lastCompletedStep = await getLastCompletedProcessStep(connection, companyId, lotNo);
+  const [stepRows] = await connection.query(
+    `
+    SELECT COALESCE(MAX(step_no), 0) AS max_step_no
+    FROM process_steps
+    WHERE company_id = ? AND lot_no = ?
+    `,
+    [companyId, lotNo]
+  );
+  const nextStepNo = Number(stepRows[0]?.max_step_no || 0) + 1;
+
+  return {
+    ok: true,
+    processLot,
+    lastCompletedStep,
+    nextStepNo,
+    inputWeight: lastCompletedStep ? toNumber(lastCompletedStep.output_weight) : toNumber(processLot.raw_weight),
+    source: lastCompletedStep ? "PREVIOUS_PROCESS_OUTPUT" : "PROCESS_LOT_RAW_WEIGHT"
+  };
+}
+
+app.get("/process/steps", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const params = [];
+    const whereParts = [];
+
+    if (companyId !== null) {
+      whereParts.push("company_id = ?");
+      params.push(companyId);
+    }
+
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM process_steps
+      ${whereClause}
+      ORDER BY lot_no ASC, step_no ASC, id ASC
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      steps: rows.map(normalizeProcessStepRow)
+    });
+  } catch (error) {
+    console.error("Get process steps error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process steps fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/process/next-input", authMiddleware, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "lotNo is required"
+      });
+    }
+
+    const context = await getNextProcessStepContext(connection, access.companyScope, lotNo);
+    return res.status(context.ok ? 200 : 400).json({
+      success: context.ok,
+      message: context.ok ? "Next process input resolved" : context.message,
+      lotNo,
+      processLot: context.processLot || null,
+      openStep: context.openStep || null,
+      lastCompletedStep: context.lastCompletedStep || null,
+      nextStepNo: context.nextStepNo || null,
+      inputWeight: context.inputWeight ?? null,
+      source: context.source || ""
+    });
+  } catch (error) {
+    console.error("Get process next input error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process next input fetch failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const userId = access.actingUserId;
+    const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const processName = String(req.body.processName || req.body.process_name || "").trim();
+    const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
+    const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
+    const karigarName = normalizeKarigarName(req.body.karigarName || req.body.karigar_name || "");
+    const outputProvided = req.body.outputWeight !== undefined || req.body.output_weight !== undefined;
+    const outputWeight = outputProvided ? toNumber(req.body.outputWeight ?? req.body.output_weight) : 0;
+    const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
+    const requestedStatus = normalizeProcessStepStatus(req.body.status || (outputProvided ? "COMPLETED" : "OPEN"));
+
+    if (!lotNo || !processName) {
+      return res.status(400).json({
+        success: false,
+        message: "Lot number and process name are required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await getNextProcessStepContext(connection, companyId, lotNo);
+    if (!context.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: context.message,
+        openStep: context.openStep || null
+      });
+    }
+
+    if (requestedStatus === "COMPLETED" && outputWeight > context.inputWeight) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output weight cannot be greater than input weight"
+      });
+    }
+
+    const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
+    const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
+    const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight : 0;
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_steps
+      (
+        company_id, process_lot_id, lot_no, step_no, process_name,
+        karigar_id, karigar_name, input_weight, output_weight, loss_weight,
+        loss_reason, status, started_at, completed_at, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+      `,
+      [
+        companyId,
+        context.processLot.id,
+        lotNo,
+        context.nextStepNo,
+        processName,
+        karigarId,
+        karigarName,
+        context.inputWeight,
+        finalOutputWeight,
+        lossWeight,
+        lossReason,
+        finalStatus,
+        finalStatus === "COMPLETED" ? new Date() : null,
+        userId
+      ]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: finalStatus === "COMPLETED" ? "Process step completed successfully" : "Process step saved as open",
+      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Save process step error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process step save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const stepId = Number(req.params.id || 0);
+    const outputWeight = toNumber(req.body.outputWeight ?? req.body.output_weight);
+    const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
+
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        message: "Process step id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [stepRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [stepId, access.companyScope]
+    );
+
+    if (!stepRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process step not found"
+      });
+    }
+
+    const step = normalizeProcessStepRow(stepRows[0]);
+    if (step.status !== "OPEN") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Only OPEN process steps can be completed"
+      });
+    }
+
+    if (outputWeight > step.input_weight) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output weight cannot be greater than input weight"
+      });
+    }
+
+    const lossWeight = step.input_weight - outputWeight;
+    await connection.query(
+      `
+      UPDATE process_steps
+      SET output_weight = ?,
+          loss_weight = ?,
+          loss_reason = ?,
+          status = 'COMPLETED',
+          completed_at = NOW()
+      WHERE id = ?
+      `,
+      [outputWeight, lossWeight, lossReason || step.loss_reason || "", stepId]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [stepId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Process step completed successfully",
+      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Complete process step error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process step completion failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/process/loss-summary", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || "");
+    const karigarId = Number(req.query.karigarId || req.query.karigar_id || 0);
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+    const params = [];
+    const whereParts = ["status = 'COMPLETED'"];
+
+    if (companyId !== null) {
+      whereParts.push("company_id = ?");
+      params.push(companyId);
+    }
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+    if (karigarId) {
+      whereParts.push("karigar_id = ?");
+      params.push(karigarId);
+    }
+    if (fromDate) {
+      whereParts.push("DATE(COALESCE(completed_at, created_at)) >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("DATE(COALESCE(completed_at, created_at)) <= ?");
+      params.push(toDate);
+    }
+
+    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+    const [lotSummary] = await pool.query(
+      `
+      SELECT lot_no, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+      FROM process_steps
+      ${whereClause}
+      GROUP BY lot_no
+      ORDER BY lot_no ASC
+      `,
+      params
+    );
+    const [karigarSummary] = await pool.query(
+      `
+      SELECT COALESCE(karigar_id, 0) AS karigar_id, COALESCE(NULLIF(karigar_name, ''), 'Unassigned') AS karigar_name,
+        COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+      FROM process_steps
+      ${whereClause}
+      GROUP BY COALESCE(karigar_id, 0), COALESCE(NULLIF(karigar_name, ''), 'Unassigned')
+      ORDER BY karigar_name ASC
+      `,
+      params
+    );
+    const [processSummary] = await pool.query(
+      `
+      SELECT process_name, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+      FROM process_steps
+      ${whereClause}
+      GROUP BY process_name
+      ORDER BY process_name ASC
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      lotSummary,
+      karigarSummary,
+      processSummary
+    });
+  } catch (error) {
+    console.error("Get process loss summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process loss summary fetch failed",
       error: getErrorDetail(error)
     });
   }
