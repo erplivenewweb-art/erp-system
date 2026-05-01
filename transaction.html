@@ -758,6 +758,11 @@
                 <tbody id="txnHistoryBody"></tbody>
               </table>
             </div>
+            <div id="txnPagination" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+              <button type="button" id="txnPrevBtn" onclick="changeTransactionPage(-1)">Previous</button>
+              <span id="txnPageInfo">Page 1</span>
+              <button type="button" id="txnNextBtn" onclick="changeTransactionPage(1)">Next</button>
+            </div>
           </div>
         </div>
       </section>
@@ -766,6 +771,7 @@
 
   <script>
     const API_BASE = window.ERP_API_BASE;
+    const TXN_PAGE_LIMIT = 100;
 
     function getLoggedInUser() {
       try {
@@ -857,6 +863,8 @@
     let currentLedgerSummary = null;
     let openSettlementInvoices = [];
     let recentReferenceData = [];
+    let txnCurrentPage = 1;
+    let txnHasNextPage = false;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1161,10 +1169,10 @@
       const oldValue = select.value || "";
       select.innerHTML = '<option value="">Keep as open / standalone entry</option>';
 
-      openSettlementInvoices.forEach((item) => {
+      select.innerHTML += openSettlementInvoices.map((item) => {
         const label = `${item.invoice_no || item.voucher_no || "Invoice"} | Open Rs ${Number(item.open_amount || 0).toFixed(2)} | ${item.voucher_date || ""}`;
-        select.innerHTML += `<option value="${Number(item.transaction_id)}">${escapeHtml(label)}</option>`;
-      });
+        return `<option value="${Number(item.transaction_id)}">${escapeHtml(label)}</option>`;
+      }).join("");
 
       if ([...select.options].some((option) => option.value === oldValue)) {
         select.value = oldValue;
@@ -1414,9 +1422,9 @@
       const oldValue = select.value || "";
       select.innerHTML = '<option value="">All</option>';
 
-      items.forEach(item => {
-        select.innerHTML += `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`;
-      });
+      select.innerHTML += items
+        .map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+        .join("");
 
       if ([...select.options].some(opt => opt.value === oldValue)) {
         select.value = oldValue;
@@ -1447,12 +1455,13 @@
       select.innerHTML = '<option value="">Select Party</option>';
 
       const selectedPartyType = String(document.getElementById("txnPartyType")?.value || "").trim();
-      transactionParties
+      select.innerHTML += transactionParties
         .filter((party) => matchesPartyTypeFilter(party.party_type, selectedPartyType))
-        .forEach((party) => {
-        const label = `${party.party_name || ""} (${formatPartyType(party.party_type)})`;
-        select.innerHTML += `<option value="${Number(party.id)}">${escapeHtml(label)}</option>`;
-      });
+        .map((party) => {
+          const label = `${party.party_name || ""} (${formatPartyType(party.party_type)})`;
+          return `<option value="${Number(party.id)}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
 
       if ([...select.options].some((opt) => opt.value === oldValue)) {
         select.value = oldValue;
@@ -1464,6 +1473,7 @@
     async function syncStockItemsFromServer() {
       try {
         const params = buildProtectedParams(true);
+        params.set("limit", "1000");
 
         const url = `${API_BASE}/getStock${params.toString() ? `?${params.toString()}` : ""}`;
         const res = await fetch(url, { cache: "no-store" });
@@ -1765,9 +1775,29 @@
       showToast("The delete API is not enabled yet.", "info");
     }
 
+    function updateTransactionPagination() {
+      const pageInfo = document.getElementById("txnPageInfo");
+      const prevBtn = document.getElementById("txnPrevBtn");
+      const nextBtn = document.getElementById("txnNextBtn");
+
+      if (pageInfo) pageInfo.textContent = `Page ${txnCurrentPage}`;
+      if (prevBtn) prevBtn.disabled = txnCurrentPage <= 1;
+      if (nextBtn) nextBtn.disabled = !txnHasNextPage;
+    }
+
+    async function changeTransactionPage(direction) {
+      const nextPage = txnCurrentPage + Number(direction || 0);
+      if (nextPage < 1) return;
+      if (direction > 0 && !txnHasNextPage) return;
+      txnCurrentPage = nextPage;
+      await loadTransactionHistory();
+    }
+
     async function loadTransactionHistory() {
       try {
         const params = buildProtectedParams(true);
+        params.set("limit", String(TXN_PAGE_LIMIT));
+        params.set("offset", String((txnCurrentPage - 1) * TXN_PAGE_LIMIT));
         const res = await fetch(`${API_BASE}/transaction/transactions?${params.toString()}`, { cache: "no-store" });
         const data = await res.json();
         if (!data.success) {
@@ -1775,13 +1805,16 @@
         }
 
         transactionData = Array.isArray(data.transactions) ? data.transactions : [];
+        txnHasNextPage = transactionData.length === TXN_PAGE_LIMIT;
       } catch (error) {
         console.log("Transaction history load error:", error);
         transactionData = [];
+        txnHasNextPage = false;
         showToast("Transaction history load failed", "error");
       }
 
       renderTransactionHistory();
+      updateTransactionPagination();
       renderQuickReferenceButtons();
       renderLiveSummaryPanel();
     }
@@ -1797,12 +1830,13 @@
         return;
       }
 
-      transactionData
+      tbody.innerHTML = transactionData
         .slice()
         .sort((a, b) => Number(b.id) - Number(a.id))
-        .forEach(item => {
+        .slice(0, 500)
+        .map(item => {
           const canReuse = canReuseTransaction(item);
-          tbody.innerHTML += `
+          return `
             <tr>
               <td>${escapeHtml(item.voucher_date || "")}</td>
               <td>${escapeHtml(item.voucher_time || "")}</td>
@@ -1826,12 +1860,13 @@
               </td>
             </tr>
           `;
-        });
+        }).join("");
     }
 
     async function loadLedgerSummary() {
       try {
         const params = buildProtectedParams(true);
+        params.set("limit", "500");
         const [cashRes, metalRes] = await Promise.all([
           fetch(`${API_BASE}/transaction/cash-ledger?${params.toString()}`, { cache: "no-store" }),
           fetch(`${API_BASE}/transaction/metal-ledger?${params.toString()}`, { cache: "no-store" })
@@ -1969,10 +2004,10 @@
         return;
       }
 
-      partyIds.forEach((partyId) => {
+      tbody.innerHTML = partyIds.map((partyId) => {
         const row = ledgerMap[partyId];
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${escapeHtml(row.name)}</td>
             <td>${row.goldReceivable > 0 ? `<span class="ledger-badge badge-gray">${row.goldReceivable.toFixed(3)} gm</span>` : "None"}</td>
@@ -1983,7 +2018,7 @@
             <td>${row.cashPayable > 0 ? `<span class="ledger-badge badge-red">${row.cashPayable.toFixed(2)} Rs</span>` : "None"}</td>
           </tr>
         `;
-      });
+      }).join("");
     }
 
     document.getElementById("txnQty")?.addEventListener("input", calculateTxnAmount);

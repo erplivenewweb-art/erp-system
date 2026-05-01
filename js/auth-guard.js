@@ -13,7 +13,25 @@
   function getConfiguredBaseOverride() {
     const metaBase = document.querySelector('meta[name="erp-api-base"]')?.content;
     const windowBase = window.ERP_API_BASE_OVERRIDE;
-    return trimTrailingSlash(metaBase || windowBase || "");
+    const overrideBase = trimTrailingSlash(metaBase || windowBase || "");
+
+    if (!overrideBase) return "";
+
+    try {
+      const overrideUrl = new URL(overrideBase);
+      const pageHost = String(window.location.hostname || "").toLowerCase();
+      const overrideHost = overrideUrl.hostname.toLowerCase();
+      const isProductionPage = window.location.protocol === "https:" && pageHost !== "localhost" && pageHost !== "127.0.0.1";
+      const isLocalOverride = overrideHost === "localhost" || overrideHost === "127.0.0.1";
+
+      if (isProductionPage && isLocalOverride) {
+        return "";
+      }
+    } catch (_) {
+      return "";
+    }
+
+    return overrideBase;
   }
 
   function getApiBase() {

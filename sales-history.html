@@ -380,6 +380,11 @@
               <tbody id="salesHistoryBody"></tbody>
             </table>
           </div>
+          <div id="salesPagination" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+            <button type="button" id="salesPrevBtn" onclick="changeSalesPage(-1)">Previous</button>
+            <span id="salesPageInfo">Page 1</span>
+            <button type="button" id="salesNextBtn" onclick="changeSalesPage(1)">Next</button>
+          </div>
         </div>
       </section>
     </main>
@@ -485,9 +490,12 @@
 
   <script>
     const API_BASE = window.ERP_API_BASE;
+    const SALES_PAGE_LIMIT = 100;
     let salesHistoryData = [];
     let activeSalePaymentRecord = null;
     let currentSalesViewMode = "ACTIVE";
+    let salesCurrentPage = 1;
+    let salesHasNextPage = false;
 
     function getLoggedInUser() {
       try {
@@ -711,6 +719,24 @@
       });
     }
 
+    function updateSalesPagination() {
+      const pageInfo = document.getElementById("salesPageInfo");
+      const prevBtn = document.getElementById("salesPrevBtn");
+      const nextBtn = document.getElementById("salesNextBtn");
+
+      if (pageInfo) pageInfo.textContent = `Page ${salesCurrentPage}`;
+      if (prevBtn) prevBtn.disabled = salesCurrentPage <= 1;
+      if (nextBtn) nextBtn.disabled = !salesHasNextPage;
+    }
+
+    async function changeSalesPage(direction) {
+      const nextPage = salesCurrentPage + Number(direction || 0);
+      if (nextPage < 1) return;
+      if (direction > 0 && !salesHasNextPage) return;
+      salesCurrentPage = nextPage;
+      await loadSalesHistory();
+    }
+
     async function loadSalesHistory() {
       try {
         const companyId = getCurrentCompanyId();
@@ -729,16 +755,23 @@
           params.set("deleted", "1");
         }
 
+        params.set("limit", String(SALES_PAGE_LIMIT));
+        params.set("offset", String((salesCurrentPage - 1) * SALES_PAGE_LIMIT));
+
         const url = `${API_BASE}/sales-history${params.toString() ? `?${params.toString()}` : ""}`;
         const response = await fetch(url, { cache: "no-store" });
         const data = await response.json();
 
         salesHistoryData = filterCompanySales(Array.isArray(data) ? data : []);
+        salesHasNextPage = salesHistoryData.length === SALES_PAGE_LIMIT;
         renderSalesHistory();
+        updateSalesPagination();
       } catch (error) {
         console.error("Sales history load error", error);
         salesHistoryData = [];
+        salesHasNextPage = false;
         renderSalesHistory();
+        updateSalesPagination();
       }
     }
 
@@ -808,6 +841,7 @@
 
     async function handleSalesViewModeChange() {
       currentSalesViewMode = String(document.getElementById("salesViewMode")?.value || "ACTIVE").toUpperCase();
+      salesCurrentPage = 1;
       updateSalesHistoryTableHead();
       await loadSalesHistory();
     }
@@ -859,7 +893,7 @@
         return;
       }
 
-      filtered.forEach((item, index) => {
+      const rowsHtml = filtered.slice(0, 500).map((item, index) => {
         const invoiceNo = item.invoice_number || item.invoiceNumber || "";
         const customer = item.customer_name || item.customerName || "";
         const gst = item.gst_number || item.gstNumber || "";
@@ -878,7 +912,7 @@
         const deleteReason = item.delete_reason || item.deleteReason || "-";
 
         if (isDeletedSalesView()) {
-          tbody.innerHTML += `
+          return `
             <tr>
               <td>${item.id || index + 1}</td>
               <td>${invoiceNo}</td>
@@ -904,10 +938,9 @@
               </td>
             </tr>
           `;
-          return;
         }
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${item.id || index + 1}</td>
             <td>${invoiceNo}</td>
@@ -965,7 +998,9 @@
             </td>
           </tr>
         `;
-      });
+      }).join("");
+
+      tbody.innerHTML = rowsHtml;
 
       renderSalesSummary(filtered);
     }
@@ -1035,8 +1070,7 @@
             </tr>
           `;
         } else {
-          items.forEach((item, index) => {
-            tbody.innerHTML += `
+          tbody.innerHTML = items.map((item, index) => `
               <tr>
                 <td>${index + 1}</td>
                 <td>${item.product_name || item.productName || ""}</td>
@@ -1046,8 +1080,7 @@
                 <td>${item.barcode || ""}</td>
                 <td>${item.lot_number || item.lot || ""}</td>
               </tr>
-            `;
-          });
+            `).join("");
         }
 
         document.getElementById("saleItemsModal").classList.add("show");

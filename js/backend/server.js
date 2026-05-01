@@ -20,6 +20,7 @@ const nodemailer = require("nodemailer");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+app.set("trust proxy", 1);
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");
 const FRONTEND_INDEX_FILE = path.join(FRONTEND_ROOT, "index.html");
 const FRONTEND_CSS_DIR = path.join(FRONTEND_ROOT, "css");
@@ -55,22 +56,39 @@ const ALLOWED_APP_ORIGINS = new Set(
     ...DEFAULT_ALLOWED_APP_ORIGINS,
     ...String(process.env.APP_ORIGIN || "")
       .split(",")
-      .map((origin) => origin.trim())
+      .map((origin) => origin.trim().replace(/\/+$/, ""))
   ].filter(Boolean)
 );
+
+function isAllowedCorsOrigin(origin = "") {
+  const cleanOrigin = String(origin || "").trim().replace(/\/+$/, "");
+  if (!cleanOrigin) return true;
+  if (ALLOWED_APP_ORIGINS.has(cleanOrigin)) return true;
+
+  try {
+    const url = new URL(cleanOrigin);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return !isProductionRuntime();
+    }
+    return url.protocol === "https:" && url.hostname.endsWith(".up.railway.app");
+  } catch (_) {
+    return false;
+  }
+}
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin) return callback(null, true);
-
-      if (ALLOWED_APP_ORIGINS.has(origin)) {
+      if (isAllowedCorsOrigin(origin)) {
         return callback(null, true);
       }
 
       return callback(new Error("CORS origin not allowed"));
     },
-    credentials: true
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   })
 );
 app.use(express.json({ limit: "10mb" }));
@@ -1857,6 +1875,70 @@ async function addColumnIfMissing(tableName, columnName, definitionSql) {
   }
 }
 
+async function indexExists(tableName, indexName) {
+  const [rows] = await pool.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = ?
+      AND index_name = ?
+    `,
+    [tableName, indexName]
+  );
+  return Number(rows[0]?.total || 0) > 0;
+}
+
+async function addIndexIfMissing(tableName, indexName, definitionSql) {
+  const exists = await indexExists(tableName, indexName);
+  if (!exists) {
+    await pool.query(`ALTER TABLE ${tableName} ADD INDEX ${indexName} ${definitionSql}`);
+    console.log(`Index added: ${tableName}.${indexName}`);
+  }
+}
+
+function getPagination(req, { defaultLimit = 100, maxLimit = 1000 } = {}) {
+  const requestedLimit = Number(req.query.limit ?? req.query.pageSize ?? defaultLimit);
+  const requestedOffset = Number(req.query.offset ?? 0);
+  const requestedPage = Number(req.query.page ?? 0);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(0, Math.min(Math.trunc(requestedLimit), maxLimit))
+    : 0;
+  const pageOffset = limit && Number.isFinite(requestedPage) && requestedPage > 1
+    ? (Math.trunc(requestedPage) - 1) * limit
+    : 0;
+  const directOffset = Number.isFinite(requestedOffset) ? Math.max(0, Math.trunc(requestedOffset)) : 0;
+
+  return {
+    limit,
+    offset: pageOffset || directOffset,
+    sql: limit ? `LIMIT ${limit} OFFSET ${pageOffset || directOffset}` : ""
+  };
+}
+
+function setPaginationHeaders(res, pagination) {
+  if (!pagination?.limit) return;
+  res.setHeader("X-ERP-Limit", String(pagination.limit));
+  res.setHeader("X-ERP-Offset", String(pagination.offset || 0));
+}
+
+function getAuthCookieOptions() {
+  const production = isProductionRuntime();
+  return {
+    httpOnly: true,
+    secure: production,
+    sameSite: production ? "None" : "Lax",
+    path: "/",
+    maxAge: 12 * 60 * 60 * 1000
+  };
+}
+
+function getClearAuthCookieOptions() {
+  const options = getAuthCookieOptions();
+  delete options.maxAge;
+  return options;
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -2748,6 +2830,56 @@ async function ensureSchema() {
     await addColumnIfMissing("otp_verifications", "consumed_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("otp_verifications", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("otp_verifications", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("stock")) {
+    await addIndexIfMissing("stock", "idx_stock_company_status", "(company_id, status)");
+    await addIndexIfMissing("stock", "idx_stock_company_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissing("stock", "idx_stock_company_created", "(company_id, created_at)");
+  }
+
+  if (await tableExists("sales_history")) {
+    await addIndexIfMissing("sales_history", "idx_sales_company_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissing("sales_history", "idx_sales_company_status", "(company_id, status)");
+    await addIndexIfMissing("sales_history", "idx_sales_company_created", "(company_id, created_at)");
+    await addIndexIfMissing("sales_history", "idx_sales_company_deleted", "(company_id, is_deleted, id)");
+  }
+
+  if (await tableExists("sales_items")) {
+    await addIndexIfMissing("sales_items", "idx_sales_items_sale", "(sale_id)");
+    await addIndexIfMissing("sales_items", "idx_sales_items_company_invoice", "(company_id, invoice_number)");
+  }
+
+  if (await tableExists("return_history")) {
+    await addIndexIfMissing("return_history", "idx_returns_company_created", "(company_id, created_at)");
+    await addIndexIfMissing("return_history", "idx_returns_company_date", "(company_id, return_date)");
+    await addIndexIfMissing("return_history", "idx_returns_company_invoice", "(company_id, invoice_number)");
+  }
+
+  if (await tableExists("transaction_master")) {
+    await addIndexIfMissing("transaction_master", "idx_txn_company_id", "(company_id, id)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_party", "(company_id, party_id)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_status", "(company_id, status)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_invoice", "(company_id, invoice_no)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_date", "(company_id, voucher_date)");
+    await addIndexIfMissing("transaction_master", "idx_txn_created", "(created_at)");
+  }
+
+  if (await tableExists("transaction_lines")) {
+    await addIndexIfMissing("transaction_lines", "idx_txn_lines_transaction", "(transaction_id)");
+  }
+
+  if (await tableExists("cash_ledger")) {
+    await addIndexIfMissing("cash_ledger", "idx_cash_company_party", "(company_id, party_id)");
+    await addIndexIfMissing("cash_ledger", "idx_cash_transaction", "(transaction_id)");
+    await addIndexIfMissing("cash_ledger", "idx_cash_company_date", "(company_id, entry_date)");
+  }
+
+  if (await tableExists("metal_ledger")) {
+    await addIndexIfMissing("metal_ledger", "idx_metal_company_party", "(company_id, party_id)");
+    await addIndexIfMissing("metal_ledger", "idx_metal_transaction", "(transaction_id)");
+    await addIndexIfMissing("metal_ledger", "idx_metal_company_date", "(company_id, entry_date)");
+    await addIndexIfMissing("metal_ledger", "idx_metal_company_type", "(company_id, metal_type)");
   }
 
   console.log("Schema ensured ✅");
@@ -4009,6 +4141,17 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       salesParams
     );
 
+    const [recentStock] = await pool.query(
+      `
+      SELECT barcode, product_name, lot_number, size, weight, status, company_id, created_at
+      FROM stock
+      ${stockWhere}
+      ORDER BY id DESC
+      LIMIT 8
+      `,
+      stockParams
+    );
+
     const returnSummary = await getReturnSummaryRows(companyId);
 
     return res.json({
@@ -4022,6 +4165,7 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       totalSales: Number(salesSummary[0]?.total_sales || 0),
       totalSalesAmount: Number(salesSummary[0]?.total_sales_amount || 0),
       recentInvoices,
+      recentStock,
       recentReturns: returnSummary.recentReturns
     });
   } catch (error) {
@@ -5360,6 +5504,7 @@ app.get("/getStock", authMiddleware, async (req, res) => {
     const companyId = access.companyScope;
     const whereClause = companyId !== null ? "WHERE company_id = ?" : "";
     const params = companyId !== null ? [companyId] : [];
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 2000 });
 
     const [rows] = await pool.query(
       `
@@ -5370,10 +5515,12 @@ app.get("/getStock", authMiddleware, async (req, res) => {
         CAST(COALESCE(lot_number, '0') AS UNSIGNED) ASC,
         CAST(COALESCE(serial, '0') AS UNSIGNED) ASC,
         id ASC
+      ${pagination.sql}
       `,
       params
     );
 
+    setPaginationHeaders(res, pagination);
     return res.json(rows);
   } catch (error) {
     console.error("Get stock error:", error);
@@ -6089,6 +6236,7 @@ app.get("/getReturns", authMiddleware, async (req, res) => {
     const companyId = access.companyScope;
     const whereClause = companyId !== null ? "WHERE rh.company_id = ?" : "";
     const params = companyId !== null ? [companyId] : [];
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     const [rows] = await pool.query(
       `
@@ -6101,13 +6249,18 @@ app.get("/getReturns", authMiddleware, async (req, res) => {
       LEFT JOIN users u ON u.id = rh.created_by
       ${whereClause}
       ORDER BY rh.id DESC
+      ${pagination.sql}
       `,
       params
     );
 
     return res.json({
       success: true,
-      returns: rows
+      returns: rows,
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
     });
   } catch (error) {
     console.error("Get returns error:", error);
@@ -8229,6 +8382,7 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 
     const companyId = access.companyScope;
     const showDeleted = String(req.query.deleted || "").trim() === "1";
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     const [sales] = await pool.query(
       `
@@ -8240,10 +8394,12 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
         ? `WHERE sh.company_id = ? AND COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`
         : `WHERE COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`}
       ORDER BY sh.id DESC
+      ${pagination.sql}
       `,
       companyId !== null ? [companyId] : []
     );
 
+    setPaginationHeaders(res, pagination);
     return res.json(sales);
   } catch (error) {
     console.error("Sales history error:", error);
@@ -9689,13 +9845,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
 
     const token = signAuthToken(user);
 
-    res.cookie(AUTH_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: isProductionRuntime(),
-      sameSite: "Lax",
-      path: "/",
-      maxAge: 12 * 60 * 60 * 1000
-    });
+    res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
     return res.json({
       success: true,
@@ -9725,12 +9875,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
 });
 
 app.post("/auth/logout", (_req, res) => {
-  res.clearCookie(AUTH_COOKIE_NAME, {
-    httpOnly: true,
-    secure: isProductionRuntime(),
-    sameSite: "Lax",
-    path: "/"
-  });
+  res.clearCookie(AUTH_COOKIE_NAME, getClearAuthCookieOptions());
 
   return res.json({
     success: true
@@ -10304,6 +10449,7 @@ app.get("/transaction/transactions", authMiddleware, async (req, res) => {
     const transactionType = normalizeTransactionType(req.query.transactionType || req.query.transaction_type);
     const params = [];
     const whereParts = [];
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     if (companyId !== null) {
       whereParts.push("tm.company_id = ?");
@@ -10340,13 +10486,18 @@ app.get("/transaction/transactions", authMiddleware, async (req, res) => {
       ${whereClause}
       GROUP BY tm.id
       ORDER BY tm.id DESC
+      ${pagination.sql}
       `,
       params
     );
 
     return res.json({
       success: true,
-      transactions: rows
+      transactions: rows,
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
     });
   } catch (error) {
     console.error("Get transactions error:", error);
@@ -10498,6 +10649,7 @@ app.get("/transaction/cash-ledger", authMiddleware, async (req, res) => {
     const partyId = Number(req.query.partyId || req.query.party_id || 0);
     const params = [];
     const whereParts = [];
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     if (companyId !== null) {
       whereParts.push("cl.company_id = ?");
@@ -10523,13 +10675,18 @@ app.get("/transaction/cash-ledger", authMiddleware, async (req, res) => {
       LEFT JOIN transaction_master tm ON tm.id = cl.transaction_id
       ${whereClause}
       ORDER BY cl.id DESC
+      ${pagination.sql}
       `,
       params
     );
 
     return res.json({
       success: true,
-      ledger: rows
+      ledger: rows,
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
     });
   } catch (error) {
     console.error("Get cash ledger error:", error);
@@ -10558,6 +10715,7 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
     const metalType = normalizeMetalType(req.query.metalType || req.query.metal_type);
     const params = [];
     const whereParts = [];
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     if (companyId !== null) {
       whereParts.push("ml.company_id = ?");
@@ -10588,13 +10746,18 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
       LEFT JOIN transaction_master tm ON tm.id = ml.transaction_id
       ${whereClause}
       ORDER BY ml.id DESC
+      ${pagination.sql}
       `,
       params
     );
 
     return res.json({
       success: true,
-      ledger: rows
+      ledger: rows,
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
     });
   } catch (error) {
     console.error("Get metal ledger error:", error);

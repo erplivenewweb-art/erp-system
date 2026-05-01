@@ -1055,6 +1055,7 @@
         const res = await fetch(loginUrl, {
           method: "POST",
           credentials: "include",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password })
         });

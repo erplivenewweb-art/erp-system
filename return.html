@@ -424,6 +424,11 @@
                 </tbody>
               </table>
             </div>
+            <div id="returnPagination" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+              <button type="button" id="returnPrevBtn" onclick="changeReturnPage(-1)">Previous</button>
+              <span id="returnPageInfo">Page 1</span>
+              <button type="button" id="returnNextBtn" onclick="changeReturnPage(1)">Next</button>
+            </div>
           </div>
         </div>
       </section>
@@ -432,7 +437,10 @@
 
   <script>
     const API_BASE = window.ERP_API_BASE;
+    const RETURN_PAGE_LIMIT = 100;
     let selectedReturnItem = null;
+    let returnCurrentPage = 1;
+    let returnHasNextPage = false;
 
     function getLoggedInUser() {
       try {
@@ -605,6 +613,7 @@
 
         if (isSuperAdmin()) {
           const stockParams = buildProtectedParams(false);
+          stockParams.set("limit", "1000");
           const stockUrl = `${API_BASE}/getStock${stockParams.toString() ? `?${stockParams.toString()}` : ""}`;
           const stockRes = await fetch(stockUrl, { cache: "no-store" });
           const stockData = await stockRes.json();
@@ -785,12 +794,12 @@
         return;
       }
 
-      rows.forEach((item) => {
+      tbody.innerHTML = rows.slice(0, 500).map((item) => {
         const type = safeText(item.return_type).toUpperCase();
         const badgeClass = type === "DAMAGED_RETURN" ? "damage" : "normal";
         const badgeLabel = type === "DAMAGED_RETURN" ? "DAMAGED_RETURN" : "RETURN_TO_STOCK";
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${safeText(item.return_date || item.created_at || "-")}</td>
             <td>${safeText(item.barcode || "-")}</td>
@@ -803,14 +812,35 @@
             <td>${safeText(item.return_reason || "-")}</td>
           </tr>
         `;
-      });
+      }).join("");
+    }
+
+    function updateReturnPagination() {
+      const pageInfo = document.getElementById("returnPageInfo");
+      const prevBtn = document.getElementById("returnPrevBtn");
+      const nextBtn = document.getElementById("returnNextBtn");
+
+      if (pageInfo) pageInfo.textContent = `Page ${returnCurrentPage}`;
+      if (prevBtn) prevBtn.disabled = returnCurrentPage <= 1;
+      if (nextBtn) nextBtn.disabled = !returnHasNextPage;
+    }
+
+    async function changeReturnPage(direction) {
+      const nextPage = returnCurrentPage + Number(direction || 0);
+      if (nextPage < 1) return;
+      if (direction > 0 && !returnHasNextPage) return;
+      returnCurrentPage = nextPage;
+      await loadReturnDashboard();
     }
 
     async function loadReturnDashboard() {
       try {
         const params = buildProtectedParams(!isSuperAdmin());
         const summaryUrl = `${API_BASE}/getReturnSummary${params.toString() ? `?${params.toString()}` : ""}`;
-        const historyUrl = `${API_BASE}/getReturns${params.toString() ? `?${params.toString()}` : ""}`;
+        const historyParams = new URLSearchParams(params);
+        historyParams.set("limit", String(RETURN_PAGE_LIMIT));
+        historyParams.set("offset", String((returnCurrentPage - 1) * RETURN_PAGE_LIMIT));
+        const historyUrl = `${API_BASE}/getReturns${historyParams.toString() ? `?${historyParams.toString()}` : ""}`;
 
         const [summaryRes, historyRes] = await Promise.all([
           fetch(summaryUrl, { cache: "no-store" }),
@@ -826,10 +856,16 @@
             ? historyData.returns
             : []
         );
+        returnHasNextPage =
+          Boolean(historyData && historyData.success && Array.isArray(historyData.returns)) &&
+          historyData.returns.length === RETURN_PAGE_LIMIT;
+        updateReturnPagination();
       } catch (error) {
         console.log("Return dashboard load error:", error);
         renderReturnSummary({});
         renderReturnHistory([]);
+        returnHasNextPage = false;
+        updateReturnPagination();
       }
     }
 

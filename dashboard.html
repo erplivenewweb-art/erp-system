@@ -788,8 +788,7 @@
         return;
       }
 
-      rows.forEach((row) => {
-        tbody.innerHTML += `
+      tbody.innerHTML = rows.map((row) => `
           <tr>
             <td>${row.lot}</td>
             <td>${row.total}</td>
@@ -798,8 +797,7 @@
             <td>${row.ret}</td>
             <td>${row.damage}</td>
           </tr>
-        `;
-      });
+        `).join("");
     }
 
     function renderSalesByLot() {
@@ -840,16 +838,14 @@
         return;
       }
 
-      rows.forEach((row) => {
-        tbody.innerHTML += `
+      tbody.innerHTML = rows.map((row) => `
           <tr>
             <td>${row.lot}</td>
             <td>${row.customer}</td>
             <td>${row.qty}</td>
             <td>${row.weight.toFixed(3)} g</td>
           </tr>
-        `;
-      });
+        `).join("");
     }
 
     function renderLowStockLots() {
@@ -893,23 +889,22 @@
         return;
       }
 
-      rows.forEach((row) => {
-        tbody.innerHTML += `
+      tbody.innerHTML = rows.map((row) => `
           <tr>
             <td>${row.lot}</td>
             <td>${row.product}</td>
             <td>${row.qty}</td>
             <td><span class="badge orange">LOW STOCK</span></td>
           </tr>
-        `;
-      });
+        `).join("");
     }
 
     function renderRecentInventory() {
       const tbody = document.getElementById("recentInventoryBody");
       tbody.innerHTML = "";
 
-      const rows = [...dashboardStockData]
+      const recentStock = Array.isArray(dashboardSalesData?.recentStock) ? dashboardSalesData.recentStock : [];
+      const rows = [...(recentStock.length ? recentStock : dashboardStockData)]
         .filter(item => getStatusType(item) !== "DELETED")
         .sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))
         .slice(0, 8);
@@ -919,7 +914,7 @@
         return;
       }
 
-      rows.forEach((item) => {
+      tbody.innerHTML = rows.map((item) => {
         const status = getStatusType(item);
         let badgeClass = "blue";
         if (status === "IN_STOCK") badgeClass = "green";
@@ -927,7 +922,7 @@
         if (status === "RETURN") badgeClass = "blue";
         if (status === "DAMAGE") badgeClass = "orange";
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${safeText(item.barcode || "-")}</td>
             <td>${safeText(item.product_name || item.productName || "-")}</td>
@@ -937,7 +932,7 @@
             <td><span class="badge ${badgeClass}">${status}</span></td>
           </tr>
         `;
-      });
+      }).join("");
     }
 
     function renderRecentSales() {
@@ -955,16 +950,14 @@
         return;
       }
 
-      recentInvoices.slice(0, 8).forEach((item) => {
-        tbody.innerHTML += `
+      tbody.innerHTML = recentInvoices.slice(0, 8).map((item) => `
           <tr>
             <td>${safeText(item.invoice_number || item.invoice_no || item.invoiceNumber || "-")}</td>
             <td>${safeText(item.customer_name || item.customerName || "-")}</td>
             <td>${formatCurrency(item.total_amount || item.total || 0)}</td>
             <td>${safeText(item.invoice_date || item.date || item.created_at || "-")}</td>
           </tr>
-        `;
-      });
+        `).join("");
     }
 
     async function loadDashboardData(force = false) {
@@ -992,50 +985,29 @@
           returnParams.set("companyId", String(companyId));
         }
 
+        stockParams.set("limit", "300");
+
         const stockUrl = `${API_BASE}/getStock${stockParams.toString() ? `?${stockParams.toString()}` : ""}`;
         const salesUrl = `${API_BASE}/api/dashboard${salesParams.toString() ? `?${salesParams.toString()}` : ""}`;
-        const returnUrl = `${API_BASE}/getReturns${returnParams.toString() ? `?${returnParams.toString()}` : ""}`;
         const returnSummaryUrl = `${API_BASE}/getReturnSummary${returnParams.toString() ? `?${returnParams.toString()}` : ""}`;
 
-        const stockRes = await fetch(stockUrl, { cache: "no-store" });
-        if (!stockRes.ok) {
-          throw new Error("Stock fetch failed");
-        }
-        const stockData = await stockRes.json();
-        dashboardStockData = filterCompanyItems(Array.isArray(stockData) ? stockData : []);
-
-        let inStock = 0;
-        let sold = 0;
-        let totalWeight = 0;
-
-        dashboardStockData.forEach((item) => {
-          const status = getStatusType(item);
-          totalWeight += Number(item.weight || 0);
-
-          if (status === "IN_STOCK") inStock += 1;
-          else if (status === "SOLD") sold += 1;
-        });
-
-        document.getElementById("inStockCount").textContent = inStock;
-        document.getElementById("soldCount").textContent = sold;
-        document.getElementById("totalWeightTop").textContent = totalWeight.toFixed(3) + " g";
-
-        const [salesResult, returnsResult, returnSummaryResult] = await Promise.allSettled([
+        const [stockResult, salesResult, returnSummaryResult] = await Promise.allSettled([
+            fetch(stockUrl, { cache: "no-store" }),
             fetch(salesUrl, { cache: "no-store" }),
-            fetch(returnUrl, { cache: "no-store" }),
             fetch(returnSummaryUrl, { cache: "no-store" })
           ]);
+
+        if (stockResult.status === "fulfilled" && stockResult.value.ok) {
+          const stockData = await stockResult.value.json();
+          dashboardStockData = filterCompanyItems(Array.isArray(stockData) ? stockData : []);
+        } else {
+          dashboardStockData = [];
+        }
 
         let salesData = null;
         if (salesResult.status === "fulfilled" && salesResult.value.ok) {
           const parsedSales = await salesResult.value.json();
           salesData = parsedSales && parsedSales.success ? parsedSales : null;
-        }
-
-        let returnsData = null;
-        if (returnsResult.status === "fulfilled" && returnsResult.value.ok) {
-          const parsedReturns = await returnsResult.value.json();
-          returnsData = parsedReturns && parsedReturns.success ? parsedReturns : null;
         }
 
         let returnSummaryData = null;
@@ -1046,10 +1018,13 @@
 
         dashboardSalesData = salesData;
         dashboardReturnData =
-          returnsData && Array.isArray(returnsData.returns)
-            ? filterCompanyItems(returnsData.returns)
+          returnSummaryData && Array.isArray(returnSummaryData.recentReturns)
+            ? filterCompanyItems(returnSummaryData.recentReturns)
             : [];
 
+        document.getElementById("inStockCount").textContent = Number(salesData?.availableItems || 0);
+        document.getElementById("soldCount").textContent = Number(salesData?.soldItems || 0);
+        document.getElementById("totalWeightTop").textContent = Number(salesData?.totalWeight || 0).toFixed(3) + " g";
         document.getElementById("totalSalesAmountCard").textContent = formatCurrency(salesData?.totalSalesAmount || 0);
         document.getElementById("totalReturnCount").textContent = String(
           Number(returnSummaryData?.totalReturns || 0)
@@ -1103,7 +1078,7 @@
         if (!document.hidden) {
           loadDashboardData();
         }
-      }, 15000);
+      }, 60000);
     }
 
     window.addEventListener("load", function () {

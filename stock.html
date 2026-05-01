@@ -401,6 +401,11 @@
                 <tbody id="stockTableBody"></tbody>
               </table>
             </div>
+            <div id="stockPagination" style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-top:12px; flex-wrap:wrap;">
+              <button type="button" id="stockPrevBtn" onclick="changeStockPage(-1)">Previous</button>
+              <span id="stockPageInfo">Page 1</span>
+              <button type="button" id="stockNextBtn" onclick="changeStockPage(1)">Next</button>
+            </div>
           </div>
         </div>
       </section>
@@ -409,11 +414,14 @@
 
   <script>
     const API_BASE = window.ERP_API_BASE;
+    const STOCK_PAGE_LIMIT = 100;
 
     let stockItems = [];
     let filteredStockItems = [];
     let currentLotItems = [];
     let isViewingLotItems = false;
+    let stockCurrentPage = 1;
+    let stockHasNextPage = false;
 
     function getLoggedInUser() {
       try {
@@ -613,6 +621,24 @@
       }
     }
 
+    function updateStockPagination() {
+      const pageInfo = document.getElementById("stockPageInfo");
+      const prevBtn = document.getElementById("stockPrevBtn");
+      const nextBtn = document.getElementById("stockNextBtn");
+
+      if (pageInfo) pageInfo.textContent = `Page ${stockCurrentPage}`;
+      if (prevBtn) prevBtn.disabled = stockCurrentPage <= 1;
+      if (nextBtn) nextBtn.disabled = !stockHasNextPage;
+    }
+
+    async function changeStockPage(direction) {
+      const nextPage = stockCurrentPage + Number(direction || 0);
+      if (nextPage < 1) return;
+      if (direction > 0 && !stockHasNextPage) return;
+      stockCurrentPage = nextPage;
+      await loadStockData();
+    }
+
     async function loadStockData() {
       try {
         const companyId = getCurrentCompanyId();
@@ -627,6 +653,9 @@
           params.set("companyId", String(companyId));
         }
 
+        params.set("limit", String(STOCK_PAGE_LIMIT));
+        params.set("offset", String((stockCurrentPage - 1) * STOCK_PAGE_LIMIT));
+
         const url = `${API_BASE}/getStock${params.toString() ? `?${params.toString()}` : ""}`;
 
         const res = await fetch(url, { cache: "no-store" });
@@ -634,15 +663,19 @@
 
         stockItems = filterCompanyItems(Array.isArray(data) ? data : []);
         filteredStockItems = [...stockItems];
+        stockHasNextPage = stockItems.length === STOCK_PAGE_LIMIT;
 
         hideSearchSummary();
         hideLotSummary();
         renderLotWiseTable(stockItems, "Lot Wise Stock Table");
+        updateStockPagination();
       } catch (error) {
         console.log("Stock load error:", error);
         stockItems = [];
         filteredStockItems = [];
+        stockHasNextPage = false;
         renderLotWiseTable([], "Lot Wise Stock Table");
+        updateStockPagination();
       }
     }
 
@@ -812,10 +845,10 @@
 
       const groupedLots = groupItemsByLot(items);
 
-      groupedLots.forEach((group) => {
+      body.innerHTML = groupedLots.map((group) => {
         const safeLot = String(group.lot).replace(/'/g, "\\'");
 
-        body.innerHTML += `
+        return `
           <div class="lot-summary-card">
             <div class="lot-card-head">
               <div class="lot-icon">
@@ -854,7 +887,7 @@
             </div>
           </div>
         `;
-      });
+      }).join("");
     }
 
     function showLotItems(lot) {
@@ -954,10 +987,10 @@
 
       const groupedLots = groupItemsByLot(items);
 
-      groupedLots.forEach((group) => {
+      tbody.innerHTML = groupedLots.map((group) => {
         const safeLot = String(group.lot).replace(/'/g, "\\'");
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${escapeHtml(group.lot)}</td>
             <td>${escapeHtml(group.sizes || "-")}</td>
@@ -968,7 +1001,7 @@
             <td><button class="view-btn" type="button" onclick="showLotItems('${safeLot}')">View</button></td>
           </tr>
         `;
-      });
+      }).join("");
     }
 
     function renderItemTable(items, title) {
@@ -1001,11 +1034,11 @@
         return;
       }
 
-      items.forEach((item) => {
+      tbody.innerHTML = items.slice(0, 1000).map((item) => {
         const status = getItemStatus(item);
         const barcode = String(item.barcode || "").trim();
 
-        tbody.innerHTML += `
+        return `
           <tr>
             <td>${escapeHtml(getItemSerial(item))}</td>
             <td>${escapeHtml(barcode)}</td>
@@ -1027,7 +1060,7 @@
             </td>
           </tr>
         `;
-      });
+      }).join("");
     }
 
     async function deleteStockItem(barcode, itemCompanyId, btnEl) {
