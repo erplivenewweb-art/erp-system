@@ -276,25 +276,44 @@
               <p>Select a saved lot to auto-load the next process input weight.</p>
             </div>
 
-            <div class="table-wrap" style="margin-top:12px;">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Step</th>
-                    <th>Process</th>
-                    <th>Karigar</th>
-                    <th>Input Wt</th>
-                    <th>Input Qty</th>
-                    <th>Output Wt</th>
-                    <th>Output Qty</th>
-                    <th>Loss Wt</th>
-                    <th>Loss Qty</th>
-                    <th>Status</th>
-                    <th>Completed</th>
-                  </tr>
-                </thead>
-                <tbody id="processStepTableBody"></tbody>
-              </table>
+            <div class="process-two-col">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Step</th>
+                      <th>Process</th>
+                      <th>Karigar</th>
+                      <th>Input Wt</th>
+                      <th>Input Qty</th>
+                      <th>Output Wt</th>
+                      <th>Output Qty</th>
+                      <th>Loss Wt</th>
+                      <th>Loss Qty</th>
+                      <th>Status</th>
+                      <th>Completed</th>
+                    </tr>
+                  </thead>
+                  <tbody id="processStepTableBody"></tbody>
+                </table>
+              </div>
+
+              <div>
+                <h3>Process-wise Loss Summary</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Process</th>
+                        <th>Steps</th>
+                        <th>Total Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processNameSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -408,23 +427,6 @@
               </div>
 
               <div class="sub-card" style="margin-top:16px;">
-                <h3>Process-wise Loss Summary</h3>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Process</th>
-                        <th>Steps</th>
-                        <th>Total Loss</th>
-                        <th>Qty Loss</th>
-                      </tr>
-                    </thead>
-                    <tbody id="processNameSummaryBody"></tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div class="sub-card" style="margin-top:16px;">
                 <h3>Karigar-wise Process Loss</h3>
                 <div class="table-wrap">
                   <table>
@@ -525,6 +527,7 @@
       karigarSummary: [],
       processSummary: []
     };
+    let processLotLoadTimer = null;
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -894,7 +897,7 @@
         const balance = Number(lot.finalWeight || 0) - used;
 
         tbody.innerHTML += `
-          <tr>
+          <tr onclick="selectProcessLotForSteps('${encodeURIComponent(lot.lotNo || "")}')" style="cursor:pointer;">
             <td>${lot.lotNo || ""}</td>
             <td>${Number(lot.rawWeight || 0).toFixed(3)}</td>
             <td>${Number(lot.totalKhadiCount || 1)}</td>
@@ -1058,9 +1061,32 @@
 
     async function loadProcessStepContext() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      if (!lotNo) {
+        processStepData = [];
+        currentOpenProcessStep = null;
+        renderProcessStepTable();
+        renderProcessLossSummary();
+        await loadNextProcessInput("");
+        return;
+      }
+
       await loadProcessSteps(lotNo);
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
+    }
+
+    function scheduleProcessStepContextLoad() {
+      clearTimeout(processLotLoadTimer);
+      processLotLoadTimer = setTimeout(() => {
+        loadProcessStepContext();
+      }, 350);
+    }
+
+    async function selectProcessLotForSteps(encodedLotNo) {
+      const lotNo = decodeURIComponent(String(encodedLotNo || ""));
+      const input = document.getElementById("stepLotNo");
+      if (input) input.value = lotNo;
+      await loadProcessStepContext();
     }
 
     async function saveOrCompleteProcessStep() {
@@ -1223,7 +1249,8 @@
 
     function renderLiveProcessSummary() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
-      const completedSteps = processStepData.filter((step) => step.status === "COMPLETED");
+      const activeSteps = processStepData.filter((step) => !lotNo || step.lotNo === lotNo);
+      const completedSteps = activeSteps.filter((step) => step.status === "COMPLETED");
       const latestStep = completedSteps.length ? completedSteps[completedSteps.length - 1] : null;
       const firstStep = completedSteps.length ? completedSteps[0] : null;
       const totalInputWeight = firstStep ? firstStep.inputWeight : 0;
@@ -1432,7 +1459,8 @@
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
-    document.getElementById("stepLotNo")?.addEventListener("input", renderLiveProcessSummary);
+    document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
+    document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);
