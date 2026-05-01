@@ -103,6 +103,73 @@
           <h2>Process</h2>
           <p>Manage lots, raw weight, loss, karigar work, and process summaries here.</p>
 
+          <div class="sub-card" id="processLiveSummaryPanel" style="position:sticky; top:0; z-index:5; margin-top:16px;">
+            <h3>Live Process Summary</h3>
+            <div class="form-grid">
+              <div class="input-box">
+                <label>Current Lot No</label>
+                <input id="liveLotNo" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Total Input Weight</label>
+                <input id="liveTotalInputWeight" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Current Output Weight</label>
+                <input id="liveCurrentOutputWeight" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Total Weight Loss</label>
+                <input id="liveTotalWeightLoss" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Total Input Qty</label>
+                <input id="liveTotalInputQty" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Current Output Qty</label>
+                <input id="liveCurrentOutputQty" type="text" readonly />
+              </div>
+              <div class="input-box">
+                <label>Total Qty Loss</label>
+                <input id="liveTotalQtyLoss" type="text" readonly />
+              </div>
+            </div>
+
+            <div class="process-two-col">
+              <div>
+                <h3>Process-wise</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Process</th>
+                        <th>Wt Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="liveProcessSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div>
+                <h3>Karigar-wise</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Karigar</th>
+                        <th>Wt Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="liveKarigarSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="process-two-col">
             <div class="sub-card">
               <h3>Process Entry</h3>
@@ -116,6 +183,16 @@
                 <div class="input-box">
                   <label for="processRawWeight">Raw Weight</label>
                   <input id="processRawWeight" type="number" step="0.001" placeholder="Enter Raw Weight" />
+                </div>
+
+                <div class="input-box">
+                  <label for="processKhadiCount">Khadi Count</label>
+                  <input id="processKhadiCount" type="number" step="1" min="1" placeholder="Batch count" />
+                </div>
+
+                <div class="input-box">
+                  <label for="processExpectedQty">Expected Total Qty</label>
+                  <input id="processExpectedQty" type="number" step="1" placeholder="Optional" />
                 </div>
 
                 <div class="input-box">
@@ -158,6 +235,8 @@
                     <tr>
                       <th>Lot No</th>
                       <th>Raw Weight</th>
+                      <th>Khadi</th>
+                      <th>Expected Qty</th>
                       <th>Loss Weight</th>
                       <th>Final Weight</th>
                       <th>Used Weight</th>
@@ -453,6 +532,11 @@
     let karigarData = [];
     let processStepData = [];
     let currentOpenProcessStep = null;
+    let processLossSummaryData = {
+      lotSummary: [],
+      karigarSummary: [],
+      processSummary: []
+    };
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -585,6 +669,8 @@
         rawWeight: Number(item?.rawWeight ?? item?.raw_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
         finalWeight: Number(item?.finalWeight ?? item?.final_weight ?? 0),
+        totalKhadiCount: Number(item?.totalKhadiCount ?? item?.total_khadi_count ?? 1),
+        expectedTotalQty: Number(item?.expectedTotalQty ?? item?.expected_total_qty ?? 0),
         company_id: item?.company_id ?? getCurrentCompanyId(),
         savedAt: item?.savedAt ?? item?.saved_at ?? item?.updated_at ?? item?.created_at ?? ""
       };
@@ -703,6 +789,8 @@
       const finalWeight = raw - loss;
       const used = getUsedWeightByLot(lotNo);
       const balance = finalWeight - used;
+      const khadiCount = Number(document.getElementById("processKhadiCount")?.value || 1);
+      const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
 
       document.getElementById("processFinalWeight").value = finalWeight.toFixed(3);
       document.getElementById("processUsedWeight").value = used.toFixed(3);
@@ -740,7 +828,9 @@
             lotNo,
             rawWeight: raw,
             lossWeight: loss,
-            finalWeight
+            finalWeight,
+            totalKhadiCount: khadiCount || 1,
+            expectedTotalQty: expectedQty
           }))
         });
         const data = await res.json();
@@ -753,7 +843,9 @@
           lotNo,
           rawWeight: raw,
           lossWeight: loss,
-          finalWeight
+          finalWeight,
+          totalKhadiCount: khadiCount || 1,
+          expectedTotalQty: expectedQty
         });
         const existingIndex = lotData.findIndex(
           (item) => String(item.lotNo || "").trim() === lotObj.lotNo
@@ -782,6 +874,8 @@
     function clearProcessForm() {
       document.getElementById("processLotNo").value = "";
       document.getElementById("processRawWeight").value = "";
+      document.getElementById("processKhadiCount").value = "";
+      document.getElementById("processExpectedQty").value = "";
       document.getElementById("processLossWeight").value = "";
       document.getElementById("processFinalWeight").value = "";
       document.getElementById("processUsedWeight").value = "";
@@ -803,7 +897,7 @@
       tbody.innerHTML = "";
 
       if (!lotData.length) {
-        tbody.innerHTML = `<tr><td colspan="6">No process lots found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8">No process lots found</td></tr>`;
         return;
       }
 
@@ -815,6 +909,8 @@
           <tr>
             <td>${lot.lotNo || ""}</td>
             <td>${Number(lot.rawWeight || 0).toFixed(3)}</td>
+            <td>${Number(lot.totalKhadiCount || 1)}</td>
+            <td>${formatProcessQty(lot.expectedTotalQty || 0)}</td>
             <td>${Number(lot.lossWeight || 0).toFixed(3)}</td>
             <td>${Number(lot.finalWeight || 0).toFixed(3)}</td>
             <td>${used.toFixed(3)}</td>
@@ -921,6 +1017,7 @@
       }
 
       renderProcessStepTable();
+      renderLiveProcessSummary();
     }
 
     async function loadNextProcessInput(lotNo) {
@@ -1044,6 +1141,9 @@
         }
 
         showToast(data?.message || "Process step saved successfully", "success", "Saved");
+        if (Array.isArray(data?.warnings) && data.warnings.length) {
+          showToast(data.warnings.join(" | "), "warning", "Warning");
+        }
         clearProcessStepForm(false);
         document.getElementById("stepLotNo").value = lotNo;
         await loadProcessStepContext();
@@ -1067,6 +1167,7 @@
       document.getElementById("stepLossReason").value = "";
       currentOpenProcessStep = null;
       setProcessStepHint();
+      renderLiveProcessSummary();
     }
 
     function renderSummaryTable(bodyId, rows, emptyText, labelKey) {
@@ -1095,10 +1196,66 @@
       }).join("");
     }
 
+    function renderLiveMiniSummary(bodyId, rows, emptyText, labelKey) {
+      const tbody = document.getElementById(bodyId);
+      if (!tbody) return;
+
+      if (!Array.isArray(rows) || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3">${emptyText}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.slice(0, 5).map((row) => {
+        const label = row?.[labelKey] || row?.label || "Unassigned";
+        return `
+          <tr>
+            <td>${escapeHtml(label)}</td>
+            <td>${formatProcessWeight(row?.total_loss ?? row?.totalLoss)}</td>
+            <td>${formatProcessQty(row?.total_loss_qty ?? row?.totalLossQty)}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function setLiveValue(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    }
+
+    function renderLiveProcessSummary() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const completedSteps = processStepData.filter((step) => step.status === "COMPLETED");
+      const latestStep = completedSteps.length ? completedSteps[completedSteps.length - 1] : null;
+      const firstStep = completedSteps.length ? completedSteps[0] : null;
+      const totalInputWeight = firstStep ? firstStep.inputWeight : 0;
+      const currentOutputWeight = latestStep ? latestStep.outputWeight : 0;
+      const totalWeightLoss = totalInputWeight - currentOutputWeight;
+      const totalInputQty = firstStep ? firstStep.inputQty : 0;
+      const currentOutputQty = latestStep ? latestStep.outputQty : 0;
+      const totalQtyLoss = totalInputQty - currentOutputQty;
+
+      setLiveValue("liveLotNo", lotNo || "-");
+      setLiveValue("liveTotalInputWeight", formatProcessWeight(totalInputWeight));
+      setLiveValue("liveCurrentOutputWeight", formatProcessWeight(currentOutputWeight));
+      setLiveValue("liveTotalWeightLoss", formatProcessWeight(totalWeightLoss));
+      setLiveValue("liveTotalInputQty", formatProcessQty(totalInputQty));
+      setLiveValue("liveCurrentOutputQty", formatProcessQty(currentOutputQty));
+      setLiveValue("liveTotalQtyLoss", formatProcessQty(totalQtyLoss));
+
+      renderLiveMiniSummary("liveProcessSummaryBody", processLossSummaryData.processSummary || [], "No process loss", "process_name");
+      renderLiveMiniSummary("liveKarigarSummaryBody", processLossSummaryData.karigarSummary || [], "No karigar loss", "karigar_name");
+    }
+
     function renderProcessLossSummary(data = {}) {
+      processLossSummaryData = {
+        lotSummary: data.lotSummary || [],
+        karigarSummary: data.karigarSummary || [],
+        processSummary: data.processSummary || []
+      };
       renderSummaryTable("processLotSummaryBody", data.lotSummary || [], "No lot-wise process loss found", "lot_no");
       renderSummaryTable("processKarigarSummaryBody", data.karigarSummary || [], "No karigar-wise process loss found", "karigar_name");
       renderSummaryTable("processNameSummaryBody", data.processSummary || [], "No process-wise loss found", "process_name");
+      renderLiveProcessSummary();
     }
 
     async function loadProcessLossSummary() {
@@ -1276,6 +1433,7 @@
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("stepLotNo")?.addEventListener("input", renderLiveProcessSummary);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);

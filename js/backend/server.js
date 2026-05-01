@@ -635,7 +635,9 @@ function normalizeProcessLotRow(row) {
     ...row,
     raw_weight: toNumber(row.raw_weight),
     loss_weight: toNumber(row.loss_weight),
-    final_weight: toNumber(row.final_weight)
+    final_weight: toNumber(row.final_weight),
+    total_khadi_count: toNumber(row.total_khadi_count),
+    expected_total_qty: toNumber(row.expected_total_qty)
   };
 }
 
@@ -2424,6 +2426,8 @@ async function ensureSchema() {
       raw_weight DECIMAL(14,3) DEFAULT 0.000,
       loss_weight DECIMAL(14,3) DEFAULT 0.000,
       final_weight DECIMAL(14,3) DEFAULT 0.000,
+      total_khadi_count INT DEFAULT 1,
+      expected_total_qty DECIMAL(14,3) DEFAULT 0.000,
       saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2755,6 +2759,8 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "raw_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "final_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lots", "total_khadi_count", "INT DEFAULT 1");
+    await addColumnIfMissing("process_lots", "expected_total_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "saved_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_lots", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -5718,6 +5724,57 @@ async function getLastCompletedProcessStep(connection, companyId, lotNo) {
   return rows.length ? normalizeProcessStepRow(rows[0]) : null;
 }
 
+async function validateStickerAgainstProcessOutput(connection, companyId, lotNo, nextWeight, nextQty = 1, excludeStockId = null) {
+  const cleanLot = normalizeProcessLotNo(lotNo);
+  if (!cleanLot) return { ok: true };
+
+  const finalStep = await getLastCompletedProcessStep(connection, companyId, cleanLot);
+  if (!finalStep) return { ok: true };
+
+  const params = [companyId, cleanLot];
+  let excludeSql = "";
+  if (excludeStockId) {
+    excludeSql = "AND id <> ?";
+    params.push(Number(excludeStockId));
+  }
+
+  const [usageRows] = await connection.query(
+    `
+    SELECT COALESCE(SUM(weight), 0) AS used_weight,
+      COALESCE(SUM(qty), 0) AS used_qty
+    FROM stock
+    WHERE company_id = ?
+      AND lot_number = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+      ${excludeSql}
+    `,
+    params
+  );
+
+  const usedWeight = toNumber(usageRows[0]?.used_weight);
+  const usedQty = toNumber(usageRows[0]?.used_qty);
+  const totalWeight = usedWeight + toNumber(nextWeight);
+  const totalQty = usedQty + toNumber(nextQty);
+  const allowedWeight = toNumber(finalStep.output_weight);
+  const allowedQty = toNumber(finalStep.output_qty);
+
+  if (allowedWeight > 0 && totalWeight > allowedWeight + 0.0005) {
+    return {
+      ok: false,
+      message: `Sticker weight exceeds final process output for lot ${cleanLot}. Allowed ${allowedWeight.toFixed(3)}g, attempted ${totalWeight.toFixed(3)}g.`
+    };
+  }
+
+  if (allowedQty > 0 && totalQty > allowedQty + 0.0005) {
+    return {
+      ok: false,
+      message: `Sticker quantity exceeds final process output for lot ${cleanLot}. Allowed ${allowedQty}, attempted ${totalQty}.`
+    };
+  }
+
+  return { ok: true };
+}
+
 async function getNextProcessStepContext(connection, companyId, lotNo, excludeStepId = null) {
   const processLot = await getProcessLotForSteps(connection, companyId, lotNo);
   if (!processLot) {
@@ -5754,7 +5811,7 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     lastCompletedStep,
     nextStepNo,
     inputWeight: lastCompletedStep ? toNumber(lastCompletedStep.output_weight) : toNumber(processLot.raw_weight),
-    inputQty: lastCompletedStep ? toNumber(lastCompletedStep.output_qty) : 0,
+    inputQty: lastCompletedStep ? toNumber(lastCompletedStep.output_qty) : toNumber(processLot.expected_total_qty),
     source: lastCompletedStep ? "PREVIOUS_PROCESS_OUTPUT" : "PROCESS_LOT_RAW_WEIGHT"
   };
 }
@@ -5915,7 +5972,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    const inputQty = context.lastCompletedStep ? context.inputQty : requestedInputQty;
+    const inputQty = context.lastCompletedStep ? context.inputQty : (inputQtyProvided ? requestedInputQty : context.inputQty);
     if (requestedStatus === "COMPLETED" && inputQty > 0 && !outputQtyProvided) {
       await connection.rollback();
       return res.status(400).json({
@@ -5937,6 +5994,10 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight : 0;
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
+    const warnings = [];
+    if (finalStatus === "COMPLETED" && inputQty > 0 && (lossQty / inputQty) > 0.05) {
+      warnings.push("Quantity loss is above 5% for this process step");
+    }
 
     const [insertResult] = await connection.query(
       `
@@ -5984,7 +6045,8 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     return res.json({
       success: true,
       message: finalStatus === "COMPLETED" ? "Process step completed successfully" : "Process step saved as open",
-      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null
+      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null,
+      warnings
     });
   } catch (error) {
     if (connection) await connection.rollback();
@@ -6082,6 +6144,11 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
 
     const lossWeight = step.input_weight - outputWeight;
     const lossQty = step.input_qty - outputQty;
+    const warnings = [];
+    if (step.input_qty > 0 && (lossQty / step.input_qty) > 0.05) {
+      warnings.push("Quantity loss is above 5% for this process step");
+    }
+
     await connection.query(
       `
       UPDATE process_steps
@@ -6112,7 +6179,8 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     return res.json({
       success: true,
       message: "Process step completed successfully",
-      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null
+      step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null,
+      warnings
     });
   } catch (error) {
     if (connection) await connection.rollback();
@@ -6249,6 +6317,8 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     const rawWeight = toNumber(req.body.rawWeight ?? req.body.raw_weight);
     const lossWeight = toNumber(req.body.lossWeight ?? req.body.loss_weight);
     const finalWeight = toNumber(req.body.finalWeight ?? req.body.final_weight, rawWeight - lossWeight);
+    const totalKhadiCount = Math.max(1, Math.floor(toNumber(req.body.totalKhadiCount ?? req.body.total_khadi_count, 1)));
+    const expectedTotalQty = toNumber(req.body.expectedTotalQty ?? req.body.expected_total_qty);
 
     if (!lotNo) {
       return res.status(400).json({
@@ -6280,20 +6350,22 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
         SET raw_weight = ?,
             loss_weight = ?,
             final_weight = ?,
+            total_khadi_count = ?,
+            expected_total_qty = ?,
             saved_at = NOW(),
             created_by = ?
         WHERE id = ?
         `,
-        [rawWeight, lossWeight, finalWeight, userId, processLotId]
+        [rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, userId, processLotId]
       );
     } else {
       const [insertResult] = await connection.query(
         `
         INSERT INTO process_lots
-        (company_id, lot_no, raw_weight, loss_weight, final_weight, saved_at, created_by)
-        VALUES (?, ?, ?, ?, ?, NOW(), ?)
+        (company_id, lot_no, raw_weight, loss_weight, final_weight, total_khadi_count, expected_total_qty, saved_at, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)
         `,
-        [companyId, lotNo, rawWeight, lossWeight, finalWeight, userId]
+        [companyId, lotNo, rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, userId]
       );
       processLotId = Number(insertResult.insertId);
     }
@@ -7583,6 +7655,14 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       });
     }
 
+    const stickerLimit = await validateStickerAgainstProcessOutput(pool, finalCompanyId, cleanLot, Number(format3(weight)), 1);
+    if (!stickerLimit.ok) {
+      return res.json({
+        success: false,
+        message: stickerLimit.message
+      });
+    }
+
     await pool.query(
       `
       INSERT INTO stock (
@@ -7761,6 +7841,21 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       return res.json({
         success: false,
         message: `Barcode ${newBarcode} already exists`
+      });
+    }
+
+    const stickerLimit = await validateStickerAgainstProcessOutput(
+      pool,
+      finalCompanyId,
+      cleanLot,
+      Number(format3(weight)),
+      Number(qty || 1),
+      currentId
+    );
+    if (!stickerLimit.ok) {
+      return res.json({
+        success: false,
+        message: stickerLimit.message
       });
     }
 
