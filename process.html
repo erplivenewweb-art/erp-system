@@ -196,13 +196,28 @@
               </div>
 
               <div class="input-box">
+                <label for="stepInputQty">Input Qty</label>
+                <input id="stepInputQty" type="number" step="1" placeholder="Pair/count" />
+              </div>
+
+              <div class="input-box">
                 <label for="stepOutputWeight">Output Weight</label>
                 <input id="stepOutputWeight" type="number" step="0.001" placeholder="Returned/output weight" />
               </div>
 
               <div class="input-box">
+                <label for="stepOutputQty">Output Qty</label>
+                <input id="stepOutputQty" type="number" step="1" placeholder="Returned count" />
+              </div>
+
+              <div class="input-box">
                 <label for="stepLossWeight">Loss Weight</label>
                 <input id="stepLossWeight" type="number" step="0.001" readonly />
+              </div>
+
+              <div class="input-box">
+                <label for="stepLossQty">Loss Qty</label>
+                <input id="stepLossQty" type="number" step="1" readonly />
               </div>
 
               <div class="input-box">
@@ -229,9 +244,12 @@
                     <th>Step</th>
                     <th>Process</th>
                     <th>Karigar</th>
-                    <th>Input</th>
-                    <th>Output</th>
-                    <th>Loss</th>
+                    <th>Input Wt</th>
+                    <th>Input Qty</th>
+                    <th>Output Wt</th>
+                    <th>Output Qty</th>
+                    <th>Loss Wt</th>
+                    <th>Loss Qty</th>
                     <th>Status</th>
                     <th>Completed</th>
                   </tr>
@@ -253,6 +271,9 @@
                       <th>Total Input</th>
                       <th>Total Output</th>
                       <th>Total Loss</th>
+                      <th>Input Qty</th>
+                      <th>Output Qty</th>
+                      <th>Qty Loss</th>
                     </tr>
                   </thead>
                   <tbody id="processLotSummaryBody"></tbody>
@@ -271,6 +292,9 @@
                       <th>Total Input</th>
                       <th>Total Output</th>
                       <th>Total Loss</th>
+                      <th>Input Qty</th>
+                      <th>Output Qty</th>
+                      <th>Qty Loss</th>
                     </tr>
                   </thead>
                   <tbody id="processKarigarSummaryBody"></tbody>
@@ -290,6 +314,9 @@
                     <th>Total Input</th>
                     <th>Total Output</th>
                     <th>Total Loss</th>
+                    <th>Input Qty</th>
+                    <th>Output Qty</th>
+                    <th>Qty Loss</th>
                   </tr>
                 </thead>
                 <tbody id="processNameSummaryBody"></tbody>
@@ -595,6 +622,12 @@
       return Number.isFinite(num) ? num.toFixed(3) : "0.000";
     }
 
+    function formatProcessQty(value) {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return "0";
+      return Number.isInteger(num) ? String(num) : num.toFixed(3);
+    }
+
     function normalizeProcessStep(item) {
       return {
         id: item?.id ?? null,
@@ -606,6 +639,9 @@
         inputWeight: Number(item?.inputWeight ?? item?.input_weight ?? 0),
         outputWeight: Number(item?.outputWeight ?? item?.output_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
+        inputQty: Number(item?.inputQty ?? item?.input_qty ?? 0),
+        outputQty: Number(item?.outputQty ?? item?.output_qty ?? 0),
+        lossQty: Number(item?.lossQty ?? item?.loss_qty ?? 0),
         lossReason: String(item?.lossReason ?? item?.loss_reason ?? "").trim(),
         status: String(item?.status || "COMPLETED").toUpperCase(),
         completedAt: item?.completedAt ?? item?.completed_at ?? "",
@@ -801,16 +837,23 @@
       const input = Number(document.getElementById("stepInputWeight")?.value || 0);
       const outputRaw = document.getElementById("stepOutputWeight")?.value;
       const lossInput = document.getElementById("stepLossWeight");
+      const inputQty = Number(document.getElementById("stepInputQty")?.value || 0);
+      const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
+      const lossQtyInput = document.getElementById("stepLossQty");
 
-      if (!lossInput) return;
-
-      if (outputRaw === "" || outputRaw === null || outputRaw === undefined) {
+      if (lossInput && (outputRaw === "" || outputRaw === null || outputRaw === undefined)) {
         lossInput.value = "";
-        return;
+      } else if (lossInput) {
+        const output = Number(outputRaw || 0);
+        lossInput.value = (input - output).toFixed(3);
       }
 
-      const output = Number(outputRaw || 0);
-      lossInput.value = (input - output).toFixed(3);
+      if (lossQtyInput && (outputQtyRaw === "" || outputQtyRaw === null || outputQtyRaw === undefined)) {
+        lossQtyInput.value = "";
+      } else if (lossQtyInput) {
+        const outputQty = Number(outputQtyRaw || 0);
+        lossQtyInput.value = formatProcessQty(inputQty - outputQty);
+      }
     }
 
     function fillProcessStepFormFromOpenStep(step) {
@@ -819,8 +862,12 @@
       document.getElementById("stepProcessName").value = step?.processName || "";
       document.getElementById("stepKarigarName").value = step?.karigarName || "";
       document.getElementById("stepInputWeight").value = formatProcessWeight(step?.inputWeight || 0);
+      document.getElementById("stepInputQty").value = formatProcessQty(step?.inputQty || 0);
+      document.getElementById("stepInputQty").readOnly = true;
       document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepOutputQty").value = "";
       document.getElementById("stepLossWeight").value = "";
+      document.getElementById("stepLossQty").value = "";
       document.getElementById("stepLossReason").value = step?.lossReason || "";
     }
 
@@ -829,7 +876,7 @@
       if (!tbody) return;
 
       if (!processStepData.length) {
-        tbody.innerHTML = `<tr><td colspan="8">No process steps found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11">No process steps found</td></tr>`;
         return;
       }
 
@@ -841,8 +888,11 @@
             <td>${escapeHtml(step.processName || "")}</td>
             <td>${escapeHtml(step.karigarName || "")}</td>
             <td>${formatProcessWeight(step.inputWeight)}</td>
+            <td>${formatProcessQty(step.inputQty)}</td>
             <td>${isOpen ? "-" : formatProcessWeight(step.outputWeight)}</td>
+            <td>${isOpen ? "-" : formatProcessQty(step.outputQty)}</td>
             <td>${isOpen ? "-" : formatProcessWeight(step.lossWeight)}</td>
+            <td>${isOpen ? "-" : formatProcessQty(step.lossQty)}</td>
             <td>${escapeHtml(step.status || "")}</td>
             <td>${escapeHtml(step.completedAt || "")}</td>
           </tr>
@@ -877,6 +927,8 @@
       if (!lotNo) {
         currentOpenProcessStep = null;
         document.getElementById("stepInputWeight").value = "";
+        document.getElementById("stepInputQty").value = "";
+        document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint();
         return;
       }
@@ -902,13 +954,19 @@
 
         currentOpenProcessStep = null;
         document.getElementById("stepInputWeight").value = formatProcessWeight(data?.inputWeight || 0);
+        document.getElementById("stepInputQty").value = data?.inputQty ? formatProcessQty(data.inputQty) : "";
+        document.getElementById("stepInputQty").readOnly = Number(data?.stepNo || 1) > 1;
         document.getElementById("stepOutputWeight").value = "";
+        document.getElementById("stepOutputQty").value = "";
         document.getElementById("stepLossWeight").value = "";
-        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g`);
+        document.getElementById("stepLossQty").value = "";
+        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty: ${formatProcessQty(data?.inputQty || 0)}`);
       } catch (error) {
         console.log("Next process input error:", error);
         currentOpenProcessStep = null;
         document.getElementById("stepInputWeight").value = "";
+        document.getElementById("stepInputQty").value = "";
+        document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint(error.message || "Unable to load next input weight.");
       }
     }
@@ -925,8 +983,12 @@
       const processName = document.getElementById("stepProcessName")?.value?.trim() || "";
       const karigarName = document.getElementById("stepKarigarName")?.value?.trim() || "";
       const outputRaw = document.getElementById("stepOutputWeight")?.value;
+      const inputQtyRaw = document.getElementById("stepInputQty")?.value;
+      const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
       const lossReason = document.getElementById("stepLossReason")?.value?.trim() || "";
       const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
+      const hasInputQty = inputQtyRaw !== "" && inputQtyRaw !== null && inputQtyRaw !== undefined;
+      const hasOutputQty = outputQtyRaw !== "" && outputQtyRaw !== null && outputQtyRaw !== undefined;
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
@@ -953,6 +1015,7 @@
             },
             body: JSON.stringify(buildAuthPayload({
               outputWeight: Number(outputRaw),
+              outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason
             }))
           });
@@ -966,7 +1029,9 @@
               lotNo,
               processName,
               karigarName,
+              inputQty: hasInputQty ? Number(inputQtyRaw) : undefined,
               outputWeight: hasOutput ? Number(outputRaw) : undefined,
+              outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason,
               status: hasOutput ? "COMPLETED" : "OPEN"
             }))
@@ -993,8 +1058,12 @@
       document.getElementById("stepProcessName").value = "";
       document.getElementById("stepKarigarName").value = "";
       document.getElementById("stepInputWeight").value = "";
+      document.getElementById("stepInputQty").value = "";
+      document.getElementById("stepInputQty").readOnly = false;
       document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepOutputQty").value = "";
       document.getElementById("stepLossWeight").value = "";
+      document.getElementById("stepLossQty").value = "";
       document.getElementById("stepLossReason").value = "";
       currentOpenProcessStep = null;
       setProcessStepHint();
@@ -1005,7 +1074,7 @@
       if (!tbody) return;
 
       if (!Array.isArray(rows) || !rows.length) {
-        tbody.innerHTML = `<tr><td colspan="5">${emptyText}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8">${emptyText}</td></tr>`;
         return;
       }
 
@@ -1018,6 +1087,9 @@
             <td>${formatProcessWeight(row?.total_input ?? row?.totalInput)}</td>
             <td>${formatProcessWeight(row?.total_output ?? row?.totalOutput)}</td>
             <td>${formatProcessWeight(row?.total_loss ?? row?.totalLoss)}</td>
+            <td>${formatProcessQty(row?.total_input_qty ?? row?.totalInputQty)}</td>
+            <td>${formatProcessQty(row?.total_output_qty ?? row?.totalOutputQty)}</td>
+            <td>${formatProcessQty(row?.total_loss_qty ?? row?.totalLossQty)}</td>
           </tr>
         `;
       }).join("");
@@ -1204,7 +1276,9 @@
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
+    document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);
 
     window.addEventListener("load", async function () {
       renderProfileBox();

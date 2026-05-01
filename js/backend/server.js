@@ -662,7 +662,10 @@ function normalizeProcessStepRow(row) {
     step_no: Number(row.step_no || 0),
     input_weight: toNumber(row.input_weight),
     output_weight: toNumber(row.output_weight),
-    loss_weight: toNumber(row.loss_weight)
+    loss_weight: toNumber(row.loss_weight),
+    input_qty: toNumber(row.input_qty),
+    output_qty: toNumber(row.output_qty),
+    loss_qty: toNumber(row.loss_qty)
   };
 }
 
@@ -2441,6 +2444,9 @@ async function ensureSchema() {
       input_weight DECIMAL(14,3) DEFAULT 0.000,
       output_weight DECIMAL(14,3) DEFAULT 0.000,
       loss_weight DECIMAL(14,3) DEFAULT 0.000,
+      input_qty DECIMAL(14,3) DEFAULT 0.000,
+      output_qty DECIMAL(14,3) DEFAULT 0.000,
+      loss_qty DECIMAL(14,3) DEFAULT 0.000,
       loss_reason VARCHAR(255) DEFAULT '',
       status VARCHAR(30) DEFAULT 'COMPLETED',
       started_at DATETIME DEFAULT NULL,
@@ -2766,6 +2772,9 @@ async function ensureSchema() {
     await addColumnIfMissing("process_steps", "input_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "output_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "input_qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "output_qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "loss_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "loss_reason", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("process_steps", "status", "VARCHAR(30) DEFAULT 'COMPLETED'");
     await addColumnIfMissing("process_steps", "started_at", "DATETIME DEFAULT NULL");
@@ -5745,6 +5754,7 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     lastCompletedStep,
     nextStepNo,
     inputWeight: lastCompletedStep ? toNumber(lastCompletedStep.output_weight) : toNumber(processLot.raw_weight),
+    inputQty: lastCompletedStep ? toNumber(lastCompletedStep.output_qty) : 0,
     source: lastCompletedStep ? "PREVIOUS_PROCESS_OUTPUT" : "PROCESS_LOT_RAW_WEIGHT"
   };
 }
@@ -5832,6 +5842,7 @@ app.get("/process/next-input", authMiddleware, async (req, res) => {
       lastCompletedStep: context.lastCompletedStep || null,
       nextStepNo: context.nextStepNo || null,
       inputWeight: context.inputWeight ?? null,
+      inputQty: context.inputQty ?? 0,
       source: context.source || ""
     });
   } catch (error) {
@@ -5869,6 +5880,10 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const karigarName = normalizeKarigarName(req.body.karigarName || req.body.karigar_name || "");
     const outputProvided = req.body.outputWeight !== undefined || req.body.output_weight !== undefined;
     const outputWeight = outputProvided ? toNumber(req.body.outputWeight ?? req.body.output_weight) : 0;
+    const inputQtyProvided = req.body.inputQty !== undefined || req.body.input_qty !== undefined;
+    const requestedInputQty = inputQtyProvided ? toNumber(req.body.inputQty ?? req.body.input_qty) : 0;
+    const outputQtyProvided = req.body.outputQty !== undefined || req.body.output_qty !== undefined;
+    const outputQty = outputQtyProvided ? toNumber(req.body.outputQty ?? req.body.output_qty) : 0;
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
     const requestedStatus = normalizeProcessStepStatus(req.body.status || (outputProvided ? "COMPLETED" : "OPEN"));
 
@@ -5900,9 +5915,28 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
+    const inputQty = context.lastCompletedStep ? context.inputQty : requestedInputQty;
+    if (requestedStatus === "COMPLETED" && inputQty > 0 && !outputQtyProvided) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity is required when input quantity is entered"
+      });
+    }
+
+    if (requestedStatus === "COMPLETED" && outputQty > inputQty) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be greater than input quantity"
+      });
+    }
+
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
     const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight : 0;
+    const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
+    const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
 
     const [insertResult] = await connection.query(
       `
@@ -5910,9 +5944,9 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       (
         company_id, process_lot_id, lot_no, step_no, process_name,
         karigar_id, karigar_name, input_weight, output_weight, loss_weight,
-        loss_reason, status, started_at, completed_at, created_by
+        input_qty, output_qty, loss_qty, loss_reason, status, started_at, completed_at, created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
       `,
       [
         companyId,
@@ -5925,6 +5959,9 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         context.inputWeight,
         finalOutputWeight,
         lossWeight,
+        inputQty,
+        finalOutputQty,
+        lossQty,
         lossReason,
         finalStatus,
         finalStatus === "COMPLETED" ? new Date() : null,
@@ -5978,6 +6015,8 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
 
     const stepId = Number(req.params.id || 0);
     const outputWeight = toNumber(req.body.outputWeight ?? req.body.output_weight);
+    const outputQtyProvided = req.body.outputQty !== undefined || req.body.output_qty !== undefined;
+    const outputQty = outputQtyProvided ? toNumber(req.body.outputQty ?? req.body.output_qty) : 0;
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
 
     if (!stepId) {
@@ -6025,18 +6064,37 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
+    if (step.input_qty > 0 && !outputQtyProvided) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity is required when input quantity is entered"
+      });
+    }
+
+    if (outputQty > step.input_qty) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be greater than input quantity"
+      });
+    }
+
     const lossWeight = step.input_weight - outputWeight;
+    const lossQty = step.input_qty - outputQty;
     await connection.query(
       `
       UPDATE process_steps
       SET output_weight = ?,
           loss_weight = ?,
+          output_qty = ?,
+          loss_qty = ?,
           loss_reason = ?,
           status = 'COMPLETED',
           completed_at = NOW()
       WHERE id = ?
       `,
-      [outputWeight, lossWeight, lossReason || step.loss_reason || "", stepId]
+      [outputWeight, lossWeight, outputQty, lossQty, lossReason || step.loss_reason || "", stepId]
     );
 
     const [savedRows] = await connection.query(
@@ -6114,7 +6172,10 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
     const [lotSummary] = await pool.query(
       `
       SELECT lot_no, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
-        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss,
+        COALESCE(SUM(input_qty), 0) AS total_input_qty,
+        COALESCE(SUM(output_qty), 0) AS total_output_qty,
+        COALESCE(SUM(loss_qty), 0) AS total_loss_qty
       FROM process_steps
       ${whereClause}
       GROUP BY lot_no
@@ -6126,7 +6187,10 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
       `
       SELECT COALESCE(karigar_id, 0) AS karigar_id, COALESCE(NULLIF(karigar_name, ''), 'Unassigned') AS karigar_name,
         COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
-        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss,
+        COALESCE(SUM(input_qty), 0) AS total_input_qty,
+        COALESCE(SUM(output_qty), 0) AS total_output_qty,
+        COALESCE(SUM(loss_qty), 0) AS total_loss_qty
       FROM process_steps
       ${whereClause}
       GROUP BY COALESCE(karigar_id, 0), COALESCE(NULLIF(karigar_name, ''), 'Unassigned')
@@ -6137,7 +6201,10 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
     const [processSummary] = await pool.query(
       `
       SELECT process_name, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
-        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss
+        COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss,
+        COALESCE(SUM(input_qty), 0) AS total_input_qty,
+        COALESCE(SUM(output_qty), 0) AS total_output_qty,
+        COALESCE(SUM(loss_qty), 0) AS total_loss_qty
       FROM process_steps
       ${whereClause}
       GROUP BY process_name
