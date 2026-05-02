@@ -622,17 +622,57 @@ function toNumber(value, fallback = 0) {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function hasProvidedValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function parseRequiredNumber(value, fieldName) {
+  if (!hasProvidedValue(value)) {
+    return { ok: false, message: `${fieldName} is required` };
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { ok: false, message: `${fieldName} must be a valid number` };
+  }
+
+  return { ok: true, value: parsed };
+}
+
+function parseOptionalNumber(value, fieldName, fallback = 0) {
+  if (!hasProvidedValue(value)) {
+    return { ok: true, value: fallback, provided: false };
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { ok: false, message: `${fieldName} must be a valid number` };
+  }
+
+  return { ok: true, value: parsed, provided: true };
+}
+
+function normalizeProcessLotStatus(value) {
+  const clean = String(value || "").trim().toUpperCase();
+  return clean === "COMPLETED" ? "COMPLETED" : "OPEN";
+}
+
 function normalizeProcessLotNo(value) {
   return String(value || "").trim();
 }
 
 function normalizeKarigarName(value) {
-  return String(value || "").trim();
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeProcessName(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function normalizeProcessLotRow(row) {
   return {
     ...row,
+    status: normalizeProcessLotStatus(row.status),
     raw_weight: toNumber(row.raw_weight),
     loss_weight: toNumber(row.loss_weight),
     final_weight: toNumber(row.final_weight),
@@ -1919,6 +1959,14 @@ async function addIndexIfMissing(tableName, indexName, definitionSql) {
   }
 }
 
+async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
+  const exists = await indexExists(tableName, indexName);
+  if (!exists) {
+    await pool.query(`ALTER TABLE ${tableName} ADD UNIQUE INDEX ${indexName} ${definitionSql}`);
+    console.log(`Unique index added: ${tableName}.${indexName}`);
+  }
+}
+
 function getPagination(req, { defaultLimit = 100, maxLimit = 1000 } = {}) {
   const requestedLimit = Number(req.query.limit ?? req.query.pageSize ?? defaultLimit);
   const requestedOffset = Number(req.query.offset ?? 0);
@@ -2428,6 +2476,7 @@ async function ensureSchema() {
       final_weight DECIMAL(14,3) DEFAULT 0.000,
       total_khadi_count INT DEFAULT 1,
       expected_total_qty DECIMAL(14,3) DEFAULT 0.000,
+      status ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN',
       saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2457,7 +2506,8 @@ async function ensureSchema() {
       completed_at DATETIME DEFAULT NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_process_steps_company_lot_step (company_id, lot_no, step_no)
     )
   `);
 
@@ -2761,6 +2811,7 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "final_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "total_khadi_count", "INT DEFAULT 1");
     await addColumnIfMissing("process_lots", "expected_total_qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lots", "status", "ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN'");
     await addColumnIfMissing("process_lots", "saved_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_lots", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -2937,6 +2988,7 @@ async function ensureSchema() {
     await addIndexIfMissing("process_steps", "idx_process_steps_karigar", "(company_id, karigar_id)");
     await addIndexIfMissing("process_steps", "idx_process_steps_process_lot", "(process_lot_id)");
     await addIndexIfMissing("process_steps", "idx_process_steps_completed", "(company_id, completed_at)");
+    await addUniqueIndexIfMissing("process_steps", "uq_process_steps_company_lot_step", "(company_id, lot_no, step_no)");
   }
 
   if (await tableExists("transaction_master")) {
@@ -5684,6 +5736,18 @@ async function getProcessLotForSteps(connection, companyId, lotNo) {
   return rows.length ? normalizeProcessLotRow(rows[0]) : null;
 }
 
+async function getProcessStepCount(connection, companyId, lotNo) {
+  const [rows] = await connection.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM process_steps
+    WHERE company_id = ? AND lot_no = ?
+    `,
+    [companyId, lotNo]
+  );
+  return Number(rows[0]?.total || 0);
+}
+
 async function getOpenProcessStep(connection, companyId, lotNo, excludeStepId = null) {
   const params = [companyId, lotNo];
   let excludeSql = "";
@@ -5724,12 +5788,41 @@ async function getLastCompletedProcessStep(connection, companyId, lotNo) {
   return rows.length ? normalizeProcessStepRow(rows[0]) : null;
 }
 
-async function validateStickerAgainstProcessOutput(connection, companyId, lotNo, nextWeight, nextQty = 1, excludeStockId = null) {
+async function validateStickerAgainstProcessOutput(connection, companyId, lotNo, nextWeight, nextQty = 1, excludeStockId = null, qtyProvided = true) {
   const cleanLot = normalizeProcessLotNo(lotNo);
   if (!cleanLot) return { ok: true };
 
+  const stickerWeight = toNumber(nextWeight);
+  const stickerQty = toNumber(nextQty);
+  if (stickerWeight <= 0) {
+    return {
+      ok: false,
+      message: "Sticker weight must be greater than zero"
+    };
+  }
+
+  if (stickerQty <= 0) {
+    return {
+      ok: false,
+      message: "Sticker quantity must be greater than zero"
+    };
+  }
+
+  const processLot = await getProcessLotForSteps(connection, companyId, cleanLot);
+  if (!processLot || normalizeProcessLotStatus(processLot.status) !== "COMPLETED") {
+    return {
+      ok: false,
+      message: `Lot ${cleanLot} must be marked COMPLETED before sticker creation`
+    };
+  }
+
   const finalStep = await getLastCompletedProcessStep(connection, companyId, cleanLot);
-  if (!finalStep) return { ok: true };
+  if (!finalStep) {
+    return {
+      ok: false,
+      message: `Lot ${cleanLot} has no completed process output for sticker creation`
+    };
+  }
 
   const params = [companyId, cleanLot];
   let excludeSql = "";
@@ -5753,10 +5846,17 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
 
   const usedWeight = toNumber(usageRows[0]?.used_weight);
   const usedQty = toNumber(usageRows[0]?.used_qty);
-  const totalWeight = usedWeight + toNumber(nextWeight);
-  const totalQty = usedQty + toNumber(nextQty);
+  const totalWeight = usedWeight + stickerWeight;
+  const totalQty = usedQty + stickerQty;
   const allowedWeight = toNumber(finalStep.output_weight);
   const allowedQty = toNumber(finalStep.output_qty);
+
+  if (allowedQty > 0 && !qtyProvided) {
+    return {
+      ok: false,
+      message: "Sticker quantity is required when quantity tracking is active"
+    };
+  }
 
   if (allowedWeight > 0 && totalWeight > allowedWeight + 0.0005) {
     return {
@@ -5803,7 +5903,17 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     `,
     [companyId, lotNo]
   );
-  const nextStepNo = Number(stepRows[0]?.max_step_no || 0) + 1;
+  const lastStepNo = Number(stepRows[0]?.max_step_no || 0);
+  const nextStepNo = lastStepNo + 1;
+
+  if (lastCompletedStep && Number(lastCompletedStep.step_no || 0) !== lastStepNo) {
+    return {
+      ok: false,
+      message: "Process step ordering is inconsistent. Complete steps in sequence before adding a new step.",
+      processLot,
+      lastCompletedStep
+    };
+  }
 
   return {
     ok: true,
@@ -5931,16 +6041,16 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const companyId = access.companyScope;
     const userId = access.actingUserId;
     const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
-    const processName = String(req.body.processName || req.body.process_name || "").trim();
+    const processName = normalizeProcessName(req.body.processName || req.body.process_name || "");
     const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
     const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
     const karigarName = normalizeKarigarName(req.body.karigarName || req.body.karigar_name || "");
-    const outputProvided = req.body.outputWeight !== undefined || req.body.output_weight !== undefined;
-    const outputWeight = outputProvided ? toNumber(req.body.outputWeight ?? req.body.output_weight) : 0;
-    const inputQtyProvided = req.body.inputQty !== undefined || req.body.input_qty !== undefined;
-    const requestedInputQty = inputQtyProvided ? toNumber(req.body.inputQty ?? req.body.input_qty) : 0;
-    const outputQtyProvided = req.body.outputQty !== undefined || req.body.output_qty !== undefined;
-    const outputQty = outputQtyProvided ? toNumber(req.body.outputQty ?? req.body.output_qty) : 0;
+    const outputWeightRaw = req.body.outputWeight ?? req.body.output_weight;
+    const outputProvided = hasProvidedValue(outputWeightRaw);
+    const inputQtyRaw = req.body.inputQty ?? req.body.input_qty;
+    const inputQtyProvided = hasProvidedValue(inputQtyRaw);
+    const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
+    const outputQtyProvided = hasProvidedValue(outputQtyRaw);
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
     const requestedStatus = normalizeProcessStepStatus(req.body.status || (outputProvided ? "COMPLETED" : "OPEN"));
 
@@ -5964,6 +6074,45 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
+    if (context.inputWeight <= 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Input weight must be greater than zero"
+      });
+    }
+
+    let outputWeight = 0;
+    if (requestedStatus === "COMPLETED") {
+      const parsedOutputWeight = parseRequiredNumber(outputWeightRaw, "Output weight");
+      if (!parsedOutputWeight.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedOutputWeight.message
+        });
+      }
+      outputWeight = parsedOutputWeight.value;
+    } else if (outputProvided) {
+      const parsedOutputWeight = parseOptionalNumber(outputWeightRaw, "Output weight");
+      if (!parsedOutputWeight.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedOutputWeight.message
+        });
+      }
+      outputWeight = parsedOutputWeight.value;
+    }
+
+    if (outputWeight < 0 || outputWeight === 0 && requestedStatus === "COMPLETED") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output weight must be greater than zero"
+      });
+    }
+
     if (requestedStatus === "COMPLETED" && outputWeight > context.inputWeight) {
       await connection.rollback();
       return res.status(400).json({
@@ -5972,12 +6121,54 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    const inputQty = context.lastCompletedStep ? context.inputQty : (inputQtyProvided ? requestedInputQty : context.inputQty);
+    let requestedInputQty = context.inputQty;
+    if (!context.lastCompletedStep && inputQtyProvided) {
+      const parsedInputQty = parseRequiredNumber(inputQtyRaw, "Input quantity");
+      if (!parsedInputQty.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedInputQty.message
+        });
+      }
+      requestedInputQty = parsedInputQty.value;
+    }
+
+    const inputQty = context.lastCompletedStep ? context.inputQty : requestedInputQty;
+    if (inputQty < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Input quantity cannot be negative"
+      });
+    }
+
+    let outputQty = 0;
     if (requestedStatus === "COMPLETED" && inputQty > 0 && !outputQtyProvided) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
         message: "Output quantity is required when input quantity is entered"
+      });
+    }
+
+    if (outputQtyProvided) {
+      const parsedOutputQty = parseRequiredNumber(outputQtyRaw, "Output quantity");
+      if (!parsedOutputQty.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedOutputQty.message
+        });
+      }
+      outputQty = parsedOutputQty.value;
+    }
+
+    if (outputQty < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be negative"
       });
     }
 
@@ -6076,15 +6267,31 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     }
 
     const stepId = Number(req.params.id || 0);
-    const outputWeight = toNumber(req.body.outputWeight ?? req.body.output_weight);
-    const outputQtyProvided = req.body.outputQty !== undefined || req.body.output_qty !== undefined;
-    const outputQty = outputQtyProvided ? toNumber(req.body.outputQty ?? req.body.output_qty) : 0;
+    const outputWeightRaw = req.body.outputWeight ?? req.body.output_weight;
+    const parsedOutputWeight = parseRequiredNumber(outputWeightRaw, "Output weight");
+    const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
+    const outputQtyProvided = hasProvidedValue(outputQtyRaw);
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
 
     if (!stepId) {
       return res.status(400).json({
         success: false,
         message: "Process step id is required"
+      });
+    }
+
+    if (!parsedOutputWeight.ok) {
+      return res.status(400).json({
+        success: false,
+        message: parsedOutputWeight.message
+      });
+    }
+
+    const outputWeight = parsedOutputWeight.value;
+    if (outputWeight <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Output weight must be greater than zero"
       });
     }
 
@@ -6118,6 +6325,14 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
+    if (step.input_weight <= 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Input weight must be greater than zero"
+      });
+    }
+
     if (outputWeight > step.input_weight) {
       await connection.rollback();
       return res.status(400).json({
@@ -6126,11 +6341,40 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
+    let outputQty = 0;
     if (step.input_qty > 0 && !outputQtyProvided) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
         message: "Output quantity is required when input quantity is entered"
+      });
+    }
+
+    if (step.input_qty < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Input quantity cannot be negative"
+      });
+    }
+
+    if (outputQtyProvided) {
+      const parsedOutputQty = parseRequiredNumber(outputQtyRaw, "Output quantity");
+      if (!parsedOutputQty.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedOutputQty.message
+        });
+      }
+      outputQty = parsedOutputQty.value;
+    }
+
+    if (outputQty < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be negative"
       });
     }
 
@@ -6327,12 +6571,19 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
       });
     }
 
+    if (rawWeight < 0 || lossWeight < 0 || finalWeight < 0 || expectedTotalQty < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Process lot weights and quantities cannot be negative"
+      });
+    }
+
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
     const [existingRows] = await connection.query(
       `
-      SELECT id
+      SELECT id, raw_weight
       FROM process_lots
       WHERE company_id = ? AND lot_no = ?
       LIMIT 1
@@ -6344,6 +6595,16 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 
     if (existingRows.length) {
       processLotId = Number(existingRows[0].id);
+      const existingRawWeight = toNumber(existingRows[0].raw_weight);
+      const stepCount = await getProcessStepCount(connection, companyId, lotNo);
+      if (stepCount > 0 && Math.abs(existingRawWeight - rawWeight) > 0.0005) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Cannot update raw weight after process steps already exist"
+        });
+      }
+
       await connection.query(
         `
         UPDATE process_lots
@@ -7601,6 +7862,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       metalType,
       processType,
       barcode,
+      qty,
       companyId
     } = req.body;
 
@@ -7617,6 +7879,22 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     const cleanLot = String(lot).trim();
     const cleanSerial = String(serial).trim();
     const cleanBarcode = String(barcode).trim();
+    const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
+    if (!parsedWeight.ok || parsedWeight.value <= 0) {
+      return res.json({
+        success: false,
+        message: parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message
+      });
+    }
+
+    const qtyProvided = hasProvidedValue(qty);
+    const parsedQty = parseOptionalNumber(qty, "Sticker quantity", 1);
+    if (!parsedQty.ok || parsedQty.value <= 0) {
+      return res.json({
+        success: false,
+        message: parsedQty.ok ? "Sticker quantity must be greater than zero" : parsedQty.message
+      });
+    }
 
     const [dupLotSerial] = await pool.query(
       `
@@ -7655,7 +7933,15 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       });
     }
 
-    const stickerLimit = await validateStickerAgainstProcessOutput(pool, finalCompanyId, cleanLot, Number(format3(weight)), 1);
+    const stickerLimit = await validateStickerAgainstProcessOutput(
+      pool,
+      finalCompanyId,
+      cleanLot,
+      Number(format3(parsedWeight.value)),
+      parsedQty.value,
+      null,
+      qtyProvided
+    );
     if (!stickerLimit.ok) {
       return res.json({
         success: false,
@@ -7673,6 +7959,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         mm,
         size,
         weight,
+        qty,
         lot_number,
         barcode,
         metal_type,
@@ -7681,7 +7968,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         company_id,
         created_by,
         deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cleanSerial,
@@ -7690,7 +7977,8 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         String(sku).trim(),
         String(mm || "").trim(),
         String(size).trim(),
-        Number(format3(weight)),
+        Number(format3(parsedWeight.value)),
+        parsedQty.value,
         cleanLot,
         cleanBarcode,
         String(metalType || "").trim(),
@@ -7740,12 +8028,12 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       sku = "",
       mm = "",
       size = "",
-      weight = 0,
+      weight,
       lot = "",
       barcode = oldBarcode,
       metalType = "",
       processType = "",
-      qty = 1,
+      qty,
       status = "IN_STOCK",
       companyId = null,
       invoiceNumber = ""
@@ -7788,6 +8076,22 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     const cleanLot = String(lot).trim();
     const cleanSerial = String(serial).trim();
     const newBarcode = String(barcode || oldBarcode).trim();
+    const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
+    if (!parsedWeight.ok || parsedWeight.value <= 0) {
+      return res.json({
+        success: false,
+        message: parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message
+      });
+    }
+
+    const qtyProvided = hasProvidedValue(qty);
+    const parsedQty = parseOptionalNumber(qty, "Sticker quantity", 1);
+    if (!parsedQty.ok || parsedQty.value <= 0) {
+      return res.json({
+        success: false,
+        message: parsedQty.ok ? "Sticker quantity must be greater than zero" : parsedQty.message
+      });
+    }
 
     const [currentRows] = await pool.query(
       `
@@ -7848,9 +8152,10 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       pool,
       finalCompanyId,
       cleanLot,
-      Number(format3(weight)),
-      Number(qty || 1),
-      currentId
+      Number(format3(parsedWeight.value)),
+      parsedQty.value,
+      currentId,
+      qtyProvided
     );
     if (!stickerLimit.ok) {
       return res.json({
@@ -7886,8 +8191,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         String(sku).trim(),
         String(mm || "").trim(),
         String(size).trim(),
-        Number(format3(weight)),
-        Number(qty || 1),
+        Number(format3(parsedWeight.value)),
+        parsedQty.value,
         cleanLot,
         newBarcode,
         String(metalType || "").trim(),
@@ -9183,6 +9488,98 @@ app.get("/getInvoiceItems/:invoiceNumber", async (req, res) => {
       success: false,
       message: "Invoice items fetch failed"
     });
+  }
+});
+
+app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "lotNo is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    if (!processLot) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process lot not found"
+      });
+    }
+
+    const openStep = await getOpenProcessStep(connection, access.companyScope, lotNo);
+    if (openStep) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Complete all OPEN process steps before completing the lot"
+      });
+    }
+
+    const finalStep = await getLastCompletedProcessStep(connection, access.companyScope, lotNo);
+    if (!finalStep) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "At least one completed process step is required before completing the lot"
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE process_lots
+      SET status = 'COMPLETED',
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [processLot.id]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_lots
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [processLot.id]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Process lot completed successfully",
+      lot: savedRows.length ? normalizeProcessLotRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Complete process lot error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lot completion failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
