@@ -207,6 +207,84 @@
       font-weight: 700;
     }
 
+    .smart-dashboard-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .smart-dashboard-controls {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .smart-dashboard-controls label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .smart-dashboard-controls input {
+      height: 38px;
+      min-width: 158px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+      color: #111827;
+      background: #fff;
+    }
+
+    .smart-status {
+      margin: 0 0 14px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      display: none;
+    }
+
+    .smart-status.loading {
+      display: block;
+      color: #1d4ed8;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+    }
+
+    .smart-status.error {
+      display: block;
+      color: #991b1b;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+    }
+
+    .smart-alert-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: 800;
+      margin-left: 8px;
+      padding: 0 9px;
+    }
+
+    .smart-dashboard-grid {
+      margin-bottom: 16px;
+    }
+
     .profile-box {
       min-width: 220px;
       text-align: right;
@@ -246,6 +324,11 @@
 
       .summary-card {
         min-height: 110px;
+      }
+
+      .smart-dashboard-header,
+      .smart-dashboard-controls {
+        align-items: stretch;
       }
 
       .profile-box {
@@ -313,6 +396,157 @@
       <section class="page active">
         <div class="alert-box" id="lowStockAlert" style="display:none;">
           Low Stock Alert: <span id="lowStockCount">0</span> low-stock lot(s) found.
+        </div>
+
+        <div class="panel">
+          <div class="smart-dashboard-header">
+            <div>
+              <h3>Smart Dashboard</h3>
+              <p class="subtext">Daily production, sales, process loss, lot, and karigar performance snapshot</p>
+            </div>
+
+            <div class="smart-dashboard-controls">
+              <div>
+                <label for="smartDashboardDate">Date</label>
+                <input type="date" id="smartDashboardDate" onchange="loadSmartDashboardData(true)" />
+              </div>
+              <button type="button" onclick="loadSmartDashboardData(true)">Refresh</button>
+            </div>
+          </div>
+
+          <div class="smart-status loading" id="smartDashboardStatus">Loading smart dashboard...</div>
+
+          <div class="summary-row summary-row-6 smart-dashboard-grid">
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-weight-scale"></i></div>
+              <div class="summary-content">
+                <h4>Today Production Weight</h4>
+                <p id="smartProductionWeight">0.000 g</p>
+                <div class="summary-subtext">Stock created on selected date</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-layer-group"></i></div>
+              <div class="summary-content">
+                <h4>Today Production Qty</h4>
+                <p id="smartProductionQty">0</p>
+                <div class="summary-subtext">Quantity/count created</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-indian-rupee-sign"></i></div>
+              <div class="summary-content">
+                <h4>Today Sales</h4>
+                <p id="smartSalesAmount">&#8377; 0.00</p>
+                <div class="summary-subtext">Billing value</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-chart-line"></i></div>
+              <div class="summary-content">
+                <h4>Estimated Billing Margin</h4>
+                <p id="smartBillingMargin">&#8377; 0.00</p>
+                <div class="summary-subtext">Existing margin fields</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-scale-unbalanced"></i></div>
+              <div class="summary-content">
+                <h4>Today Process Loss Weight</h4>
+                <p id="smartProcessLossWeight">0.000 g</p>
+                <div class="summary-subtext">Completed process steps</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-minus-circle"></i></div>
+              <div class="summary-content">
+                <h4>Today Process Loss Qty</h4>
+                <p id="smartProcessLossQty">0</p>
+                <div class="summary-subtext">Pair/count loss</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-folder-open"></i></div>
+              <div class="summary-content">
+                <h4>Open Lots</h4>
+                <p id="smartOpenLots">0</p>
+                <div class="summary-subtext">Process lots open</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-circle-check"></i></div>
+              <div class="summary-content">
+                <h4>Completed Lots</h4>
+                <p id="smartCompletedLots">0</p>
+                <div class="summary-subtext">Process lots completed</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-hourglass-half"></i></div>
+              <div class="summary-content">
+                <h4>Pending Process Lots</h4>
+                <p id="smartPendingProcessLots">0</p>
+                <div class="summary-subtext">Open lot/process work</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-ranking-star"></i></div>
+              <div class="summary-content">
+                <h4>Best Karigar</h4>
+                <p id="smartBestKarigar">-</p>
+                <div class="summary-subtext" id="smartBestKarigarSub">Lowest loss percent</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-triangle-exclamation"></i></div>
+              <div class="summary-content">
+                <h4>Worst Karigar</h4>
+                <p id="smartWorstKarigar">-</p>
+                <div class="summary-subtext" id="smartWorstKarigarSub">Highest loss percent</div>
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-icon"><i class="fas fa-bell"></i></div>
+              <div class="summary-content">
+                <h4>High Loss Alerts</h4>
+                <p id="smartHighLossAlertCount">0</p>
+                <div class="summary-subtext">Loss above 5%</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="dashboard-table">
+              <thead>
+                <tr>
+                  <th>Lot</th>
+                  <th>Process</th>
+                  <th>Karigar</th>
+                  <th>Input Wt</th>
+                  <th>Output Wt</th>
+                  <th>Loss Wt</th>
+                  <th>Loss Qty</th>
+                  <th>Loss %</th>
+                </tr>
+              </thead>
+              <tbody id="smartHighLossAlertsBody">
+                <tr>
+                  <td colspan="8" class="empty-text">No high loss alert found</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="summary-row summary-row-6">
@@ -519,6 +753,7 @@
     let dashboardStockData = [];
     let dashboardSalesData = null;
     let dashboardReturnData = [];
+    let smartDashboardLoadPromise = null;
 
     function getLoggedInUser() {
       try {
@@ -684,6 +919,180 @@
 
     function formatCurrency(value) {
       return `\u20B9 ${Number(value || 0).toFixed(2)}`;
+    }
+
+    function formatWeight(value) {
+      return `${Number(value || 0).toFixed(3)} g`;
+    }
+
+    function formatQty(value) {
+      return Number(value || 0).toFixed(3).replace(/\.000$/, "");
+    }
+
+    function formatPercent(value) {
+      return `${Number(value || 0).toFixed(2)}%`;
+    }
+
+    function getTodayDateValue() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function setSmartText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function setSmartStatus(type = "", message = "") {
+      const statusEl = document.getElementById("smartDashboardStatus");
+      if (!statusEl) return;
+
+      statusEl.className = "smart-status";
+      statusEl.textContent = message || "";
+
+      if (type) {
+        statusEl.classList.add(type);
+      }
+    }
+
+    function resetSmartDashboardValues() {
+      setSmartText("smartProductionWeight", formatWeight(0));
+      setSmartText("smartProductionQty", "0");
+      setSmartText("smartSalesAmount", formatCurrency(0));
+      setSmartText("smartBillingMargin", formatCurrency(0));
+      setSmartText("smartProcessLossWeight", formatWeight(0));
+      setSmartText("smartProcessLossQty", "0");
+      setSmartText("smartOpenLots", "0");
+      setSmartText("smartCompletedLots", "0");
+      setSmartText("smartPendingProcessLots", "0");
+      setSmartText("smartBestKarigar", "-");
+      setSmartText("smartBestKarigarSub", "Lowest loss percent");
+      setSmartText("smartWorstKarigar", "-");
+      setSmartText("smartWorstKarigarSub", "Highest loss percent");
+      setSmartText("smartHighLossAlertCount", "0");
+
+      const tbody = document.getElementById("smartHighLossAlertsBody");
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-text">No high loss alert found</td></tr>`;
+      }
+    }
+
+    function getSmartDashboardDate() {
+      const input = document.getElementById("smartDashboardDate");
+      if (!input) return getTodayDateValue();
+      if (!input.value) input.value = getTodayDateValue();
+      return input.value;
+    }
+
+    function buildSmartDashboardParams() {
+      const params = new URLSearchParams();
+      const actingUserId = getCurrentUserId();
+      const companyId = getCurrentCompanyId();
+
+      params.set("date", getSmartDashboardDate());
+
+      if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+        params.set("actingUserId", String(actingUserId));
+      }
+
+      if (companyId !== null && !isSuperAdmin()) {
+        params.set("companyId", String(companyId));
+      }
+
+      return params;
+    }
+
+    function renderSmartKarigar(prefix, karigar) {
+      if (!karigar) {
+        setSmartText(`${prefix}Karigar`, "-");
+        setSmartText(`${prefix}KarigarSub`, prefix === "smartBest" ? "Lowest loss percent" : "Highest loss percent");
+        return;
+      }
+
+      setSmartText(`${prefix}Karigar`, safeText(karigar.name || "-") || "-");
+      setSmartText(
+        `${prefix}KarigarSub`,
+        `${formatPercent(karigar.lossPercent)} loss | ${Number(karigar.stepCount || 0)} step(s)`
+      );
+    }
+
+    function renderHighLossAlerts(alerts = []) {
+      const tbody = document.getElementById("smartHighLossAlertsBody");
+      if (!tbody) return;
+
+      if (!Array.isArray(alerts) || !alerts.length) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-text">No high loss alert found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = alerts.map((item) => `
+        <tr>
+          <td>${safeText(item.lotNo || "-")}</td>
+          <td>${safeText(item.processName || "-")}</td>
+          <td>${safeText(item.karigarName || "-")}</td>
+          <td>${formatWeight(item.inputWeight)}</td>
+          <td>${formatWeight(item.outputWeight)}</td>
+          <td>${formatWeight(item.lossWeight)}</td>
+          <td>${formatQty(item.lossQty)}</td>
+          <td><span class="badge red">${formatPercent(item.lossPercent)}</span></td>
+        </tr>
+      `).join("");
+    }
+
+    function renderSmartDashboard(data = {}) {
+      setSmartText("smartProductionWeight", formatWeight(data.todayProductionWeight));
+      setSmartText("smartProductionQty", formatQty(data.todayProductionQty));
+      setSmartText("smartSalesAmount", formatCurrency(data.todaySalesAmount));
+      setSmartText("smartBillingMargin", formatCurrency(data.todayBillingMargin));
+      setSmartText("smartProcessLossWeight", formatWeight(data.todayProcessLossWeight));
+      setSmartText("smartProcessLossQty", formatQty(data.todayProcessLossQty));
+      setSmartText("smartOpenLots", String(Number(data.openLots || 0)));
+      setSmartText("smartCompletedLots", String(Number(data.completedLots || 0)));
+      setSmartText("smartPendingProcessLots", String(Number(data.pendingProcessLots || 0)));
+      renderSmartKarigar("smartBest", data.bestKarigar);
+      renderSmartKarigar("smartWorst", data.worstKarigar);
+
+      const alerts = Array.isArray(data.highLossAlerts) ? data.highLossAlerts : [];
+      setSmartText("smartHighLossAlertCount", String(alerts.length));
+      renderHighLossAlerts(alerts);
+    }
+
+    async function loadSmartDashboardData(force = false) {
+      if (smartDashboardLoadPromise && !force) {
+        return smartDashboardLoadPromise;
+      }
+
+      smartDashboardLoadPromise = (async () => {
+        setSmartStatus("loading", "Loading smart dashboard...");
+
+        try {
+          const params = buildSmartDashboardParams();
+          const response = await fetch(`${API_BASE}/api/smart-dashboard?${params.toString()}`, {
+            cache: "no-store"
+          });
+          const data = await response.json();
+
+          if (!response.ok || !data?.success) {
+            throw new Error(data?.message || "Smart dashboard load failed");
+          }
+
+          renderSmartDashboard(data);
+          setSmartStatus("", "");
+          return data;
+        } catch (error) {
+          console.log("Smart dashboard load error:", error);
+          resetSmartDashboardValues();
+          setSmartStatus("error", error.message || "Smart dashboard load failed");
+          return null;
+        } finally {
+          smartDashboardLoadPromise = null;
+        }
+      })();
+
+      return smartDashboardLoadPromise;
     }
 
     function getReturnType(item) {
@@ -1090,6 +1499,8 @@
       }
 
       renderProfileInfo();
+      getSmartDashboardDate();
+      loadSmartDashboardData(true);
       loadDashboardData();
       startDashboardAutoRefresh();
     });
