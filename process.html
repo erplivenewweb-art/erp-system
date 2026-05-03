@@ -146,8 +146,8 @@
                 </div>
 
                 <div class="input-box">
-                  <label for="processKhadiCount">Khadi Count</label>
-                  <input id="processKhadiCount" type="number" step="1" min="1" placeholder="Batch count" />
+                  <label for="khadiCount">Khadi Count</label>
+                  <input id="khadiCount" type="number" step="1" min="1" placeholder="Batch count" />
                 </div>
 
                 <div class="input-box">
@@ -660,7 +660,7 @@
         rawWeight: Number(item?.rawWeight ?? item?.raw_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
         finalWeight: Number(item?.finalWeight ?? item?.final_weight ?? 0),
-        totalKhadiCount: Number(item?.totalKhadiCount ?? item?.total_khadi_count ?? 1),
+        totalKhadiCount: Number(item?.totalKhadiCount ?? 1),
         expectedTotalQty: Number(item?.expectedTotalQty ?? item?.expected_total_qty ?? 0),
         company_id: item?.company_id ?? getCurrentCompanyId(),
         savedAt: item?.savedAt ?? item?.saved_at ?? item?.updated_at ?? item?.created_at ?? ""
@@ -780,7 +780,6 @@
       const finalWeight = raw - loss;
       const used = getUsedWeightByLot(lotNo);
       const balance = finalWeight - used;
-      const khadiCount = Number(document.getElementById("processKhadiCount")?.value || 1);
       const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
 
       document.getElementById("processFinalWeight").value = finalWeight.toFixed(3);
@@ -803,9 +802,16 @@
       const finalWeight = raw - loss;
       const used = getUsedWeightByLot(lotNo);
       const balance = finalWeight - used;
+      const khadiCount = Number(document.getElementById("khadiCount")?.value || 0);
+      const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
 
       if (!lotNo) {
-      showToast("Please enter the lot number.", "error", "Missing Field");
+        showToast("Please enter the lot number.", "error", "Missing Field");
+        return;
+      }
+
+      if (!khadiCount) {
+        showToast("Enter khadi count", "error");
         return;
       }
 
@@ -820,7 +826,7 @@
             rawWeight: raw,
             lossWeight: loss,
             finalWeight,
-            totalKhadiCount: khadiCount || 1,
+            totalKhadiCount: khadiCount,
             expectedTotalQty: expectedQty
           }))
         });
@@ -835,7 +841,7 @@
           rawWeight: raw,
           lossWeight: loss,
           finalWeight,
-          totalKhadiCount: khadiCount || 1,
+          totalKhadiCount: khadiCount,
           expectedTotalQty: expectedQty
         });
         const existingIndex = lotData.findIndex(
@@ -865,7 +871,7 @@
     function clearProcessForm() {
       document.getElementById("processLotNo").value = "";
       document.getElementById("processRawWeight").value = "";
-      document.getElementById("processKhadiCount").value = "";
+      document.getElementById("khadiCount").value = "";
       document.getElementById("processExpectedQty").value = "";
       document.getElementById("processLossWeight").value = "";
       document.getElementById("processFinalWeight").value = "";
@@ -1458,6 +1464,7 @@
 
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
