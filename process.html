@@ -277,6 +277,7 @@
                       <th>Input Wt</th>
                       <th>Input Qty</th>
                       <th>Output Wt</th>
+                      <th>Recovery Wt</th>
                       <th>Output Qty</th>
                       <th>Loss Wt</th>
                       <th>Loss Qty</th>
@@ -408,6 +409,10 @@
                   <div class="input-box">
                     <label>Current Output Weight</label>
                     <input id="liveCurrentOutputWeight" type="text" readonly />
+                  </div>
+                  <div class="input-box">
+                    <label>Total Recovery Weight</label>
+                    <input id="liveTotalRecoveryWeight" type="text" readonly />
                   </div>
                   <div class="input-box">
                     <label>Total Weight Loss</label>
@@ -717,6 +722,7 @@
         karigarName: String(item?.karigarName ?? item?.karigar_name ?? "").trim(),
         inputWeight: Number(item?.inputWeight ?? item?.input_weight ?? 0),
         outputWeight: Number(item?.outputWeight ?? item?.output_weight ?? 0),
+        recoveryWeight: Number(item?.recoveryWeight ?? item?.recovery_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
         inputQty: Number(item?.inputQty ?? item?.input_qty ?? 0),
         outputQty: Number(item?.outputQty ?? item?.output_qty ?? 0),
@@ -984,7 +990,7 @@
       if (!tbody) return;
 
       if (!processStepData.length) {
-        tbody.innerHTML = `<tr><td colspan="11">No process steps found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12">No process steps found</td></tr>`;
         return;
       }
 
@@ -998,6 +1004,7 @@
             <td>${formatProcessWeight(step.inputWeight)}</td>
             <td>${formatProcessQty(step.inputQty)}</td>
             <td>${isOpen ? "-" : formatProcessWeight(step.outputWeight)}</td>
+            <td>${isOpen ? "-" : formatProcessWeight(step.recoveryWeight)}</td>
             <td>${isOpen ? "-" : formatProcessQty(step.outputQty)}</td>
             <td>${isOpen ? "-" : formatProcessWeight(step.lossWeight)}</td>
             <td>${isOpen ? "-" : formatProcessQty(step.lossQty)}</td>
@@ -1127,8 +1134,7 @@
       const hasOutputQty = outputQtyRaw !== "" && outputQtyRaw !== null && outputQtyRaw !== undefined;
       const finishedOutputWeight = Number(outputRaw || 0);
       const recoveryWeight = Number(recoveryRaw || 0);
-      const accountedOutputWeight = finishedOutputWeight + recoveryWeight;
-      const calculatedLossWeight = inputWeight - accountedOutputWeight;
+      const calculatedLossWeight = inputWeight - finishedOutputWeight - recoveryWeight;
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
@@ -1169,7 +1175,8 @@
               "Content-Type": "application/json"
             },
             body: JSON.stringify(buildAuthPayload({
-              outputWeight: accountedOutputWeight,
+              outputWeight: finishedOutputWeight,
+              recoveryWeight,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason
             }))
@@ -1185,7 +1192,8 @@
               processName,
               karigarName,
               inputQty: hasInputQty ? Number(inputQtyRaw) : undefined,
-              outputWeight: hasOutput ? accountedOutputWeight : undefined,
+              outputWeight: hasOutput ? finishedOutputWeight : undefined,
+              recoveryWeight: hasOutput || hasRecovery ? recoveryWeight : undefined,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason,
               status: hasOutput ? "COMPLETED" : "OPEN"
@@ -1302,7 +1310,8 @@
       const firstStep = completedSteps.length ? completedSteps[0] : null;
       const totalInputWeight = firstStep ? firstStep.inputWeight : 0;
       const currentOutputWeight = latestStep ? latestStep.outputWeight : 0;
-      const totalWeightLoss = totalInputWeight - currentOutputWeight;
+      const totalRecoveryWeight = completedSteps.reduce((sum, step) => sum + Number(step.recoveryWeight || 0), 0);
+      const totalWeightLoss = completedSteps.reduce((sum, step) => sum + Number(step.lossWeight || 0), 0);
       const totalInputQty = firstStep ? firstStep.inputQty : 0;
       const currentOutputQty = latestStep ? latestStep.outputQty : 0;
       const totalQtyLoss = totalInputQty - currentOutputQty;
@@ -1318,6 +1327,7 @@
       setLiveValue("liveUsedWeight", formatProcessWeight(usedWeight));
       setLiveValue("liveBalanceWeight", formatProcessWeight(balanceWeight));
       setLiveValue("liveCurrentOutputWeight", formatProcessWeight(currentOutputWeight));
+      setLiveValue("liveTotalRecoveryWeight", formatProcessWeight(totalRecoveryWeight));
       setLiveValue("liveTotalWeightLoss", formatProcessWeight(totalWeightLoss));
       setLiveValue("liveTotalInputQty", formatProcessQty(totalInputQty));
       setLiveValue("liveCurrentOutputQty", formatProcessQty(currentOutputQty));

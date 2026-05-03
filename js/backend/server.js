@@ -6288,6 +6288,8 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const karigarName = normalizeKarigarName(req.body.karigarName || req.body.karigar_name || "");
     const outputWeightRaw = req.body.outputWeight ?? req.body.output_weight;
     const outputProvided = hasProvidedValue(outputWeightRaw);
+    const recoveryWeightRaw = req.body.recoveryWeight ?? req.body.recovery_weight;
+    const recoveryProvided = hasProvidedValue(recoveryWeightRaw);
     const inputQtyRaw = req.body.inputQty ?? req.body.input_qty;
     const inputQtyProvided = hasProvidedValue(inputQtyRaw);
     const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
@@ -6346,11 +6348,11 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       outputWeight = parsedOutputWeight.value;
     }
 
-    if (outputWeight < 0 || outputWeight === 0 && requestedStatus === "COMPLETED") {
+    if (outputWeight < 0) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight must be greater than zero"
+        message: "Output weight cannot be negative"
       });
     }
 
@@ -6359,6 +6361,35 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       return res.status(400).json({
         success: false,
         message: "Output weight cannot be greater than input weight"
+      });
+    }
+
+    let recoveryWeight = 0;
+    if (recoveryProvided) {
+      const parsedRecoveryWeight = parseOptionalNumber(recoveryWeightRaw, "Recovery weight");
+      if (!parsedRecoveryWeight.ok) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: parsedRecoveryWeight.message
+        });
+      }
+      recoveryWeight = parsedRecoveryWeight.value;
+    }
+
+    if (recoveryWeight < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Recovery weight cannot be negative"
+      });
+    }
+
+    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > context.inputWeight) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output weight plus recovery weight cannot be greater than input weight"
       });
     }
 
@@ -6423,10 +6454,27 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
 
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
-    const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight : 0;
+    const finalRecoveryWeight = finalStatus === "COMPLETED" ? recoveryWeight : 0;
+    const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight - finalRecoveryWeight : 0;
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
     const warnings = [];
+
+    if (lossWeight < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Loss weight cannot be negative"
+      });
+    }
+
+    console.log("[PROCESS_STEP_SAVE]", {
+      inputWeight: context.inputWeight,
+      outputWeight: finalOutputWeight,
+      recoveryWeight: finalRecoveryWeight,
+      lossWeight
+    });
+
     if (finalStatus === "COMPLETED" && inputQty > 0 && (lossQty / inputQty) > 0.05) {
       warnings.push("Quantity loss is above 5% for this process step");
     }
@@ -6436,10 +6484,10 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       INSERT INTO process_steps
       (
         company_id, process_lot_id, lot_no, step_no, process_name,
-        karigar_id, karigar_name, input_weight, output_weight, loss_weight,
+        karigar_id, karigar_name, input_weight, output_weight, recovery_weight, loss_weight,
         input_qty, output_qty, loss_qty, loss_reason, status, started_at, completed_at, created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
       `,
       [
         companyId,
@@ -6451,6 +6499,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         karigarName,
         context.inputWeight,
         finalOutputWeight,
+        finalRecoveryWeight,
         lossWeight,
         inputQty,
         finalOutputQty,
@@ -6510,6 +6559,8 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     const stepId = Number(req.params.id || 0);
     const outputWeightRaw = req.body.outputWeight ?? req.body.output_weight;
     const parsedOutputWeight = parseRequiredNumber(outputWeightRaw, "Output weight");
+    const recoveryWeightRaw = req.body.recoveryWeight ?? req.body.recovery_weight;
+    const recoveryProvided = hasProvidedValue(recoveryWeightRaw);
     const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
     const outputQtyProvided = hasProvidedValue(outputQtyRaw);
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
@@ -6529,10 +6580,29 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     }
 
     const outputWeight = parsedOutputWeight.value;
-    if (outputWeight <= 0) {
+    if (outputWeight < 0) {
       return res.status(400).json({
         success: false,
-        message: "Output weight must be greater than zero"
+        message: "Output weight cannot be negative"
+      });
+    }
+
+    let recoveryWeight = 0;
+    if (recoveryProvided) {
+      const parsedRecoveryWeight = parseOptionalNumber(recoveryWeightRaw, "Recovery weight");
+      if (!parsedRecoveryWeight.ok) {
+        return res.status(400).json({
+          success: false,
+          message: parsedRecoveryWeight.message
+        });
+      }
+      recoveryWeight = parsedRecoveryWeight.value;
+    }
+
+    if (recoveryWeight < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Recovery weight cannot be negative"
       });
     }
 
@@ -6574,11 +6644,11 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    if (outputWeight > step.input_weight) {
+    if (outputWeight + recoveryWeight > step.input_weight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight cannot be greater than input weight"
+        message: "Output weight plus recovery weight cannot be greater than input weight"
       });
     }
 
@@ -6627,9 +6697,25 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    const lossWeight = step.input_weight - outputWeight;
+    const lossWeight = step.input_weight - outputWeight - recoveryWeight;
     const lossQty = step.input_qty - outputQty;
     const warnings = [];
+
+    if (lossWeight < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Loss weight cannot be negative"
+      });
+    }
+
+    console.log("[PROCESS_STEP_COMPLETE]", {
+      inputWeight: step.input_weight,
+      outputWeight,
+      recoveryWeight,
+      lossWeight
+    });
+
     if (step.input_qty > 0 && (lossQty / step.input_qty) > 0.05) {
       warnings.push("Quantity loss is above 5% for this process step");
     }
@@ -6638,6 +6724,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       `
       UPDATE process_steps
       SET output_weight = ?,
+          recovery_weight = ?,
           loss_weight = ?,
           output_qty = ?,
           loss_qty = ?,
@@ -6646,7 +6733,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
           completed_at = NOW()
       WHERE id = ?
       `,
-      [outputWeight, lossWeight, outputQty, lossQty, lossReason || step.loss_reason || "", stepId]
+      [outputWeight, recoveryWeight, lossWeight, outputQty, lossQty, lossReason || step.loss_reason || "", stepId]
     );
 
     const [savedRows] = await connection.query(
