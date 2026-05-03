@@ -4309,6 +4309,214 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const reportDate = normalizeReportDateInput(req.query.date);
+    const nextDate = getNextDateString(reportDate);
+    const companyFilter = companyId !== null ? "AND company_id = ?" : "";
+    const companyParams = companyId !== null ? [companyId] : [];
+
+    const [productionRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(weight), 0) AS today_production_weight,
+        COALESCE(SUM(COALESCE(qty, 1)), 0) AS today_production_qty,
+        COUNT(*) AS today_production_count
+      FROM stock
+      WHERE created_at >= ?
+        AND created_at < ?
+        ${companyFilter}
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
+    const [salesRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(total_amount), 0) AS today_sales_amount,
+        COALESCE(SUM(
+          CASE
+            WHEN COALESCE(employee_margin_amount, 0) <> 0 THEN employee_margin_amount
+            WHEN COALESCE(company_total_amount, 0) <> 0 THEN total_amount - company_total_amount
+            ELSE 0
+          END
+        ), 0) AS today_billing_margin
+      FROM sales_history
+      WHERE created_at >= ?
+        AND created_at < ?
+        AND COALESCE(is_deleted, 0) = 0
+        ${companyFilter}
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
+    const [processLossRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(loss_weight), 0) AS today_process_loss_weight,
+        COALESCE(SUM(loss_qty), 0) AS today_process_loss_qty
+      FROM process_steps
+      WHERE UPPER(COALESCE(status, '')) = 'COMPLETED'
+        AND COALESCE(completed_at, created_at) >= ?
+        AND COALESCE(completed_at, created_at) < ?
+        ${companyFilter}
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
+    const [lotRows] = await pool.query(
+      `
+      SELECT
+        SUM(CASE WHEN UPPER(COALESCE(status, 'OPEN')) = 'OPEN' THEN 1 ELSE 0 END) AS open_lots,
+        SUM(CASE WHEN UPPER(COALESCE(status, '')) = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_lots
+      FROM process_lots
+      WHERE 1 = 1
+        ${companyFilter}
+      `,
+      companyParams
+    );
+
+    const [pendingRows] = await pool.query(
+      `
+      SELECT COUNT(DISTINCT pending_lots.lot_no) AS pending_process_lots
+      FROM (
+        SELECT lot_no
+        FROM process_lots
+        WHERE UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+          ${companyFilter}
+        UNION
+        SELECT lot_no
+        FROM process_steps
+        WHERE UPPER(COALESCE(status, '')) <> 'COMPLETED'
+          ${companyFilter}
+      ) pending_lots
+      `,
+      [...companyParams, ...companyParams]
+    );
+
+    const [karigarRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(NULLIF(karigar_name, ''), 'Unassigned') AS karigar_name,
+        COUNT(*) AS step_count,
+        COALESCE(SUM(input_weight), 0) AS total_input_weight,
+        COALESCE(SUM(output_weight), 0) AS total_output_weight,
+        COALESCE(SUM(loss_weight), 0) AS total_loss_weight,
+        CASE
+          WHEN COALESCE(SUM(input_weight), 0) > 0
+          THEN (COALESCE(SUM(loss_weight), 0) / COALESCE(SUM(input_weight), 0)) * 100
+          ELSE 0
+        END AS loss_percent
+      FROM process_steps
+      WHERE UPPER(COALESCE(status, '')) = 'COMPLETED'
+        AND COALESCE(completed_at, created_at) >= ?
+        AND COALESCE(completed_at, created_at) < ?
+        ${companyFilter}
+      GROUP BY COALESCE(NULLIF(karigar_name, ''), 'Unassigned')
+      HAVING COALESCE(SUM(input_weight), 0) > 0
+      ORDER BY loss_percent ASC, total_input_weight DESC
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
+    const [highLossRows] = await pool.query(
+      `
+      SELECT
+        id,
+        lot_no,
+        process_name,
+        COALESCE(NULLIF(karigar_name, ''), 'Unassigned') AS karigar_name,
+        input_weight,
+        output_weight,
+        loss_weight,
+        input_qty,
+        output_qty,
+        loss_qty,
+        CASE
+          WHEN COALESCE(input_weight, 0) > 0
+          THEN (COALESCE(loss_weight, 0) / COALESCE(input_weight, 0)) * 100
+          ELSE 0
+        END AS loss_percent,
+        COALESCE(completed_at, created_at) AS completed_at
+      FROM process_steps
+      WHERE UPPER(COALESCE(status, '')) = 'COMPLETED'
+        AND COALESCE(input_weight, 0) > 0
+        AND (COALESCE(loss_weight, 0) / COALESCE(input_weight, 0)) * 100 > 5
+        AND COALESCE(completed_at, created_at) >= ?
+        AND COALESCE(completed_at, created_at) < ?
+        ${companyFilter}
+      ORDER BY loss_percent DESC, COALESCE(completed_at, created_at) DESC
+      LIMIT 20
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
+    const bestKarigarRow = karigarRows[0] || null;
+    const worstKarigarRow = karigarRows.length ? karigarRows[karigarRows.length - 1] : null;
+    const formatKarigar = (row) => row
+      ? {
+          name: String(row.karigar_name || "Unassigned"),
+          stepCount: Number(row.step_count || 0),
+          totalInputWeight: Number(row.total_input_weight || 0),
+          totalOutputWeight: Number(row.total_output_weight || 0),
+          totalLossWeight: Number(row.total_loss_weight || 0),
+          lossPercent: Number(row.loss_percent || 0)
+        }
+      : null;
+
+    return res.json({
+      success: true,
+      date: reportDate,
+      companyId,
+      todayProductionWeight: Number(productionRows[0]?.today_production_weight || 0),
+      todayProductionQty: Number(
+        productionRows[0]?.today_production_qty || productionRows[0]?.today_production_count || 0
+      ),
+      todaySalesAmount: Number(salesRows[0]?.today_sales_amount || 0),
+      todayBillingMargin: Number(salesRows[0]?.today_billing_margin || 0),
+      todayProcessLossWeight: Number(processLossRows[0]?.today_process_loss_weight || 0),
+      todayProcessLossQty: Number(processLossRows[0]?.today_process_loss_qty || 0),
+      openLots: Number(lotRows[0]?.open_lots || 0),
+      completedLots: Number(lotRows[0]?.completed_lots || 0),
+      pendingProcessLots: Number(pendingRows[0]?.pending_process_lots || 0),
+      bestKarigar: formatKarigar(bestKarigarRow),
+      worstKarigar: formatKarigar(worstKarigarRow),
+      highLossAlerts: highLossRows.map((row) => ({
+        id: row.id,
+        lotNo: row.lot_no || "",
+        processName: row.process_name || "",
+        karigarName: row.karigar_name || "Unassigned",
+        inputWeight: Number(row.input_weight || 0),
+        outputWeight: Number(row.output_weight || 0),
+        lossWeight: Number(row.loss_weight || 0),
+        inputQty: Number(row.input_qty || 0),
+        outputQty: Number(row.output_qty || 0),
+        lossQty: Number(row.loss_qty || 0),
+        lossPercent: Number(row.loss_percent || 0),
+        completedAt: row.completed_at || null
+      }))
+    });
+  } catch (error) {
+    console.error("Smart dashboard error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Smart dashboard fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 /* =========================
    COMPANY SETTINGS
 ========================= */
