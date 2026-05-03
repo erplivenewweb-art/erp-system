@@ -207,15 +207,6 @@
       font-weight: 700;
     }
 
-    .smart-dashboard-header {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      gap: 14px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-
     .smart-dashboard-controls {
       display: flex;
       align-items: flex-end;
@@ -235,7 +226,7 @@
 
     .smart-dashboard-controls input {
       height: 38px;
-      min-width: 158px;
+      width: 150px;
       border: 1px solid #d1d5db;
       border-radius: 10px;
       padding: 8px 10px;
@@ -245,7 +236,7 @@
     }
 
     .smart-status {
-      margin: 0 0 14px;
+      margin: 0 0 12px;
       padding: 10px 12px;
       border-radius: 10px;
       font-size: 13px;
@@ -283,6 +274,22 @@
 
     .smart-dashboard-grid {
       margin-bottom: 16px;
+    }
+
+    .smart-alert-panel {
+      margin-bottom: 16px;
+      padding: 14px;
+    }
+
+    .smart-alert-panel h3 {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .smart-alert-panel .dashboard-table th,
+    .smart-alert-panel .dashboard-table td {
+      padding: 9px 11px;
+      font-size: 13px;
     }
 
     .profile-box {
@@ -326,7 +333,6 @@
         min-height: 110px;
       }
 
-      .smart-dashboard-header,
       .smart-dashboard-controls {
         align-items: stretch;
       }
@@ -386,7 +392,13 @@
         </div>
 
         <div class="top-right" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <button type="button" onclick="loadDashboardData()">Refresh</button>
+          <div class="smart-dashboard-controls">
+            <div>
+              <label for="smartDashboardDate">Date</label>
+              <input type="date" id="smartDashboardDate" onchange="loadSmartDashboardData(true)" />
+            </div>
+          </div>
+          <button type="button" onclick="refreshDashboard()">Refresh</button>
           <button type="button" onclick="window.print()">Print</button>
           <button type="button" onclick="logoutUser()">Logout</button>
           <div class="profile-box" id="profileBox"></div>
@@ -398,25 +410,9 @@
           Low Stock Alert: <span id="lowStockCount">0</span> low-stock lot(s) found.
         </div>
 
-        <div class="panel">
-          <div class="smart-dashboard-header">
-            <div>
-              <h3>Smart Dashboard</h3>
-              <p class="subtext">Daily production, sales, process loss, lot, and karigar performance snapshot</p>
-            </div>
+        <div class="smart-status loading" id="smartDashboardStatus">Loading dashboard metrics...</div>
 
-            <div class="smart-dashboard-controls">
-              <div>
-                <label for="smartDashboardDate">Date</label>
-                <input type="date" id="smartDashboardDate" onchange="loadSmartDashboardData(true)" />
-              </div>
-              <button type="button" onclick="loadSmartDashboardData(true)">Refresh</button>
-            </div>
-          </div>
-
-          <div class="smart-status loading" id="smartDashboardStatus">Loading smart dashboard...</div>
-
-          <div class="summary-row summary-row-6 smart-dashboard-grid">
+        <div class="summary-row summary-row-6 smart-dashboard-grid">
             <div class="summary-card">
               <div class="summary-icon"><i class="fas fa-weight-scale"></i></div>
               <div class="summary-content">
@@ -524,32 +520,7 @@
                 <div class="summary-subtext">Loss above 5%</div>
               </div>
             </div>
-          </div>
 
-          <div class="table-wrap">
-            <table class="dashboard-table">
-              <thead>
-                <tr>
-                  <th>Lot</th>
-                  <th>Process</th>
-                  <th>Karigar</th>
-                  <th>Input Wt</th>
-                  <th>Output Wt</th>
-                  <th>Loss Wt</th>
-                  <th>Loss Qty</th>
-                  <th>Loss %</th>
-                </tr>
-              </thead>
-              <tbody id="smartHighLossAlertsBody">
-                <tr>
-                  <td colspan="8" class="empty-text">No high loss alert found</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="summary-row summary-row-6">
           <div class="summary-card">
             <div class="summary-icon">📦</div>
             <div class="summary-content">
@@ -620,6 +591,32 @@
               <p id="totalWeightTop">0 g</p>
               <div class="summary-subtext">Total stock weight</div>
             </div>
+          </div>
+        </div>
+
+        <div class="panel smart-alert-panel">
+          <h3>High Loss Alerts</h3>
+          <p class="subtext">Process steps where loss is above 5%</p>
+          <div class="table-wrap">
+            <table class="dashboard-table">
+              <thead>
+                <tr>
+                  <th>Lot</th>
+                  <th>Process</th>
+                  <th>Karigar</th>
+                  <th>Input Wt</th>
+                  <th>Output Wt</th>
+                  <th>Loss Wt</th>
+                  <th>Loss Qty</th>
+                  <th>Loss %</th>
+                </tr>
+              </thead>
+              <tbody id="smartHighLossAlertsBody">
+                <tr>
+                  <td colspan="8" class="empty-text">No high loss alert found</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -1066,7 +1063,7 @@
       }
 
       smartDashboardLoadPromise = (async () => {
-        setSmartStatus("loading", "Loading smart dashboard...");
+        setSmartStatus("loading", "Loading dashboard metrics...");
 
         try {
           const params = buildSmartDashboardParams();
@@ -1076,16 +1073,16 @@
           const data = await response.json();
 
           if (!response.ok || !data?.success) {
-            throw new Error(data?.message || "Smart dashboard load failed");
+            throw new Error(data?.message || "Dashboard metrics load failed");
           }
 
           renderSmartDashboard(data);
           setSmartStatus("", "");
           return data;
         } catch (error) {
-          console.log("Smart dashboard load error:", error);
+          console.log("Dashboard metrics load error:", error);
           resetSmartDashboardValues();
-          setSmartStatus("error", error.message || "Smart dashboard load failed");
+          setSmartStatus("error", error.message || "Dashboard metrics load failed");
           return null;
         } finally {
           smartDashboardLoadPromise = null;
@@ -1488,6 +1485,11 @@
           loadDashboardData();
         }
       }, 60000);
+    }
+
+    function refreshDashboard() {
+      loadSmartDashboardData(true);
+      loadDashboardData(true);
     }
 
     window.addEventListener("load", function () {
