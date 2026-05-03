@@ -297,6 +297,25 @@ function getRequestIpAddress(req) {
   ).trim();
 }
 
+function maskDebugIdentifier(value = "") {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+
+  const atIndex = clean.indexOf("@");
+  if (atIndex > 0) {
+    const name = clean.slice(0, atIndex);
+    const domain = clean.slice(atIndex + 1);
+    const maskedName =
+      name.length <= 2
+        ? `${name[0] || "*"}***`
+        : `${name.slice(0, 2)}***${name.slice(-1)}`;
+    return `${maskedName}@${domain}`;
+  }
+
+  if (clean.length <= 4) return `${clean[0] || "*"}***`;
+  return `${clean.slice(0, 2)}***${clean.slice(-2)}`;
+}
+
 function safeJsonStringify(value) {
   try {
     if (value === undefined) return null;
@@ -4171,6 +4190,16 @@ app.get("/:page", (req, res, next) => {
 
 app.get("/api/test", (req, res) => {
   return res.status(200).send("API TEST OK");
+});
+
+app.get("/debug/ping-login", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    method: "GET",
+    time: new Date().toISOString(),
+    origin: String(req.headers.origin || ""),
+    ip: getRequestIpAddress(req)
+  });
 });
 
 app.get("/health", async (req, res) => {
@@ -11146,12 +11175,39 @@ app.put("/rejectStaffRequest/:id", authMiddleware, checkRole(["SUPERADMIN", "OWN
    LOGIN
 ========================= */
 app.post("/login", loginRateLimiter, async (req, res) => {
+  const loginDebugId = crypto.randomBytes(4).toString("hex");
+  const loginDebugStartedAt = new Date();
+
+  console.log("[LOGIN_DEBUG] request_received", {
+    id: loginDebugId,
+    time: loginDebugStartedAt.toISOString(),
+    ip: getRequestIpAddress(req),
+    origin: String(req.headers.origin || ""),
+    userAgent: String(req.headers["user-agent"] || ""),
+    contentType: String(req.headers["content-type"] || ""),
+    hasBody: Boolean(req.body && Object.keys(req.body || {}).length),
+    emailOrMobile: maskDebugIdentifier(req.body?.email || req.body?.mobile || "")
+  });
+
+  const sendLoginDebugJson = (statusCode, payload) => {
+    console.log("[LOGIN_DEBUG] response_sending", {
+      id: loginDebugId,
+      time: new Date().toISOString(),
+      status: statusCode,
+      success: Boolean(payload?.success),
+      message: String(payload?.message || ""),
+      durationMs: Date.now() - loginDebugStartedAt.getTime()
+    });
+
+    return res.status(statusCode).json(payload);
+  };
+
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "").trim();
 
     if (!email || !password) {
-      return res.json({
+      return sendLoginDebugJson(200, {
         success: false,
         message: "Email and password are required"
       });
@@ -11160,12 +11216,12 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     const user = await findUserByEmail(email);
 
     if (!user) {
-      return res.json({ success: false, message: "Invalid login" });
+      return sendLoginDebugJson(200, { success: false, message: "Invalid login" });
     }
 
     const passwordMatches = await verifyPasswordForUser(user, password);
     if (!passwordMatches) {
-      return res.json({ success: false, message: "Invalid login" });
+      return sendLoginDebugJson(200, { success: false, message: "Invalid login" });
     }
 
     if (isSuperAdminUser(user)) {
@@ -11177,18 +11233,18 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     }
 
     if (String(user.status || "").toLowerCase() !== "approved") {
-      return res.json({ success: false, message: "Pending approval" });
+      return sendLoginDebugJson(200, { success: false, message: "Pending approval" });
     }
 
     if (!String(user.role || "").trim()) {
-      return res.json({ success: false, message: "Role not assigned yet" });
+      return sendLoginDebugJson(200, { success: false, message: "Role not assigned yet" });
     }
 
     const token = signAuthToken(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
-    return res.json({
+    return sendLoginDebugJson(200, {
       success: true,
       token,
       user: {
@@ -11207,7 +11263,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return res.status(500).json({
+    return sendLoginDebugJson(500, {
       success: false,
       message: "Server error",
       error: getErrorDetail(error)
