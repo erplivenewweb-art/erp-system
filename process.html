@@ -226,7 +226,12 @@
 
               <div class="input-box">
                 <label for="stepOutputWeight">Output Weight</label>
-                <input id="stepOutputWeight" type="number" step="0.001" placeholder="Returned/output weight" />
+                <input id="stepOutputWeight" type="number" step="0.001" placeholder="Finished output weight" />
+              </div>
+
+              <div class="input-box">
+                <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
+                <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
               </div>
 
               <div class="input-box">
@@ -934,16 +939,20 @@
     function updateProcessStepLoss() {
       const input = Number(document.getElementById("stepInputWeight")?.value || 0);
       const outputRaw = document.getElementById("stepOutputWeight")?.value;
+      const recoveryRaw = document.getElementById("stepRecoveryWeight")?.value;
       const lossInput = document.getElementById("stepLossWeight");
       const inputQty = Number(document.getElementById("stepInputQty")?.value || 0);
       const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
       const lossQtyInput = document.getElementById("stepLossQty");
+      const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
+      const hasRecovery = recoveryRaw !== "" && recoveryRaw !== null && recoveryRaw !== undefined;
 
-      if (lossInput && (outputRaw === "" || outputRaw === null || outputRaw === undefined)) {
+      if (lossInput && !hasOutput && !hasRecovery) {
         lossInput.value = "";
       } else if (lossInput) {
         const output = Number(outputRaw || 0);
-        lossInput.value = (input - output).toFixed(3);
+        const recovery = Number(recoveryRaw || 0);
+        lossInput.value = Math.max(input - (output + recovery), 0).toFixed(3);
       }
 
       if (lossQtyInput && (outputQtyRaw === "" || outputQtyRaw === null || outputQtyRaw === undefined)) {
@@ -963,6 +972,7 @@
       document.getElementById("stepInputQty").value = formatProcessQty(step?.inputQty || 0);
       document.getElementById("stepInputQty").readOnly = true;
       document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepRecoveryWeight").value = "";
       document.getElementById("stepOutputQty").value = "";
       document.getElementById("stepLossWeight").value = "";
       document.getElementById("stepLossQty").value = "";
@@ -1056,6 +1066,7 @@
         document.getElementById("stepInputQty").value = data?.inputQty ? formatProcessQty(data.inputQty) : "";
         document.getElementById("stepInputQty").readOnly = Number(data?.stepNo || 1) > 1;
         document.getElementById("stepOutputWeight").value = "";
+        document.getElementById("stepRecoveryWeight").value = "";
         document.getElementById("stepOutputQty").value = "";
         document.getElementById("stepLossWeight").value = "";
         document.getElementById("stepLossQty").value = "";
@@ -1104,13 +1115,20 @@
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const processName = document.getElementById("stepProcessName")?.value?.trim() || "";
       const karigarName = document.getElementById("stepKarigarName")?.value?.trim() || "";
+      const inputWeight = Number(document.getElementById("stepInputWeight")?.value || 0);
       const outputRaw = document.getElementById("stepOutputWeight")?.value;
+      const recoveryRaw = document.getElementById("stepRecoveryWeight")?.value;
       const inputQtyRaw = document.getElementById("stepInputQty")?.value;
       const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
       const lossReason = document.getElementById("stepLossReason")?.value?.trim() || "";
       const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
+      const hasRecovery = recoveryRaw !== "" && recoveryRaw !== null && recoveryRaw !== undefined;
       const hasInputQty = inputQtyRaw !== "" && inputQtyRaw !== null && inputQtyRaw !== undefined;
       const hasOutputQty = outputQtyRaw !== "" && outputQtyRaw !== null && outputQtyRaw !== undefined;
+      const finishedOutputWeight = Number(outputRaw || 0);
+      const recoveryWeight = Number(recoveryRaw || 0);
+      const accountedOutputWeight = finishedOutputWeight + recoveryWeight;
+      const calculatedLossWeight = inputWeight - accountedOutputWeight;
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
@@ -1119,6 +1137,21 @@
 
       if (!currentOpenProcessStep && !processName) {
         showToast("Please enter the process name.", "error", "Missing Field");
+        return;
+      }
+
+      if (hasRecovery && recoveryWeight < 0) {
+        showToast("Recovery weight cannot be negative", "error");
+        return;
+      }
+
+      if (hasOutput && finishedOutputWeight < 0) {
+        showToast("Output weight cannot be negative", "error");
+        return;
+      }
+
+      if ((hasOutput || hasRecovery) && calculatedLossWeight < 0) {
+        showToast("Output plus recovery cannot be greater than input weight", "error");
         return;
       }
 
@@ -1136,7 +1169,7 @@
               "Content-Type": "application/json"
             },
             body: JSON.stringify(buildAuthPayload({
-              outputWeight: Number(outputRaw),
+              outputWeight: accountedOutputWeight,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason
             }))
@@ -1152,7 +1185,7 @@
               processName,
               karigarName,
               inputQty: hasInputQty ? Number(inputQtyRaw) : undefined,
-              outputWeight: hasOutput ? Number(outputRaw) : undefined,
+              outputWeight: hasOutput ? accountedOutputWeight : undefined,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason,
               status: hasOutput ? "COMPLETED" : "OPEN"
@@ -1186,6 +1219,7 @@
       document.getElementById("stepInputQty").value = "";
       document.getElementById("stepInputQty").readOnly = false;
       document.getElementById("stepOutputWeight").value = "";
+      document.getElementById("stepRecoveryWeight").value = "";
       document.getElementById("stepOutputQty").value = "";
       document.getElementById("stepLossWeight").value = "";
       document.getElementById("stepLossQty").value = "";
@@ -1486,6 +1520,7 @@
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
+    document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);
 
     window.addEventListener("load", async function () {

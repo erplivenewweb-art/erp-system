@@ -723,6 +723,8 @@ function normalizeProcessStepRow(row) {
     step_no: Number(row.step_no || 0),
     input_weight: toNumber(row.input_weight),
     output_weight: toNumber(row.output_weight),
+    recovery_weight: toNumber(row.recovery_weight),
+    recoveryWeight: toNumber(row.recoveryWeight ?? row.recovery_weight),
     loss_weight: toNumber(row.loss_weight),
     input_qty: toNumber(row.input_qty),
     output_qty: toNumber(row.output_qty),
@@ -2515,6 +2517,7 @@ async function ensureSchema() {
       karigar_name VARCHAR(255) DEFAULT '',
       input_weight DECIMAL(14,3) DEFAULT 0.000,
       output_weight DECIMAL(14,3) DEFAULT 0.000,
+      recovery_weight DECIMAL(14,3) DEFAULT 0.000,
       loss_weight DECIMAL(14,3) DEFAULT 0.000,
       input_qty DECIMAL(14,3) DEFAULT 0.000,
       output_qty DECIMAL(14,3) DEFAULT 0.000,
@@ -2847,6 +2850,7 @@ async function ensureSchema() {
     await addColumnIfMissing("process_steps", "karigar_name", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("process_steps", "input_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "output_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "recovery_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "input_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "output_qty", "DECIMAL(14,3) DEFAULT 0.000");
