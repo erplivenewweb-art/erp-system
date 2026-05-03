@@ -68,32 +68,24 @@
     .summary-icon {
       width: 54px;
       height: 54px;
-      border: 1px solid #e7dcc8;
-      border-radius: 14px;
+      border: none;
+      border-radius: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 26px;
+      font-size: 34px;
       line-height: 1;
       color: #7c5a1d;
-      background:
-        linear-gradient(180deg, #fffdf9, #f7f1e6);
+      background: transparent;
       flex-shrink: 0;
-      box-shadow:
-        0 8px 18px rgba(15, 23, 42, 0.06),
-        inset 0 1px 0 rgba(255,255,255,0.9);
+      box-shadow: none;
       position: relative;
-      overflow: hidden;
+      overflow: visible;
       font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
     }
 
     .summary-icon::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      background: linear-gradient(135deg, rgba(197, 139, 43, 0.12), rgba(255,255,255,0));
-      pointer-events: none;
+      content: none;
     }
 
     .summary-icon i {
@@ -414,7 +406,7 @@
 
         <div class="summary-row summary-row-6 smart-dashboard-grid">
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-weight-scale"></i></div>
+              <div class="summary-icon">🏭</div>
               <div class="summary-content">
                 <h4>Today Production Weight</h4>
                 <p id="smartProductionWeight">0.000 g</p>
@@ -423,7 +415,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-layer-group"></i></div>
+              <div class="summary-icon">📦</div>
               <div class="summary-content">
                 <h4>Today Production Qty</h4>
                 <p id="smartProductionQty">0</p>
@@ -432,7 +424,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-indian-rupee-sign"></i></div>
+              <div class="summary-icon">💰</div>
               <div class="summary-content">
                 <h4>Today Sales</h4>
                 <p id="smartSalesAmount">&#8377; 0.00</p>
@@ -441,7 +433,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-chart-line"></i></div>
+              <div class="summary-icon">📈</div>
               <div class="summary-content">
                 <h4>Estimated Billing Margin</h4>
                 <p id="smartBillingMargin">&#8377; 0.00</p>
@@ -450,7 +442,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-scale-unbalanced"></i></div>
+              <div class="summary-icon">⚖️</div>
               <div class="summary-content">
                 <h4>Today Process Loss Weight</h4>
                 <p id="smartProcessLossWeight">0.000 g</p>
@@ -459,7 +451,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-minus-circle"></i></div>
+              <div class="summary-icon">📉</div>
               <div class="summary-content">
                 <h4>Today Process Loss Qty</h4>
                 <p id="smartProcessLossQty">0</p>
@@ -468,7 +460,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-folder-open"></i></div>
+              <div class="summary-icon">📂</div>
               <div class="summary-content">
                 <h4>Open Lots</h4>
                 <p id="smartOpenLots">0</p>
@@ -477,7 +469,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-circle-check"></i></div>
+              <div class="summary-icon">✅</div>
               <div class="summary-content">
                 <h4>Completed Lots</h4>
                 <p id="smartCompletedLots">0</p>
@@ -486,7 +478,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-hourglass-half"></i></div>
+              <div class="summary-icon">⏳</div>
               <div class="summary-content">
                 <h4>Pending Process Lots</h4>
                 <p id="smartPendingProcessLots">0</p>
@@ -495,7 +487,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-ranking-star"></i></div>
+              <div class="summary-icon">👑</div>
               <div class="summary-content">
                 <h4>Best Karigar</h4>
                 <p id="smartBestKarigar">-</p>
@@ -504,7 +496,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-triangle-exclamation"></i></div>
+              <div class="summary-icon">⚠️</div>
               <div class="summary-content">
                 <h4>Worst Karigar</h4>
                 <p id="smartWorstKarigar">-</p>
@@ -513,7 +505,7 @@
             </div>
 
             <div class="summary-card">
-              <div class="summary-icon"><i class="fas fa-bell"></i></div>
+              <div class="summary-icon">🚨</div>
               <div class="summary-content">
                 <h4>High Loss Alerts</h4>
                 <p id="smartHighLossAlertCount">0</p>
@@ -540,7 +532,7 @@
           </div>
 
           <div class="summary-card">
-            <div class="summary-icon">🔄</div>
+            <div class="summary-icon">🔁</div>
             <div class="summary-content">
               <h4>Total Returns</h4>
               <p id="totalReturnCount">0</p>
@@ -576,7 +568,7 @@
           </div>
 
           <div class="summary-card">
-            <div class="summary-icon">🚨</div>
+            <div class="summary-icon">🔔</div>
             <div class="summary-content">
               <h4>Low Stock Alert</h4>
               <p id="lowStockLotCount">0</p>
