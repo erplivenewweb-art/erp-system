@@ -156,23 +156,8 @@
                 </div>
 
                 <div class="input-box">
-                  <label for="processLossWeight">Loss Weight</label>
-                  <input id="processLossWeight" type="number" step="0.001" placeholder="Enter Loss Weight" />
-                </div>
-
-                <div class="input-box">
                   <label for="processFinalWeight">Final Weight</label>
-                  <input id="processFinalWeight" type="number" step="0.001" readonly />
-                </div>
-
-                <div class="input-box">
-                  <label for="processUsedWeight">Used Weight</label>
-                  <input id="processUsedWeight" type="number" step="0.001" readonly />
-                </div>
-
-                <div class="input-box">
-                  <label for="processBalanceWeight">Balance Weight</label>
-                  <input id="processBalanceWeight" type="number" step="0.001" readonly />
+                  <input id="processFinalWeight" type="number" step="0.001" placeholder="Enter Final Weight" />
                 </div>
               </div>
 
@@ -183,7 +168,7 @@
 
               <div id="processSummary" class="summary" style="margin-top: 16px;">
                 <h3>Summary</h3>
-                <p>Raw: 0 | Loss: 0 | Final: 0 | Used: 0 | Balance: 0</p>
+                <p>Raw: 0 | Final: 0 | Loss: 0</p>
               </div>
             </div>
 
@@ -402,6 +387,18 @@
                   <div class="input-box">
                     <label>Total Input Weight</label>
                     <input id="liveTotalInputWeight" type="text" readonly />
+                  </div>
+                  <div class="input-box">
+                    <label>Final/Available Weight</label>
+                    <input id="liveFinalAvailableWeight" type="text" readonly />
+                  </div>
+                  <div class="input-box">
+                    <label>Used Weight</label>
+                    <input id="liveUsedWeight" type="text" readonly />
+                  </div>
+                  <div class="input-box">
+                    <label>Balance Weight</label>
+                    <input id="liveBalanceWeight" type="text" readonly />
                   </div>
                   <div class="input-box">
                     <label>Current Output Weight</label>
@@ -776,37 +773,46 @@
     function updateProcessCalculations() {
       const lotNo = document.getElementById("processLotNo")?.value?.trim() || "";
       const raw = Number(document.getElementById("processRawWeight")?.value || 0);
-      const loss = Number(document.getElementById("processLossWeight")?.value || 0);
-      const finalWeight = raw - loss;
-      const used = getUsedWeightByLot(lotNo);
-      const balance = finalWeight - used;
+      const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
+      const loss = raw - finalWeight;
       const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
-
-      document.getElementById("processFinalWeight").value = finalWeight.toFixed(3);
-      document.getElementById("processUsedWeight").value = used.toFixed(3);
-      document.getElementById("processBalanceWeight").value = balance.toFixed(3);
 
       const summary = document.getElementById("processSummary");
       if (summary) {
         summary.innerHTML = `
           <h3>Summary</h3>
-          <p>Raw: ${raw.toFixed(3)} | Loss: ${loss.toFixed(3)} | Final: ${finalWeight.toFixed(3)} | Used: ${used.toFixed(3)} | Balance: ${balance.toFixed(3)}</p>
+          <p>Raw: ${raw.toFixed(3)} | Final: ${finalWeight.toFixed(3)} | Loss: ${Math.max(loss, 0).toFixed(3)} | Expected Qty: ${formatProcessQty(expectedQty)}</p>
         `;
       }
+
+      renderLiveProcessSummary();
     }
 
     async function saveProcessLot() {
       const lotNo = document.getElementById("processLotNo")?.value?.trim() || "";
       const raw = Number(document.getElementById("processRawWeight")?.value || 0);
-      const loss = Number(document.getElementById("processLossWeight")?.value || 0);
-      const finalWeight = raw - loss;
-      const used = getUsedWeightByLot(lotNo);
-      const balance = finalWeight - used;
+      const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
+      const loss = raw - finalWeight;
       const khadiCount = Number(document.getElementById("khadiCount")?.value || 0);
       const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
+        return;
+      }
+
+      if (raw <= 0) {
+        showToast("Enter raw weight greater than 0", "error");
+        return;
+      }
+
+      if (finalWeight <= 0) {
+        showToast("Enter final weight greater than 0", "error");
+        return;
+      }
+
+      if (finalWeight > raw) {
+        showToast("Final weight cannot be more than raw weight", "error");
         return;
       }
 
@@ -873,18 +879,17 @@
       document.getElementById("processRawWeight").value = "";
       document.getElementById("khadiCount").value = "";
       document.getElementById("processExpectedQty").value = "";
-      document.getElementById("processLossWeight").value = "";
       document.getElementById("processFinalWeight").value = "";
-      document.getElementById("processUsedWeight").value = "";
-      document.getElementById("processBalanceWeight").value = "";
 
       const summary = document.getElementById("processSummary");
       if (summary) {
         summary.innerHTML = `
           <h3>Summary</h3>
-          <p>Raw: 0 | Loss: 0 | Final: 0 | Used: 0 | Balance: 0</p>
+          <p>Raw: 0 | Final: 0 | Loss: 0</p>
         `;
       }
+
+      renderLiveProcessSummary();
     }
 
     function renderProcessTable() {
@@ -1254,7 +1259,9 @@
     }
 
     function renderLiveProcessSummary() {
-      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const stepLotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const entryLotNo = document.getElementById("processLotNo")?.value?.trim() || "";
+      const lotNo = stepLotNo || entryLotNo;
       const activeSteps = processStepData.filter((step) => !lotNo || step.lotNo === lotNo);
       const completedSteps = activeSteps.filter((step) => step.status === "COMPLETED");
       const latestStep = completedSteps.length ? completedSteps[completedSteps.length - 1] : null;
@@ -1265,9 +1272,17 @@
       const totalInputQty = firstStep ? firstStep.inputQty : 0;
       const currentOutputQty = latestStep ? latestStep.outputQty : 0;
       const totalQtyLoss = totalInputQty - currentOutputQty;
+      const savedLot = lotData.find((lot) => String(lot.lotNo || "").trim() === lotNo);
+      const formFinalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
+      const finalAvailableWeight = savedLot ? Number(savedLot.finalWeight || 0) : formFinalWeight;
+      const usedWeight = lotNo ? getUsedWeightByLot(lotNo) : 0;
+      const balanceWeight = finalAvailableWeight - usedWeight;
 
       setLiveValue("liveLotNo", lotNo || "-");
       setLiveValue("liveTotalInputWeight", formatProcessWeight(totalInputWeight));
+      setLiveValue("liveFinalAvailableWeight", formatProcessWeight(finalAvailableWeight));
+      setLiveValue("liveUsedWeight", formatProcessWeight(usedWeight));
+      setLiveValue("liveBalanceWeight", formatProcessWeight(balanceWeight));
       setLiveValue("liveCurrentOutputWeight", formatProcessWeight(currentOutputWeight));
       setLiveValue("liveTotalWeightLoss", formatProcessWeight(totalWeightLoss));
       setLiveValue("liveTotalInputQty", formatProcessQty(totalInputQty));
@@ -1465,7 +1480,8 @@
     document.getElementById("processLotNo")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
-    document.getElementById("processLossWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
