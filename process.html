@@ -983,6 +983,28 @@
       return { ok: true, usedWeight: given - returned };
     }
 
+    function getAdditiveMaterialPayload() {
+      if (!isAdditiveMaterialStepActive()) {
+        return {
+          additiveGivenWeight: 0,
+          additiveReturnedWeight: 0,
+          additiveUsedWeight: 0,
+          additiveMaterialLabel: ""
+        };
+      }
+
+      const validation = validateAdditiveMaterialInputs(false);
+      const given = Number(document.getElementById("stepAdditiveGivenWeight")?.value || 0);
+      const returned = Number(document.getElementById("stepAdditiveReturnedWeight")?.value || 0);
+
+      return {
+        additiveGivenWeight: given,
+        additiveReturnedWeight: returned,
+        additiveUsedWeight: validation.ok ? validation.usedWeight : 0,
+        additiveMaterialLabel: getAdditiveMaterialLabel()
+      };
+    }
+
     function updateAdditiveMaterialUsage() {
       if (!isAdditiveMaterialStepActive()) return;
 
@@ -1548,13 +1570,14 @@
       const inputQtyRaw = document.getElementById("stepInputQty")?.value;
       const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
       const lossReason = document.getElementById("stepLossReason")?.value?.trim() || "";
+      const additivePayload = getAdditiveMaterialPayload();
       const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
       const hasRecovery = recoveryRaw !== "" && recoveryRaw !== null && recoveryRaw !== undefined;
       const hasInputQty = inputQtyRaw !== "" && inputQtyRaw !== null && inputQtyRaw !== undefined;
       const hasOutputQty = outputQtyRaw !== "" && outputQtyRaw !== null && outputQtyRaw !== undefined;
       const finishedOutputWeight = Number(outputRaw || 0);
       const recoveryWeight = Number(recoveryRaw || 0);
-      const calculatedLossWeight = inputWeight - finishedOutputWeight - recoveryWeight;
+      const calculatedLossWeight = inputWeight + additivePayload.additiveUsedWeight - finishedOutputWeight - recoveryWeight;
       const additiveValidation = validateAdditiveMaterialInputs(true);
 
       if (!lotNo) {
@@ -1582,7 +1605,7 @@
       }
 
       if ((hasOutput || hasRecovery) && calculatedLossWeight < 0) {
-        showToast("Output plus recovery cannot be greater than input weight", "error");
+        showToast("Output plus recovery cannot be greater than input weight plus additive material used weight", "error");
         return;
       }
 
@@ -1602,6 +1625,7 @@
             body: JSON.stringify(buildAuthPayload({
               outputWeight: finishedOutputWeight,
               recoveryWeight,
+              ...additivePayload,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason
             }))
@@ -1620,6 +1644,7 @@
               outputWeight: hasOutput ? finishedOutputWeight : undefined,
               recoveryWeight: hasOutput || hasRecovery ? recoveryWeight : undefined,
               recoveryStockIds: [...selectedRecoveryStockIds],
+              ...additivePayload,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason,
               status: hasOutput ? "COMPLETED" : "OPEN"
