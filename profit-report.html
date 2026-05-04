@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profit Report</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .company-info-chip {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .profit-hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 18px 20px;
+      border-radius: 18px;
+      border: 1px solid #eadfca;
+      background:
+        radial-gradient(circle at top right, rgba(212, 175, 55, 0.18), transparent 38%),
+        linear-gradient(180deg, #fffaf1 0%, #ffffff 100%);
+      box-shadow: 0 12px 30px rgba(46, 42, 36, 0.06);
+    }
+
+    .profit-hero h2 {
+      margin: 0 0 6px;
+      color: #2e2a24;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .profit-hero p {
+      margin: 0;
+      color: #7a6f5c;
+      line-height: 1.55;
+    }
+
+    .profit-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      border: 1px solid #dec98d;
+      color: #8a6b12;
+      background: #fff4d6;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .profit-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .profit-filter-grid {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+
+    .profit-filter-grid .input-box {
+      min-width: 220px;
+    }
+
+    .profit-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .profit-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #eadfca;
+      border-radius: 18px;
+      padding: 18px 16px;
+      background: linear-gradient(180deg, #ffffff 0%, #fffaf1 100%);
+      box-shadow: 0 12px 28px rgba(46, 42, 36, 0.05);
+    }
+
+    .profit-card::after {
+      content: "";
+      position: absolute;
+      right: -22px;
+      bottom: -24px;
+      width: 84px;
+      height: 84px;
+      border-radius: 999px;
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .profit-card-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .profit-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #9a6b09;
+      background: #fff4d6;
+      border: 1px solid #e8d19a;
+      font-size: 18px;
+    }
+
+    .profit-card h4 {
+      margin: 0;
+      color: #7a6f5c;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .profit-value {
+      margin: 0;
+      position: relative;
+      z-index: 1;
+      color: #2e2a24;
+      font-size: 28px;
+      line-height: 1.1;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .profit-value.gold {
+      color: #b8901f;
+    }
+
+    .profit-meta {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px dashed #decfb8;
+      background: #fffdf8;
+      color: #7a6f5c;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1080px) {
+      .profit-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .profit-summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .profit-filter-grid,
+      .profit-filter-grid .input-box {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand">
+          <div class="brand-logo"><i class="fas fa-gem"></i></div>
+          <div class="brand-text">
+            <h2>ERP</h2>
+            <p>Jewellery Suite</p>
+          </div>
+        </div>
+
+        <ul class="menu">
+          <li><a href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a></li>
+          <li><a href="process.html"><i class="fas fa-screwdriver-wrench"></i> Process</a></li>
+          <li><a href="sticker.html"><i class="fas fa-barcode"></i> Sticker</a></li>
+          <li><a href="stock.html"><i class="fas fa-boxes-stacked"></i> Stock</a></li>
+          <li><a href="material-stock.html"><i class="fas fa-box-open"></i> Material Stock</a></li>
+          <li><a href="daily-report.html"><i class="fas fa-chart-line"></i> Daily Report</a></li>
+          <li><a href="profit-report.html" class="active"><i class="fas fa-coins"></i> Profit Report</a></li>
+          <li><a href="invoice.html"><i class="fas fa-file-invoice"></i> Invoice</a></li>
+          <li><a href="billing.html"><i class="fas fa-money-bill-wave"></i> Billing</a></li>
+          <li><a href="sales-history.html"><i class="fas fa-receipt"></i> Sales History</a></li>
+          <li><a href="return.html"><i class="fas fa-rotate-left"></i> Return</a></li>
+          <li><a href="transaction.html"><i class="fas fa-right-left"></i> Transactions</a></li>
+          <li><a href="transaction-reports.html"><i class="fas fa-book"></i> Transaction Reports</a></li>
+          <li><a href="settings.html"><i class="fas fa-gear"></i> Settings</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div class="top-left">
+          <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+            <i class="fas fa-bars"></i>
+          </button>
+          <div class="title">
+            <h1 id="pageCompanyTitle">RPJ MANUFACTURER</h1>
+            <p>Profit Report</p>
+          </div>
+        </div>
+
+        <div class="top-right">
+          <button type="button" onclick="window.print()">Print</button>
+          <div class="profile-box" id="profileBox"></div>
+        </div>
+      </div>
+
+      <section class="page active">
+        <div class="section-box">
+          <div id="companyInfoChip" class="company-info-chip">Company: Loading...</div>
+
+          <div class="profit-hero">
+            <div>
+              <h2>Profit Report</h2>
+              <p>Review sales, company cost, and computed profit without changing billing data.</p>
+            </div>
+            <span class="profit-badge"><i class="fas fa-shield-halved"></i> Read Only</span>
+          </div>
+
+          <div class="profit-toolbar">
+            <div class="profit-filter-grid">
+              <div class="input-box">
+                <label for="fromDate">From Date</label>
+                <input id="fromDate" type="date" />
+              </div>
+
+              <div class="input-box">
+                <label for="toDate">To Date</label>
+                <input id="toDate" type="date" />
+              </div>
+            </div>
+
+            <div class="btn-row">
+              <button class="primary-btn" type="button" onclick="loadProfitReport(true)">
+                <i class="fas fa-rotate"></i> Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="profit-summary-grid">
+            <div class="profit-card">
+              <div class="profit-card-head">
+                <span class="profit-icon"><i class="fas fa-indian-rupee-sign"></i></span>
+                <h4>Total Sales</h4>
+              </div>
+              <p id="totalSales" class="profit-value">₹ 0.00</p>
+            </div>
+
+            <div class="profit-card">
+              <div class="profit-card-head">
+                <span class="profit-icon"><i class="fas fa-building"></i></span>
+                <h4>Total Cost</h4>
+              </div>
+              <p id="totalCost" class="profit-value">₹ 0.00</p>
+            </div>
+
+            <div class="profit-card">
+              <div class="profit-card-head">
+                <span class="profit-icon"><i class="fas fa-coins"></i></span>
+                <h4>Total Profit</h4>
+              </div>
+              <p id="totalProfit" class="profit-value gold">₹ 0.00</p>
+            </div>
+
+            <div class="profit-card">
+              <div class="profit-card-head">
+                <span class="profit-icon"><i class="fas fa-file-invoice"></i></span>
+                <h4>Total Invoices</h4>
+              </div>
+              <p id="totalInvoices" class="profit-value">0</p>
+            </div>
+          </div>
+
+          <div id="profitMeta" class="profit-meta">Select dates and refresh to view the report.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    const API_BASE = window.ERP_API_BASE;
+    const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
+
+    function getLoggedInUserSafe() {
+      try {
+        return JSON.parse(localStorage.getItem("erpLoggedInUser")) || null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function getCurrentCompanyNameSafe() {
+      if (typeof getCurrentCompanyName === "function") return getCurrentCompanyName();
+      const user = getLoggedInUserSafe();
+      return String(user?.company_name || user?.companyName || "").trim();
+    }
+
+    function getCurrentCompanyIdSafe() {
+      if (typeof getCurrentCompanyId === "function") return getCurrentCompanyId();
+      const user = getLoggedInUserSafe();
+      const raw = user?.company_id ?? user?.companyId ?? null;
+      if (raw === null || raw === undefined || raw === "") return null;
+      const num = Number(raw);
+      return Number.isNaN(num) ? null : num;
+    }
+
+    function getCurrentUserIdSafe() {
+      if (typeof getCurrentUserId === "function") return getCurrentUserId();
+      const user = getLoggedInUserSafe();
+      const raw = user?.id ?? user?.user_id ?? user?.userId ?? null;
+      if (raw === null || raw === undefined || raw === "") return null;
+      const num = Number(raw);
+      return Number.isNaN(num) ? null : num;
+    }
+
+    function isSuperAdminSafe() {
+      if (typeof isSuperAdmin === "function") return isSuperAdmin();
+      const user = getLoggedInUserSafe();
+      const role = String(user?.role || "").toLowerCase();
+      const email = String(user?.email || "").toLowerCase();
+      return role === "superadmin" || email === "grudrapratap0@gmail.com";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatMoney(value) {
+      const num = Number(value || 0);
+      return `₹ ${num.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })}`;
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function buildProfitParams() {
+      const params = new URLSearchParams();
+      const userId = getCurrentUserIdSafe();
+      const companyId = getCurrentCompanyIdSafe();
+      const from = document.getElementById("fromDate")?.value || "";
+      const to = document.getElementById("toDate")?.value || "";
+
+      if (userId !== null) params.set("actingUserId", String(userId));
+      if (companyId !== null) params.set("companyId", String(companyId));
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+
+      return params;
+    }
+
+    function renderProfileBox() {
+      const profile = document.getElementById("profileBox");
+      if (!profile) return;
+      const user = getLoggedInUserSafe();
+      if (!user) {
+        profile.innerHTML = `<i class="fas fa-user-circle"></i><span>Guest</span>`;
+        return;
+      }
+
+      const role = String(user.role || "-");
+      const companyName = isSuperAdminSafe() ? "All Companies" : (getCurrentCompanyNameSafe() || "No Company");
+      profile.innerHTML = `<i class="fas fa-user-circle"></i><span>${escapeHtml(role)} | ${escapeHtml(companyName)}</span>`;
+    }
+
+    function renderCompanyInfo() {
+      const chip = document.getElementById("companyInfoChip");
+      if (!chip) return;
+      chip.textContent = isSuperAdminSafe()
+        ? "Company: Super Admin View"
+        : `Company: ${getCurrentCompanyNameSafe() || "Unknown Company"}`;
+    }
+
+    function renderPageTitle() {
+      const title = document.getElementById("pageCompanyTitle");
+      if (!title) return;
+      title.textContent = isSuperAdminSafe()
+        ? "SUPER ADMIN PANEL"
+        : (getCurrentCompanyNameSafe() || "RPJ MANUFACTURER");
+    }
+
+    async function loadProfitReport(showToastOnSuccess = false) {
+      const from = document.getElementById("fromDate")?.value || "";
+      const to = document.getElementById("toDate")?.value || "";
+
+      if (from && to && from > to) {
+        showToast("From Date cannot be after To Date", "error");
+        return;
+      }
+
+      try {
+        const params = buildProfitParams();
+        const url = `${API_BASE}/api/reports/profit${params.toString() ? `?${params.toString()}` : ""}`;
+        const res = await fetch(url, { cache: "no-store" });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Profit report load failed");
+        }
+
+        setText("totalSales", formatMoney(data.totalSales));
+        setText("totalCost", formatMoney(data.totalCost));
+        setText("totalProfit", formatMoney(data.totalProfit));
+        setText("totalInvoices", String(Number(data.totalInvoices || 0)));
+
+        const rangeLabel = from || to
+          ? `${from || "Start"} to ${to || "Today"}`
+          : "All available invoices";
+        setText("profitMeta", `Showing ${rangeLabel}. Profit is computed as Total Sales minus Total Cost.`);
+
+        if (showToastOnSuccess) showToast("Profit report refreshed", "success");
+      } catch (error) {
+        console.log("Profit report error:", error);
+        setText("profitMeta", error.message || "Profit report load failed");
+        showToast(error.message || "Profit report load failed", "error");
+      }
+    }
+
+    function saveSidebarState(isCollapsed) {
+      localStorage.setItem(ERP_SIDEBAR_STORAGE_KEY, isCollapsed ? "true" : "false");
+    }
+
+    function applySidebarState() {
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      const isCollapsed = localStorage.getItem(ERP_SIDEBAR_STORAGE_KEY) === "true";
+      sidebar.classList.toggle("collapsed", isCollapsed);
+    }
+
+    function bindSidebarToggle() {
+      const sidebar = document.getElementById("sidebar");
+      const toggle = document.getElementById("sidebarToggle");
+      if (!sidebar || !toggle) return;
+
+      toggle.addEventListener("click", () => {
+        const nextState = !sidebar.classList.contains("collapsed");
+        sidebar.classList.toggle("collapsed", nextState);
+        saveSidebarState(nextState);
+      });
+    }
+
+    window.addEventListener("load", async function () {
+      requireLogin();
+      filterSidebarMenuByRole();
+      applySidebarState();
+      bindSidebarToggle();
+      renderProfileBox();
+      renderCompanyInfo();
+      renderPageTitle();
+      await loadProfitReport(false);
+    });
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>
