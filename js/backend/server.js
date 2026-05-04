@@ -1164,7 +1164,7 @@ function validateBillingTotals(payload) {
   const paidAmount = toNumber(payload.paidAmount);
   const dueAmount = toNumber(payload.dueAmount);
 
-  const matches = expectedCandidates.some((expected) => {
+  const matchedTotals = expectedCandidates.find((expected) => {
     const subtotalOk = isAmountClose(submittedSubtotal, expected.subtotal);
     const totalOk =
       isAmountClose(submittedTotal, expected.totalAmount) &&
@@ -1176,7 +1176,7 @@ function validateBillingTotals(payload) {
     return subtotalOk && totalOk && companyTotalOk && marginOk && weightOk;
   });
 
-  if (!matches) {
+  if (!matchedTotals) {
     return {
       ok: false,
       message: "Billing total mismatch. Please recalculate and try again."
@@ -1199,7 +1199,8 @@ function validateBillingTotals(payload) {
   }
 
   return {
-    ok: true
+    ok: true,
+    totals: matchedTotals
   };
 }
 
@@ -10970,6 +10971,31 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       });
     }
 
+    const billingTotals = billingTotalsValidation.totals;
+    const billingLines = Array.isArray(billingTotals?.lines) ? billingTotals.lines : [];
+    const ledgerItems = items.map((item, index) => {
+      const line = billingLines[index] || {};
+      return {
+        ...item,
+        pureWeight: line.pureWeight,
+        pure_weight: line.pureWeight,
+        fineWeight: line.pureWeight,
+        fine_weight: line.pureWeight,
+        companyRatePerGram: line.companyRatePerGram,
+        company_rate_per_gram: line.companyRatePerGram,
+        sellingRatePerGram: line.sellingRatePerGram,
+        selling_rate_per_gram: line.sellingRatePerGram,
+        customerLineAmount: line.customerLineAmount,
+        customer_line_amount: line.customerLineAmount,
+        companyLineAmount: line.companyLineAmount,
+        company_line_amount: line.companyLineAmount,
+        employeeMarginAmount: line.employeeMarginAmount,
+        employee_margin_amount: line.employeeMarginAmount,
+        totalPrice: line.customerLineAmount,
+        total_price: line.customerLineAmount
+      };
+    });
+
     const [saleInsert] = await connection.query(
       `
       INSERT INTO sales_history
@@ -11015,30 +11041,31 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         String(paymentStatus || "").trim(),
         Number(paidAmount || 0),
         Number(dueAmount || 0),
-        finalTotalItems,
-        Number(finalTotalWeight || 0),
+        Number(billingTotals.totalItems || 0),
+        Number(billingTotals.totalWeight || 0),
         Number(ratePerGram || 0),
         Number(companyRatePerGram || 0),
         Number(sellingRatePerGram || ratePerGram || 0),
         Number(marginPerGram || 0),
         Number(mcRate || 0),
         Number(roundOff || 0),
-        Number(subtotal || 0),
-        Number(customerSubtotal || subtotal || 0),
-        Number(customerTotal || totalAmount || 0),
-        Number(companySubtotal || 0),
-        Number(companyTotal || 0),
-        Number(employeeMargin || 0),
+        Number(billingTotals.subtotal || 0),
+        Number(billingTotals.customerSubtotal || 0),
+        Number(billingTotals.customerTotal || 0),
+        Number(billingTotals.companySubtotal || 0),
+        Number(billingTotals.companyTotal || 0),
+        Number(billingTotals.employeeMargin || 0),
         String(employeeName || "").trim(),
-        Number(totalAmount || customerTotal || 0),
+        Number(billingTotals.totalAmount || 0),
         finalCompanyId
       ]
     );
 
     const saleId = saleInsert.insertId;
 
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
       const barcode = String(item.barcode || "").trim();
+      const line = billingLines[index] || {};
 
       await connection.query(
         `
@@ -11077,12 +11104,12 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           Number(item.weight || 0),
           String(item.lot || item.lot_number || "").trim(),
           String(customerName || "").trim(),
-          Number(item.pureWeight || item.pure_weight || 0),
-          Number(item.companyRatePerGram || item.company_rate_per_gram || companyRatePerGram || 0),
-          Number(item.sellingRatePerGram || item.selling_rate_per_gram || sellingRatePerGram || ratePerGram || 0),
-          Number(item.customerLineAmount || item.customer_line_amount || item.totalPrice || item.total_price || 0),
-          Number(item.companyLineAmount || item.company_line_amount || 0),
-          Number(item.employeeMarginAmount || item.employee_margin_amount || 0),
+          Number(line.pureWeight || 0),
+          Number(line.companyRatePerGram || 0),
+          Number(line.sellingRatePerGram || 0),
+          Number(line.customerLineAmount || 0),
+          Number(line.companyLineAmount || 0),
+          Number(line.employeeMarginAmount || 0),
           String(item.employeeName || employeeName || "").trim(),
           finalCompanyId
         ]
@@ -11124,16 +11151,16 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       paymentStatus: String(paymentStatus || "").trim(),
       paidAmount: Number(paidAmount || 0),
       dueAmount: Number(dueAmount || 0),
-      totalAmount: Number(totalAmount || 0),
-      totalWeight: Number(finalTotalWeight || 0),
+      totalAmount: Number(billingTotals.totalAmount || 0),
+      totalWeight: Number(billingTotals.totalWeight || 0),
       ratePerGram: Number(ratePerGram || 0),
       mcRate: Number(mcRate || 0),
       roundOff: Number(roundOff || 0),
-      subtotal: Number(subtotal || 0),
+      subtotal: Number(billingTotals.subtotal || 0),
       metalPercent: Number(metalPercent || 0),
       metalPayable: Number(metalPayable || 0),
       metalNote: String(metalNote || "").trim(),
-      items
+      items: ledgerItems
     });
 
     const cleanDraftId = Number(invoiceDraftId || 0);
@@ -11183,9 +11210,9 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         paymentStatus: String(paymentStatus || "").trim(),
         paidAmount: Number(paidAmount || 0),
         dueAmount: Number(dueAmount || 0),
-        totalAmount: Number(totalAmount || customerTotal || 0),
-        totalItems: finalTotalItems,
-        totalWeight: Number(finalTotalWeight || 0)
+        totalAmount: Number(billingTotals.totalAmount || 0),
+        totalItems: Number(billingTotals.totalItems || 0),
+        totalWeight: Number(billingTotals.totalWeight || 0)
       }
     });
 
