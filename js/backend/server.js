@@ -792,6 +792,43 @@ function normalizeAdditiveIssueRow(row) {
   };
 }
 
+async function recalcProcessStepAdditiveTotals(connection, companyId, processStepId) {
+  const [issueRows] = await connection.query(
+    `
+    SELECT given_weight, returned_weight, used_weight, material_label
+    FROM process_step_additive_issues
+    WHERE company_id = ?
+      AND process_step_id = ?
+    `,
+    [companyId, processStepId]
+  );
+
+  const totalGiven = issueRows.reduce((sum, row) => sum + toNumber(row.given_weight), 0);
+  const totalReturned = issueRows.reduce((sum, row) => sum + toNumber(row.returned_weight), 0);
+  const totalUsed = issueRows.reduce((sum, row) => sum + toNumber(row.used_weight), 0);
+  const materialLabel = String(issueRows.find((row) => String(row.material_label || "").trim())?.material_label || "").trim();
+
+  await connection.query(
+    `
+    UPDATE process_steps
+    SET additive_given_weight = ?,
+        additive_returned_weight = ?,
+        additive_used_weight = ?,
+        additive_material_label = ?
+    WHERE company_id = ?
+      AND id = ?
+    `,
+    [totalGiven, totalReturned, totalUsed, materialLabel, companyId, processStepId]
+  );
+
+  return {
+    additiveGivenWeight: totalGiven,
+    additiveReturnedWeight: totalReturned,
+    additiveUsedWeight: totalUsed,
+    additiveMaterialLabel: materialLabel
+  };
+}
+
 async function ensureProcessRecoveryStockEntry(connection, {
   companyId,
   createdBy,
@@ -7015,6 +7052,164 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     return res.status(500).json({
       success: false,
       message: "Process additive issue save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const issueId = Number(req.params.id || 0);
+    const returnedRaw = req.body.returned_weight ?? req.body.returnedWeight;
+    const parsedReturned = parseRequiredNumber(returnedRaw, "KDM/Solder returned weight");
+    const notesProvided = req.body.notes !== undefined || req.body.note !== undefined;
+    const notes = String(req.body.notes ?? req.body.note ?? "").trim();
+
+    if (!issueId) {
+      return res.status(400).json({
+        success: false,
+        message: "Additive issue id is required"
+      });
+    }
+
+    if (!parsedReturned.ok) {
+      return res.status(400).json({
+        success: false,
+        message: parsedReturned.message
+      });
+    }
+
+    const returnedWeight = parsedReturned.value;
+    if (returnedWeight < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "KDM/Solder returned weight cannot be negative"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [issueRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_step_additive_issues
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [issueId, access.companyScope]
+    );
+
+    if (!issueRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "KDM/Solder issue not found"
+      });
+    }
+
+    const issue = normalizeAdditiveIssueRow(issueRows[0]);
+    if (returnedWeight > issue.givenWeight) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "KDM/Solder returned weight cannot be greater than given weight"
+      });
+    }
+
+    const [stepIssueRows] = await connection.query(
+      `
+      SELECT id, given_weight, returned_weight
+      FROM process_step_additive_issues
+      WHERE company_id = ?
+        AND process_step_id = ?
+      FOR UPDATE
+      `,
+      [access.companyScope, issue.process_step_id]
+    );
+
+    const totalGiven = stepIssueRows.reduce((sum, row) => sum + toNumber(row.given_weight), 0);
+    const totalReturned = stepIssueRows.reduce((sum, row) => {
+      return sum + (Number(row.id) === issueId ? returnedWeight : toNumber(row.returned_weight));
+    }, 0);
+
+    if (totalReturned > totalGiven) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Total returned KDM/Solder cannot exceed total given KDM/Solder"
+      });
+    }
+
+    const usedWeight = issue.givenWeight - returnedWeight;
+    const nextStatus = returnedWeight > 0 ? "RETURNED" : "ISSUED";
+    await connection.query(
+      `
+      UPDATE process_step_additive_issues
+      SET returned_weight = ?,
+          used_weight = ?,
+          status = ?,
+          returned_by = ?,
+          returned_at = ?,
+          notes = CASE WHEN ? THEN ? ELSE notes END
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [
+        returnedWeight,
+        usedWeight,
+        nextStatus,
+        returnedWeight > 0 ? access.actingUserId : null,
+        returnedWeight > 0 ? new Date() : null,
+        notesProvided ? 1 : 0,
+        notes,
+        issueId,
+        access.companyScope
+      ]
+    );
+
+    const totals = await recalcProcessStepAdditiveTotals(connection, access.companyScope, issue.process_step_id);
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_step_additive_issues
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [issueId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "KDM/Solder return saved",
+      issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null,
+      totals
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Return process additive issue error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process additive issue return failed",
       error: getErrorDetail(error)
     });
   } finally {
