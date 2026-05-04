@@ -7,3 +7,12 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
+document.addEventListener("wheel", (event) => {
+  const activeInput = document.activeElement;
+  if (!activeInput || !activeInput.matches?.('input[type="number"]')) return;
+
+  if (event.target === activeInput) {
+    activeInput.blur();
+  }
+}, { capture: true });

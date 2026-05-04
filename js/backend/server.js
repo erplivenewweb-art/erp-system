@@ -728,7 +728,15 @@ function normalizeProcessStepRow(row) {
     loss_weight: toNumber(row.loss_weight),
     input_qty: toNumber(row.input_qty),
     output_qty: toNumber(row.output_qty),
-    loss_qty: toNumber(row.loss_qty)
+    loss_qty: toNumber(row.loss_qty),
+    additive_given_weight: toNumber(row.additive_given_weight),
+    additive_returned_weight: toNumber(row.additive_returned_weight),
+    additive_used_weight: toNumber(row.additive_used_weight),
+    additiveGivenWeight: toNumber(row.additiveGivenWeight ?? row.additive_given_weight),
+    additiveReturnedWeight: toNumber(row.additiveReturnedWeight ?? row.additive_returned_weight),
+    additiveUsedWeight: toNumber(row.additiveUsedWeight ?? row.additive_used_weight),
+    additive_material_label: String(row.additive_material_label || ""),
+    additiveMaterialLabel: String(row.additiveMaterialLabel ?? row.additive_material_label ?? "")
   };
 }
 
@@ -2153,6 +2161,9 @@ async function seedDefaultProcessTemplatesForCompanies() {
 
       const templateId = insertResult.insertId;
       const stepRows = DEFAULT_PROCESS_TEMPLATE_STEPS.map((stepName, index) => [
+        String(stepName || "").trim().toLowerCase() === "soldering" ? 1 : 0,
+        String(stepName || "").trim().toLowerCase() === "soldering" ? "Solder/KDM" : "",
+        1,
         companyId,
         templateId,
         index + 1,
@@ -2165,7 +2176,10 @@ async function seedDefaultProcessTemplatesForCompanies() {
       await connection.query(
         `
         INSERT INTO process_template_steps
-        (company_id, template_id, step_order, step_name, is_required, allow_repeat, status)
+        (
+          uses_additive_material, additive_material_label, additive_affects_output_weight,
+          company_id, template_id, step_order, step_name, is_required, allow_repeat, status
+        )
         VALUES ?
         `,
         [stepRows]
@@ -2666,6 +2680,9 @@ async function ensureSchema() {
       step_name VARCHAR(255) NOT NULL,
       is_required TINYINT(1) DEFAULT 1,
       allow_repeat TINYINT(1) DEFAULT 0,
+      uses_additive_material TINYINT(1) DEFAULT 0,
+      additive_material_label VARCHAR(120) DEFAULT '',
+      additive_affects_output_weight TINYINT(1) DEFAULT 1,
       status VARCHAR(30) DEFAULT 'ACTIVE',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY uq_process_template_steps_order (company_id, template_id, step_order)
@@ -2709,6 +2726,10 @@ async function ensureSchema() {
       output_weight DECIMAL(14,3) DEFAULT 0.000,
       recovery_weight DECIMAL(14,3) DEFAULT 0.000,
       loss_weight DECIMAL(14,3) DEFAULT 0.000,
+      additive_given_weight DECIMAL(14,3) DEFAULT 0.000,
+      additive_returned_weight DECIMAL(14,3) DEFAULT 0.000,
+      additive_used_weight DECIMAL(14,3) DEFAULT 0.000,
+      additive_material_label VARCHAR(120) DEFAULT '',
       input_qty DECIMAL(14,3) DEFAULT 0.000,
       output_qty DECIMAL(14,3) DEFAULT 0.000,
       loss_qty DECIMAL(14,3) DEFAULT 0.000,
@@ -3051,6 +3072,9 @@ async function ensureSchema() {
     await addColumnIfMissing("process_template_steps", "step_name", "VARCHAR(255) NOT NULL");
     await addColumnIfMissing("process_template_steps", "is_required", "TINYINT(1) DEFAULT 1");
     await addColumnIfMissing("process_template_steps", "allow_repeat", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("process_template_steps", "uses_additive_material", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("process_template_steps", "additive_material_label", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_template_steps", "additive_affects_output_weight", "TINYINT(1) DEFAULT 1");
     await addColumnIfMissing("process_template_steps", "status", "VARCHAR(30) DEFAULT 'ACTIVE'");
     await addColumnIfMissing("process_template_steps", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
@@ -3087,6 +3111,10 @@ async function ensureSchema() {
     await addColumnIfMissing("process_steps", "output_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "recovery_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "additive_given_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "additive_returned_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "additive_used_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_steps", "additive_material_label", "VARCHAR(120) DEFAULT ''");
     await addColumnIfMissing("process_steps", "input_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "output_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_steps", "loss_qty", "DECIMAL(14,3) DEFAULT 0.000");
