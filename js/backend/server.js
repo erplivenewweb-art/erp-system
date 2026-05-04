@@ -2550,6 +2550,82 @@ async function backfillSolderingAdditiveTemplateMetadata() {
   console.log(`Solder/KDM additive template metadata backfilled: ${Number(result.affectedRows || 0)} row(s) updated`);
 }
 
+async function seedInvoiceSequencesFromSalesHistory() {
+  if (!(await tableExists("invoice_sequences"))) {
+    return;
+  }
+
+  const currentYear = new Date().getFullYear();
+  let companyRows = [];
+
+  if (await tableExists("companies")) {
+    const [rows] = await pool.query(`
+      SELECT id
+      FROM companies
+      WHERE id IS NOT NULL
+      ORDER BY id ASC
+    `);
+    companyRows = rows;
+  } else if (await tableExists("sales_history")) {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT company_id AS id
+      FROM sales_history
+      WHERE company_id IS NOT NULL
+      ORDER BY company_id ASC
+    `);
+    companyRows = rows;
+  }
+
+  for (const company of companyRows) {
+    const companyId = Number(company.id || 0);
+    if (!companyId) continue;
+
+    await pool.query(
+      `
+      INSERT INTO invoice_sequences (company_id, prefix, sequence_year, last_number)
+      VALUES (?, 'BILL', ?, 0)
+      ON DUPLICATE KEY UPDATE
+        last_number = GREATEST(last_number, VALUES(last_number))
+      `,
+      [companyId, currentYear]
+    );
+  }
+
+  if (!(await tableExists("sales_history"))) {
+    return;
+  }
+
+  const [sequenceRows] = await pool.query(`
+    SELECT
+      company_id,
+      CAST(SUBSTRING(invoice_number, 6, 4) AS UNSIGNED) AS sequence_year,
+      MAX(CAST(SUBSTRING(invoice_number, 11) AS UNSIGNED)) AS last_number
+    FROM sales_history
+    WHERE company_id IS NOT NULL
+      AND invoice_number REGEXP '^BILL-[0-9]{4}-[0-9]{6}$'
+    GROUP BY company_id, sequence_year
+  `);
+
+  for (const row of sequenceRows) {
+    const companyId = Number(row.company_id || 0);
+    const sequenceYear = Number(row.sequence_year || 0);
+    const lastNumber = Number(row.last_number || 0);
+    if (!companyId || !sequenceYear) continue;
+
+    await pool.query(
+      `
+      INSERT INTO invoice_sequences (company_id, prefix, sequence_year, last_number)
+      VALUES (?, 'BILL', ?, ?)
+      ON DUPLICATE KEY UPDATE
+        last_number = GREATEST(last_number, VALUES(last_number))
+      `,
+      [companyId, sequenceYear, lastNumber]
+    );
+  }
+
+  console.log(`Invoice sequences seeded: ${companyRows.length} company row(s), ${sequenceRows.length} detected sequence row(s)`);
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -2659,6 +2735,19 @@ async function ensureSchema() {
       delete_reason VARCHAR(255) DEFAULT '',
       company_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS invoice_sequences (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      prefix VARCHAR(20) NOT NULL DEFAULT 'BILL',
+      sequence_year INT NOT NULL,
+      last_number INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_invoice_sequence_company_year_prefix (company_id, sequence_year, prefix)
     )
   `);
 
@@ -3360,6 +3449,20 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_history", "delete_reason", "VARCHAR(255) DEFAULT ''");
   }
 
+  if (await tableExists("invoice_sequences")) {
+    await addColumnIfMissing("invoice_sequences", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("invoice_sequences", "prefix", "VARCHAR(20) NOT NULL DEFAULT 'BILL'");
+    await addColumnIfMissing("invoice_sequences", "sequence_year", "INT NOT NULL");
+    await addColumnIfMissing("invoice_sequences", "last_number", "INT NOT NULL DEFAULT 0");
+    await addColumnIfMissing("invoice_sequences", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("invoice_sequences", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await addUniqueIndexIfMissing(
+      "invoice_sequences",
+      "uq_invoice_sequence_company_year_prefix",
+      "(company_id, sequence_year, prefix)"
+    );
+  }
+
   if (await tableExists("sales_items")) {
     await addColumnIfMissing("sales_items", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("sales_items", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -3734,6 +3837,7 @@ async function ensureSchema() {
 
   await seedDefaultProcessTemplatesForCompanies();
   await backfillSolderingAdditiveTemplateMetadata();
+  await seedInvoiceSequencesFromSalesHistory();
 
   console.log("Schema ensured ✅");
 }
