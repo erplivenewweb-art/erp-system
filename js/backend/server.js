@@ -671,6 +671,39 @@ function parseOptionalNumber(value, fieldName, fallback = 0) {
   return { ok: true, value: parsed, provided: true };
 }
 
+function parseAdditiveMaterialPayload(body = {}) {
+  const givenRaw = body.additiveGivenWeight ?? body.additive_given_weight;
+  const returnedRaw = body.additiveReturnedWeight ?? body.additive_returned_weight;
+  const parsedGiven = parseOptionalNumber(givenRaw, "Additive material given weight", 0);
+  if (!parsedGiven.ok) return parsedGiven;
+
+  const parsedReturned = parseOptionalNumber(returnedRaw, "Additive material returned weight", 0);
+  if (!parsedReturned.ok) return parsedReturned;
+
+  const givenWeight = parsedGiven.value;
+  const returnedWeight = parsedReturned.value;
+
+  if (givenWeight < 0) {
+    return { ok: false, message: "Additive material given weight cannot be negative" };
+  }
+
+  if (returnedWeight < 0) {
+    return { ok: false, message: "Additive material returned weight cannot be negative" };
+  }
+
+  if (returnedWeight > givenWeight) {
+    return { ok: false, message: "Additive material returned weight cannot be greater than given weight" };
+  }
+
+  return {
+    ok: true,
+    givenWeight,
+    returnedWeight,
+    usedWeight: givenWeight - returnedWeight,
+    materialLabel: String(body.additiveMaterialLabel ?? body.additive_material_label ?? "").trim()
+  };
+}
+
 function normalizeProcessLotStatus(value) {
   const clean = String(value || "").trim().toUpperCase();
   return clean === "COMPLETED" ? "COMPLETED" : "OPEN";
@@ -6899,6 +6932,19 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     }
 
     const effectiveInputWeight = toNumber(context.inputWeight) + selectedRecoveryWeight;
+    const additivePayload = parseAdditiveMaterialPayload(req.body);
+    if (!additivePayload.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: additivePayload.message
+      });
+    }
+    const additiveGivenWeight = additivePayload.givenWeight;
+    const additiveReturnedWeight = additivePayload.returnedWeight;
+    const additiveUsedWeight = additivePayload.usedWeight;
+    const additiveMaterialLabel = additivePayload.materialLabel;
+    const allowedInputWeight = effectiveInputWeight + additiveUsedWeight;
 
     if (effectiveInputWeight <= 0) {
       await connection.rollback();
@@ -6939,11 +6985,11 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight > effectiveInputWeight) {
+    if (requestedStatus === "COMPLETED" && outputWeight > allowedInputWeight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight cannot be greater than input weight"
+        message: "Output weight cannot be greater than input weight plus additive material used weight"
       });
     }
 
@@ -6968,11 +7014,11 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > effectiveInputWeight) {
+    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > allowedInputWeight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight plus recovery weight cannot be greater than input weight"
+        message: "Output weight plus recovery weight cannot be greater than input weight plus additive material used weight"
       });
     }
 
@@ -7038,7 +7084,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
     const finalRecoveryWeight = finalStatus === "COMPLETED" ? recoveryWeight : 0;
-    const lossWeight = finalStatus === "COMPLETED" ? effectiveInputWeight - finalOutputWeight - finalRecoveryWeight : 0;
+    const lossWeight = finalStatus === "COMPLETED" ? allowedInputWeight - finalOutputWeight - finalRecoveryWeight : 0;
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
     const warnings = [];
@@ -7055,6 +7101,9 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       inputWeight: effectiveInputWeight,
       baseInputWeight: context.inputWeight,
       recoveryInputWeight: selectedRecoveryWeight,
+      additiveGivenWeight,
+      additiveReturnedWeight,
+      additiveUsedWeight,
       outputWeight: finalOutputWeight,
       recoveryWeight: finalRecoveryWeight,
       lossWeight
@@ -7070,9 +7119,10 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       (
         company_id, process_lot_id, lot_no, step_no, process_name,
         karigar_id, karigar_name, input_weight, output_weight, recovery_weight, loss_weight,
+        additive_given_weight, additive_returned_weight, additive_used_weight, additive_material_label,
         input_qty, output_qty, loss_qty, loss_reason, status, started_at, completed_at, created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
       `,
       [
         companyId,
@@ -7086,6 +7136,10 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         finalOutputWeight,
         finalRecoveryWeight,
         lossWeight,
+        additiveGivenWeight,
+        additiveReturnedWeight,
+        additiveUsedWeight,
+        additiveMaterialLabel,
         inputQty,
         finalOutputQty,
         lossQty,
@@ -7217,6 +7271,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
     const outputQtyProvided = hasProvidedValue(outputQtyRaw);
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
+    const additivePayload = parseAdditiveMaterialPayload(req.body);
 
     if (!stepId) {
       return res.status(400).json({
@@ -7229,6 +7284,13 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       return res.status(400).json({
         success: false,
         message: parsedOutputWeight.message
+      });
+    }
+
+    if (!additivePayload.ok) {
+      return res.status(400).json({
+        success: false,
+        message: additivePayload.message
       });
     }
 
@@ -7297,11 +7359,17 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    if (outputWeight + recoveryWeight > step.input_weight) {
+    const additiveGivenWeight = additivePayload.givenWeight;
+    const additiveReturnedWeight = additivePayload.returnedWeight;
+    const additiveUsedWeight = additivePayload.usedWeight;
+    const additiveMaterialLabel = additivePayload.materialLabel;
+    const allowedInputWeight = step.input_weight + additiveUsedWeight;
+
+    if (outputWeight + recoveryWeight > allowedInputWeight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight plus recovery weight cannot be greater than input weight"
+        message: "Output weight plus recovery weight cannot be greater than input weight plus additive material used weight"
       });
     }
 
@@ -7350,7 +7418,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    const lossWeight = step.input_weight - outputWeight - recoveryWeight;
+    const lossWeight = allowedInputWeight - outputWeight - recoveryWeight;
     const lossQty = step.input_qty - outputQty;
     const warnings = [];
 
@@ -7364,6 +7432,9 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
 
     console.log("[PROCESS_STEP_COMPLETE]", {
       inputWeight: step.input_weight,
+      additiveGivenWeight,
+      additiveReturnedWeight,
+      additiveUsedWeight,
       outputWeight,
       recoveryWeight,
       lossWeight
@@ -7379,6 +7450,10 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       SET output_weight = ?,
           recovery_weight = ?,
           loss_weight = ?,
+          additive_given_weight = ?,
+          additive_returned_weight = ?,
+          additive_used_weight = ?,
+          additive_material_label = ?,
           output_qty = ?,
           loss_qty = ?,
           loss_reason = ?,
@@ -7386,7 +7461,19 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
           completed_at = NOW()
       WHERE id = ?
       `,
-      [outputWeight, recoveryWeight, lossWeight, outputQty, lossQty, lossReason || step.loss_reason || "", stepId]
+      [
+        outputWeight,
+        recoveryWeight,
+        lossWeight,
+        additiveGivenWeight,
+        additiveReturnedWeight,
+        additiveUsedWeight,
+        additiveMaterialLabel,
+        outputQty,
+        lossQty,
+        lossReason || step.loss_reason || "",
+        stepId
+      ]
     );
 
     await ensureProcessRecoveryStockEntry(connection, {
