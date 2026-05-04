@@ -12585,6 +12585,84 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/api/reports/profit", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const fromDate = String(req.query.from || "").trim();
+    const toDate = String(req.query.to || "").trim();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (fromDate && !datePattern.test(fromDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "from must be in YYYY-MM-DD format"
+      });
+    }
+
+    if (toDate && !datePattern.test(toDate)) {
+      return res.status(400).json({
+        success: false,
+        message: "to must be in YYYY-MM-DD format"
+      });
+    }
+
+    const whereParts = [
+      "company_id = ?",
+      "COALESCE(is_deleted, 0) = 0",
+      "UPPER(COALESCE(status, 'ACTIVE')) <> 'DELETED'"
+    ];
+    const params = [access.companyScope];
+
+    if (fromDate) {
+      whereParts.push("COALESCE(invoice_date, DATE(created_at)) >= ?");
+      params.push(fromDate);
+    }
+
+    if (toDate) {
+      whereParts.push("COALESCE(invoice_date, DATE(created_at)) <= ?");
+      params.push(toDate);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total_sales,
+        COALESCE(SUM(COALESCE(company_total_amount, 0)), 0) AS total_cost,
+        COALESCE(SUM(COALESCE(total_amount, 0) - COALESCE(company_total_amount, 0)), 0) AS total_profit,
+        COUNT(*) AS total_invoices
+      FROM sales_history
+      WHERE ${whereParts.join(" AND ")}
+      `,
+      params
+    );
+
+    const summary = rows[0] || {};
+    return res.json({
+      success: true,
+      totalSales: toNumber(summary.total_sales),
+      totalCost: toNumber(summary.total_cost),
+      totalProfit: toNumber(summary.total_profit),
+      totalInvoices: Number(summary.total_invoices || 0)
+    });
+  } catch (error) {
+    console.error("Get profit report error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Profit report fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.get("/transaction/reports/party-ledger", async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {

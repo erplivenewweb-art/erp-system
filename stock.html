@@ -202,6 +202,94 @@
       opacity: 0.96;
     }
 
+    .recovery-detail-card {
+      background: #fffaf1;
+      border: 1px solid #eadfca;
+      border-left: 4px solid #d4af37;
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 24px rgba(46, 42, 36, 0.06);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .recovery-detail-card:hover {
+      transform: translateY(-2px);
+      border-color: #e2d2ad;
+      box-shadow: 0 16px 34px rgba(46, 42, 36, 0.11);
+    }
+
+    .recovery-detail-card h4 {
+      margin: 0 0 14px;
+      color: #b8901f;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .recovery-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px 18px;
+    }
+
+    .recovery-detail-row {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      line-height: 1.35;
+    }
+
+    .recovery-detail-row.recovery-detail-wide {
+      grid-column: 1 / -1;
+    }
+
+    .recovery-detail-label {
+      color: #7a6f5c;
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    .recovery-detail-value {
+      color: #2e2a24;
+      font-weight: 600;
+      font-size: 14px;
+      word-break: break-word;
+    }
+
+    .recovery-detail-value.weight-highlight {
+      color: #b8901f;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .recovery-status-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid #d9c38d;
+      padding: 5px 10px;
+      color: #8a6b12;
+      background: #fff4d6;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .recovery-status-badge.used {
+      color: #6b5b45;
+      background: #f4ead9;
+      border-color: #decfb8;
+    }
+
+    .recovery-status-badge.other {
+      color: #5f6470;
+      background: #f1f3f5;
+      border-color: #d7dbe0;
+    }
+
     .back-btn {
       border: none;
       border-radius: 12px;
@@ -1094,18 +1182,47 @@
       const box = document.getElementById("recoveryDetailBox");
       if (!box || !item) return;
 
+      const status = getItemStatus(item);
+      const statusClass =
+        status === "IN_STOCK" ? "" :
+        status === "USED" ? "used" :
+        "other";
+
       box.style.display = "block";
       box.innerHTML = `
-        <h4 style="margin:0 0 8px;">Recovery Details</h4>
-        <p style="margin:0;">
-          Lot No: ${escapeHtml(getItemLot(item) || "-")}<br>
-          Product Name: ${escapeHtml(getItemProduct(item) || "-")}<br>
-          Recovery Weight: ${getItemWeight(item).toFixed(3)} g<br>
-          Status: ${escapeHtml(getItemStatus(item))}<br>
-          Source: ${escapeHtml(getItemSource(item) || "-")}<br>
-          Reference Step ID: ${escapeHtml(getReferenceStepId(item) || "-")}<br>
-          Created Date: ${escapeHtml(getCreatedDate(item) || "-")}
-        </p>
+        <div class="recovery-detail-card">
+          <h4>Recovery Details</h4>
+          <div class="recovery-detail-grid">
+            <div class="recovery-detail-row">
+              <span class="recovery-detail-label">Lot No</span>
+              <span class="recovery-detail-value">${escapeHtml(getItemLot(item) || "-")}</span>
+            </div>
+            <div class="recovery-detail-row">
+              <span class="recovery-detail-label">Status</span>
+              <span class="recovery-status-badge ${statusClass}">${escapeHtml(status)}</span>
+            </div>
+            <div class="recovery-detail-row recovery-detail-wide">
+              <span class="recovery-detail-label">Recovery Weight</span>
+              <span class="recovery-detail-value weight-highlight">${getItemWeight(item).toFixed(3)} g</span>
+            </div>
+            <div class="recovery-detail-row recovery-detail-wide">
+              <span class="recovery-detail-label">Product Name</span>
+              <span class="recovery-detail-value">${escapeHtml(getItemProduct(item) || "-")}</span>
+            </div>
+            <div class="recovery-detail-row">
+              <span class="recovery-detail-label">Source</span>
+              <span class="recovery-detail-value">${escapeHtml(getItemSource(item) || "-")}</span>
+            </div>
+            <div class="recovery-detail-row">
+              <span class="recovery-detail-label">Reference Step ID</span>
+              <span class="recovery-detail-value">${escapeHtml(getReferenceStepId(item) || "-")}</span>
+            </div>
+            <div class="recovery-detail-row recovery-detail-wide">
+              <span class="recovery-detail-label">Created Date</span>
+              <span class="recovery-detail-value">${escapeHtml(getCreatedDate(item) || "-")}</span>
+            </div>
+          </div>
+        </div>
       `;
     }
 
