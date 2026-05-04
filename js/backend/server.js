@@ -2095,6 +2095,92 @@ function getClearAuthCookieOptions() {
   return options;
 }
 
+const DEFAULT_PROCESS_TEMPLATE_STEPS = [
+  "Patta",
+  "Hydraulic Press",
+  "Soldering",
+  "Acid Poda",
+  "Cutting",
+  "Fitting"
+];
+
+async function seedDefaultProcessTemplatesForCompanies() {
+  if (
+    !(await tableExists("companies")) ||
+    !(await tableExists("process_templates")) ||
+    !(await tableExists("process_template_steps"))
+  ) {
+    return;
+  }
+
+  const [companies] = await pool.query(`
+    SELECT id
+    FROM companies
+    WHERE id IS NOT NULL
+    ORDER BY id ASC
+  `);
+
+  for (const company of companies) {
+    const companyId = Number(company.id || 0);
+    if (!companyId) continue;
+
+    const [existingTemplates] = await pool.query(
+      `
+      SELECT id
+      FROM process_templates
+      WHERE company_id = ?
+        AND is_default = 1
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      LIMIT 1
+      `,
+      [companyId]
+    );
+
+    if (existingTemplates.length) continue;
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO process_templates
+        (company_id, name, is_default, status, created_by, created_at, updated_at)
+        VALUES (?, 'Default Jewellery Process', 1, 'ACTIVE', NULL, NOW(), NOW())
+        `,
+        [companyId]
+      );
+
+      const templateId = insertResult.insertId;
+      const stepRows = DEFAULT_PROCESS_TEMPLATE_STEPS.map((stepName, index) => [
+        companyId,
+        templateId,
+        index + 1,
+        stepName,
+        1,
+        0,
+        "ACTIVE"
+      ]);
+
+      await connection.query(
+        `
+        INSERT INTO process_template_steps
+        (company_id, template_id, step_order, step_name, is_required, allow_repeat, status)
+        VALUES ?
+        `,
+        [stepRows]
+      );
+
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -2559,6 +2645,34 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_templates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      name VARCHAR(255) NOT NULL,
+      is_default TINYINT(1) DEFAULT 0,
+      status VARCHAR(30) DEFAULT 'ACTIVE',
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_template_steps (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      template_id INT NOT NULL,
+      step_order INT NOT NULL,
+      step_name VARCHAR(255) NOT NULL,
+      is_required TINYINT(1) DEFAULT 1,
+      allow_repeat TINYINT(1) DEFAULT 0,
+      status VARCHAR(30) DEFAULT 'ACTIVE',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_process_template_steps_order (company_id, template_id, step_order)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS process_lots (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -2569,6 +2683,11 @@ async function ensureSchema() {
       total_khadi_count INT DEFAULT 1,
       expected_total_qty DECIMAL(14,3) DEFAULT 0.000,
       status ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN',
+      template_id INT DEFAULT NULL,
+      template_snapshot_json JSON DEFAULT NULL,
+      template_version_label VARCHAR(120) DEFAULT NULL,
+      completed_at DATETIME DEFAULT NULL,
+      completed_by INT DEFAULT NULL,
       saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2915,6 +3034,27 @@ async function ensureSchema() {
     await addColumnIfMissing("material_stock_movements", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_templates")) {
+    await addColumnIfMissing("process_templates", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_templates", "name", "VARCHAR(255) NOT NULL");
+    await addColumnIfMissing("process_templates", "is_default", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("process_templates", "status", "VARCHAR(30) DEFAULT 'ACTIVE'");
+    await addColumnIfMissing("process_templates", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_templates", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_templates", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("process_template_steps")) {
+    await addColumnIfMissing("process_template_steps", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_template_steps", "template_id", "INT NOT NULL");
+    await addColumnIfMissing("process_template_steps", "step_order", "INT NOT NULL");
+    await addColumnIfMissing("process_template_steps", "step_name", "VARCHAR(255) NOT NULL");
+    await addColumnIfMissing("process_template_steps", "is_required", "TINYINT(1) DEFAULT 1");
+    await addColumnIfMissing("process_template_steps", "allow_repeat", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("process_template_steps", "status", "VARCHAR(30) DEFAULT 'ACTIVE'");
+    await addColumnIfMissing("process_template_steps", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("process_lots")) {
     await addColumnIfMissing("process_lots", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "lot_no", "VARCHAR(120) NOT NULL");
@@ -2924,6 +3064,11 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "total_khadi_count", "INT DEFAULT 1");
     await addColumnIfMissing("process_lots", "expected_total_qty", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "status", "ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN'");
+    await addColumnIfMissing("process_lots", "template_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "template_snapshot_json", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "template_version_label", "VARCHAR(120) DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "completed_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "completed_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "saved_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_lots", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -3120,6 +3265,15 @@ async function ensureSchema() {
     await addUniqueIndexIfMissing("process_steps", "uq_process_steps_company_lot_step", "(company_id, lot_no, step_no)");
   }
 
+  if (await tableExists("process_templates")) {
+    await addIndexIfMissing("process_templates", "idx_process_templates_company_default", "(company_id, is_default, status)");
+  }
+
+  if (await tableExists("process_template_steps")) {
+    await addIndexIfMissing("process_template_steps", "idx_process_template_steps_template", "(company_id, template_id)");
+    await addUniqueIndexIfMissing("process_template_steps", "uq_process_template_steps_order", "(company_id, template_id, step_order)");
+  }
+
   if (await tableExists("transaction_master")) {
     await addIndexIfMissing("transaction_master", "idx_txn_company_id", "(company_id, id)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_party", "(company_id, party_id)");
@@ -3145,6 +3299,8 @@ async function ensureSchema() {
     await addIndexIfMissing("metal_ledger", "idx_metal_company_date", "(company_id, entry_date)");
     await addIndexIfMissing("metal_ledger", "idx_metal_company_type", "(company_id, metal_type)");
   }
+
+  await seedDefaultProcessTemplatesForCompanies();
 
   console.log("Schema ensured ✅");
 }
@@ -6070,6 +6226,84 @@ app.get("/process/data", async (req, res) => {
   }
 });
 
+app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
+  const connection = await pool.getConnection();
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo);
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "Lot No is required"
+      });
+    }
+
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    if (!processLot) {
+      return res.status(404).json({
+        success: false,
+        message: `Process lot ${lotNo} not found`
+      });
+    }
+
+    const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
+    const template = templateContext.steps;
+
+    const [completedRows] = await connection.query(
+      `
+      SELECT process_name
+      FROM process_steps
+      WHERE company_id = ?
+        AND lot_no = ?
+        AND status = 'COMPLETED'
+      ORDER BY step_no ASC, id ASC
+      `,
+      [access.companyScope, lotNo]
+    );
+
+    const completedSteps = completedRows
+      .map((row) => String(row.process_name || "").trim())
+      .filter(Boolean);
+    const completedNameSet = new Set(completedSteps.map(normalizeTemplateStepName));
+    const completedTemplateSteps = template.filter((stepName) => {
+      return completedNameSet.has(normalizeTemplateStepName(stepName));
+    });
+    const nextStep = template.find((stepName) => {
+      return !completedNameSet.has(normalizeTemplateStepName(stepName));
+    }) || null;
+    const totalSteps = template.length;
+    const completedCount = completedTemplateSteps.length;
+
+    return res.json({
+      success: true,
+      template,
+      completedSteps,
+      nextStep,
+      progress: `${completedCount}/${totalSteps}`,
+      isReadyToComplete: totalSteps > 0 && completedCount >= totalSteps
+    });
+  } catch (error) {
+    console.error("Get process lot next step error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process next step fetch failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    connection.release();
+  }
+});
+
 async function getProcessLotForSteps(connection, companyId, lotNo) {
   const [rows] = await connection.query(
     `
@@ -6133,6 +6367,54 @@ async function getLastCompletedProcessStep(connection, companyId, lotNo) {
     [companyId, lotNo]
   );
   return rows.length ? normalizeProcessStepRow(rows[0]) : null;
+}
+
+function normalizeTemplateStepName(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+async function getProcessTemplateStepsForLot(connection, companyId, processLot) {
+  let templateId = Number(processLot?.template_id || 0) || null;
+
+  if (!templateId) {
+    const [defaultRows] = await connection.query(
+      `
+      SELECT id
+      FROM process_templates
+      WHERE company_id = ?
+        AND is_default = 1
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    templateId = Number(defaultRows[0]?.id || 0) || null;
+  }
+
+  if (!templateId) {
+    return {
+      templateId: null,
+      steps: []
+    };
+  }
+
+  const [stepRows] = await connection.query(
+    `
+    SELECT step_name
+    FROM process_template_steps
+    WHERE company_id = ?
+      AND template_id = ?
+      AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+    ORDER BY step_order ASC, id ASC
+    `,
+    [companyId, templateId]
+  );
+
+  return {
+    templateId,
+    steps: stepRows.map((row) => String(row.step_name || "").trim()).filter(Boolean)
+  };
 }
 
 async function validateStickerAgainstProcessOutput(connection, companyId, lotNo, nextWeight, nextQty = 1, excludeStockId = null, qtyProvided = true) {
