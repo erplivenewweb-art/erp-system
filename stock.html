@@ -407,6 +407,51 @@
               <button type="button" id="stockNextBtn" onclick="changeStockPage(1)">Next</button>
             </div>
           </div>
+
+          <div class="sub-card" id="recoveryStockCard" style="margin-top:16px;">
+            <h3>Recovery Stock</h3>
+
+            <div class="form-grid">
+              <div class="input-box">
+                <label for="recoverySearchLot">Lot No Search</label>
+                <input type="text" id="recoverySearchLot" placeholder="Enter Lot No" oninput="filterRecoveryStockTable()" />
+              </div>
+
+              <div class="input-box">
+                <label for="recoverySearchProduct">Product Search</label>
+                <input type="text" id="recoverySearchProduct" placeholder="Enter Product" oninput="filterRecoveryStockTable()" />
+              </div>
+
+              <div class="input-box">
+                <label for="recoveryStatusFilter">Status Filter</label>
+                <select id="recoveryStatusFilter" onchange="filterRecoveryStockTable()">
+                  <option value="ALL">ALL</option>
+                  <option value="IN_STOCK">IN_STOCK</option>
+                  <option value="USED">USED</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="recoveryDetailBox" class="summary-card" style="display:none; margin-top:12px;"></div>
+
+            <div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lot No</th>
+                    <th>Product Name</th>
+                    <th>Recovery Weight</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>Reference Step ID</th>
+                    <th>Created Date</th>
+                    <th>Action/View</th>
+                  </tr>
+                </thead>
+                <tbody id="recoveryStockTableBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
     </main>
@@ -418,6 +463,8 @@
 
     let stockItems = [];
     let filteredStockItems = [];
+    let recoveryStockItems = [];
+    let filteredRecoveryStockItems = [];
     let currentLotItems = [];
     let isViewingLotItems = false;
     let stockCurrentPage = 1;
@@ -661,20 +708,27 @@
         const res = await fetch(url, { cache: "no-store" });
         const data = await res.json();
 
-        stockItems = filterCompanyItems(Array.isArray(data) ? data : []);
+        const allVisibleItems = filterCompanyItems(Array.isArray(data) ? data : []);
+        recoveryStockItems = allVisibleItems.filter(isProcessRecoveryStock);
+        filteredRecoveryStockItems = [...recoveryStockItems];
+        stockItems = allVisibleItems.filter((item) => !isProcessRecoveryStock(item));
         filteredStockItems = [...stockItems];
         stockHasNextPage = stockItems.length === STOCK_PAGE_LIMIT;
 
         hideSearchSummary();
         hideLotSummary();
         renderLotWiseTable(stockItems, "Lot Wise Stock Table");
+        renderRecoveryStockTable(filteredRecoveryStockItems);
         updateStockPagination();
       } catch (error) {
         console.log("Stock load error:", error);
         stockItems = [];
         filteredStockItems = [];
+        recoveryStockItems = [];
+        filteredRecoveryStockItems = [];
         stockHasNextPage = false;
         renderLotWiseTable([], "Lot Wise Stock Table");
+        renderRecoveryStockTable([]);
         updateStockPagination();
       }
     }
@@ -693,6 +747,29 @@
 
     function getItemWeight(item) {
       return Number(item.weight || 0);
+    }
+
+    function getItemSource(item) {
+      return String(item.source || item.stock_source || "").trim();
+    }
+
+    function getItemCategory(item) {
+      return String(item.category || "").trim();
+    }
+
+    function getReferenceStepId(item) {
+      return item.reference_step_id || item.referenceStepId || "";
+    }
+
+    function getCreatedDate(item) {
+      return item.created_at || item.createdAt || "";
+    }
+
+    function isProcessRecoveryStock(item) {
+      return (
+        getItemCategory(item).toUpperCase() === "RECOVERY" &&
+        getItemSource(item).toUpperCase() === "PROCESS_RECOVERY"
+      );
     }
 
     function getItemSerial(item) {
@@ -750,6 +827,27 @@
       renderSearchSummary();
       renderLotSummary(filteredStockItems);
       renderLotWiseTable(filteredStockItems, "Filtered Lot Wise Stock Table");
+    }
+
+    function filterRecoveryStockTable() {
+      const lotSearch = normalizeText(document.getElementById("recoverySearchLot")?.value);
+      const productSearch = normalizeText(document.getElementById("recoverySearchProduct")?.value);
+      const statusFilter = document.getElementById("recoveryStatusFilter")?.value || "ALL";
+
+      filteredRecoveryStockItems = recoveryStockItems.filter((item) => {
+        const lot = normalizeText(getItemLot(item));
+        const product = normalizeText(getItemProduct(item));
+        const status = getItemStatus(item);
+
+        return (
+          (!lotSearch || lot.includes(lotSearch)) &&
+          (!productSearch || product.includes(productSearch)) &&
+          (statusFilter === "ALL" || status === statusFilter)
+        );
+      });
+
+      hideRecoveryDetail();
+      renderRecoveryStockTable(filteredRecoveryStockItems);
     }
 
     function hideSearchSummary() {
@@ -946,6 +1044,13 @@
       renderLotWiseTable(stockItems, "Lot Wise Stock Table");
     }
 
+    function hideRecoveryDetail() {
+      const box = document.getElementById("recoveryDetailBox");
+      if (!box) return;
+      box.style.display = "none";
+      box.innerHTML = "";
+    }
+
     function getStatusBadge(status) {
       if (status === "IN_STOCK") return `<span class="status-badge in-stock">IN_STOCK</span>`;
       if (status === "SOLD") return `<span class="status-badge sold">SOLD</span>`;
@@ -953,6 +1058,55 @@
         return `<span class="status-badge damaged-return">DAMAGED_RETURN</span>`;
       }
       return `<span class="status-badge other">${escapeHtml(status)}</span>`;
+    }
+
+    function renderRecoveryStockTable(items) {
+      const tbody = document.getElementById("recoveryStockTableBody");
+      if (!tbody) return;
+
+      tbody.innerHTML = "";
+
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No recovery stock found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map((item) => {
+        const id = Number(item.id || 0);
+        const status = getItemStatus(item);
+        return `
+          <tr>
+            <td>${escapeHtml(getItemLot(item) || "-")}</td>
+            <td>${escapeHtml(getItemProduct(item) || "-")}</td>
+            <td>${getItemWeight(item).toFixed(3)}</td>
+            <td>${getStatusBadge(status)}</td>
+            <td>${escapeHtml(getItemSource(item) || "-")}</td>
+            <td>${escapeHtml(getReferenceStepId(item) || "-")}</td>
+            <td>${escapeHtml(getCreatedDate(item) || "-")}</td>
+            <td><button class="view-btn" type="button" onclick="viewRecoveryStock(${id})">View</button></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function viewRecoveryStock(id) {
+      const item = recoveryStockItems.find((row) => Number(row.id || 0) === Number(id || 0));
+      const box = document.getElementById("recoveryDetailBox");
+      if (!box || !item) return;
+
+      box.style.display = "block";
+      box.innerHTML = `
+        <h4 style="margin:0 0 8px;">Recovery Details</h4>
+        <p style="margin:0;">
+          Lot No: ${escapeHtml(getItemLot(item) || "-")}<br>
+          Product Name: ${escapeHtml(getItemProduct(item) || "-")}<br>
+          Recovery Weight: ${getItemWeight(item).toFixed(3)} g<br>
+          Status: ${escapeHtml(getItemStatus(item))}<br>
+          Source: ${escapeHtml(getItemSource(item) || "-")}<br>
+          Reference Step ID: ${escapeHtml(getReferenceStepId(item) || "-")}<br>
+          Created Date: ${escapeHtml(getCreatedDate(item) || "-")}
+        </p>
+      `;
     }
 
     function renderLotWiseTable(items, title) {
