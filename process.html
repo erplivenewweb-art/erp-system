@@ -614,21 +614,13 @@
     let selectedRecoveryStockIds = new Set();
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
+    let processGuideData = null;
     let processLossSummaryData = {
       lotSummary: [],
       karigarSummary: [],
       processSummary: []
     };
     let processLotLoadTimer = null;
-
-    const DEFAULT_PROCESS_TEMPLATE = [
-      "Patta",
-      "Hydraulic Press",
-      "Soldering",
-      "Acid Poda",
-      "Cutting",
-      "Fitting"
-    ];
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -806,57 +798,86 @@
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
     }
 
-    function normalizeProcessTemplateName(value) {
-      return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    function normalizeProcessGuideData(data = {}) {
+      const template = Array.isArray(data.template)
+        ? data.template.map((step) => String(step || "").trim()).filter(Boolean)
+        : [];
+      const completedSteps = Array.isArray(data.completedSteps)
+        ? data.completedSteps.map((step) => String(step || "").trim()).filter(Boolean)
+        : [];
+      const nextStep = data.nextStep ? String(data.nextStep).trim() : "";
+      const progress = String(data.progress || `${completedSteps.length}/${template.length}`).trim();
+
+      return {
+        template,
+        completedSteps,
+        nextStep,
+        progress,
+        isReadyToComplete: Boolean(data.isReadyToComplete)
+      };
     }
 
-    function getCompletedTemplateSteps() {
-      const completedNames = new Set(
-        processStepData
-          .filter((step) => String(step.status || "").toUpperCase() === "COMPLETED")
-          .map((step) => normalizeProcessTemplateName(step.processName))
-          .filter(Boolean)
-      );
-
-      return DEFAULT_PROCESS_TEMPLATE.filter((name) => completedNames.has(normalizeProcessTemplateName(name)));
-    }
-
-    function getNextSuggestedProcessStep() {
-      const completedNames = new Set(getCompletedTemplateSteps().map(normalizeProcessTemplateName));
-      return DEFAULT_PROCESS_TEMPLATE.find((name) => !completedNames.has(normalizeProcessTemplateName(name))) || "";
-    }
-
-    function prefillSuggestedProcessName() {
+    function prefillSuggestedProcessName(nextStep = "") {
       if (currentOpenProcessStep) return;
 
       const input = document.getElementById("stepProcessName");
       if (!input || input.value.trim()) return;
 
-      const suggested = getNextSuggestedProcessStep();
+      const suggested = String(nextStep || processGuideData?.nextStep || "").trim();
       if (suggested) input.value = suggested;
     }
 
-    function renderProcessGuide() {
+    function renderProcessGuide(message = "") {
       const completedEl = document.getElementById("processGuideCompleted");
       const nextEl = document.getElementById("processGuideNext");
       const progressEl = document.getElementById("processGuideProgress");
       if (!completedEl || !nextEl || !progressEl) return;
 
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
-      const completedSteps = getCompletedTemplateSteps();
-      const nextStep = getNextSuggestedProcessStep();
-      const isReady = completedSteps.length >= DEFAULT_PROCESS_TEMPLATE.length;
+      const completedSteps = processGuideData?.completedSteps || [];
+      const nextStep = processGuideData?.nextStep || "";
+      const progress = processGuideData?.progress || "0/0";
+      const isReady = Boolean(processGuideData?.isReadyToComplete);
 
       completedEl.textContent = lotNo
-        ? (completedSteps.length ? completedSteps.join(", ") : "No fixed steps completed")
+        ? (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed"))
         : "Select a lot";
       nextEl.textContent = lotNo
-        ? (isReady ? "Ready to Complete Lot" : nextStep)
+        ? (isReady ? "Ready to Complete Lot" : (nextStep || "-"))
         : "-";
       nextEl.classList.toggle("process-guide-ready", isReady);
-      progressEl.textContent = `${completedSteps.length}/${DEFAULT_PROCESS_TEMPLATE.length}`;
+      progressEl.textContent = lotNo ? progress : "0/0";
 
-      prefillSuggestedProcessName();
+      prefillSuggestedProcessName(nextStep);
+    }
+
+    async function loadProcessGuide(lotNo) {
+      const cleanLotNo = String(lotNo || "").trim();
+      if (!cleanLotNo) {
+        processGuideData = null;
+        renderProcessGuide();
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(cleanLotNo)}/next-step${query}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Process guide fetch failed");
+        }
+
+        processGuideData = normalizeProcessGuideData(data);
+        renderProcessGuide();
+      } catch (error) {
+        console.log("Process guide load error:", error);
+        processGuideData = null;
+        renderProcessGuide(error.message || "Unable to load process guide");
+      }
     }
 
     function getSelectedRecoveryTotal() {
@@ -1302,6 +1323,7 @@
     async function loadNextProcessInput(lotNo) {
       if (!lotNo) {
         currentOpenProcessStep = null;
+        processGuideData = null;
         selectedRecoveryStockIds.clear();
         setBaseProcessInputWeight(0);
         document.getElementById("stepInputQty").value = "";
@@ -1361,15 +1383,19 @@
       if (!lotNo) {
         processStepData = [];
         currentOpenProcessStep = null;
+        processGuideData = null;
         renderProcessStepTable();
         renderProcessLossSummary();
         await loadNextProcessInput("");
         return;
       }
 
+      processGuideData = null;
+      renderProcessGuide();
       await loadProcessSteps(lotNo);
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
+      await loadProcessGuide(lotNo);
     }
 
     function scheduleProcessStepContextLoad() {
@@ -1506,6 +1532,7 @@
       document.getElementById("stepLossQty").value = "";
       document.getElementById("stepLossReason").value = "";
       currentOpenProcessStep = null;
+      processGuideData = null;
       setProcessStepHint();
       renderRecoveryStockOptions();
       renderProcessGuide();
