@@ -1031,6 +1031,145 @@ function parseBooleanLike(value) {
   return normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on";
 }
 
+const BILLING_AMOUNT_TOLERANCE = 1;
+const BILLING_WEIGHT_TOLERANCE = 0.001;
+
+function roundMoney(value) {
+  return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+}
+
+function isAmountClose(actual, expected, tolerance = BILLING_AMOUNT_TOLERANCE) {
+  return Math.abs(roundMoney(actual) - roundMoney(expected)) <= tolerance;
+}
+
+function isWeightClose(actual, expected, tolerance = BILLING_WEIGHT_TOLERANCE) {
+  return Math.abs(Number(actual || 0) - Number(expected || 0)) <= tolerance;
+}
+
+function hasMeaningfulNumber(value) {
+  return value !== null && value !== undefined && value !== "" && !Number.isNaN(Number(value));
+}
+
+function getBillingTaxModes(billType, taxType) {
+  const cleanBillType = String(billType || "").trim().toUpperCase();
+  const cleanTaxType = String(taxType || "").trim().toUpperCase();
+
+  if (cleanBillType) {
+    return [
+      {
+        billType: cleanBillType,
+        taxType: cleanTaxType || "CGST_SGST",
+        taxRate: cleanBillType === "GST" ? 0.03 : 0
+      }
+    ];
+  }
+
+  return [
+    { billType: "GST", taxType: cleanTaxType || "CGST_SGST", taxRate: 0.03 },
+    { billType: "NON_GST", taxType: cleanTaxType || "", taxRate: 0 }
+  ];
+}
+
+function calculateExpectedBillingTotals(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const sellingRate = toNumber(payload.sellingRatePerGram || payload.ratePerGram);
+  const companyRate = toNumber(payload.companyRatePerGram || payload.ratePerGram);
+  const mcRate = toNumber(payload.mcRate);
+  const roundOff = toNumber(payload.roundOff);
+
+  const baseTotals = items.reduce(
+    (totals, item) => {
+      const weight = toNumber(item.weight);
+      const purity = toNumber(item.purity) > 0 ? toNumber(item.purity) : 100;
+      const pureWeight = (weight * purity) / 100;
+      const makingCharge = hasMeaningfulNumber(item.makingChargeAmount ?? item.making_charge_amount)
+        ? toNumber(item.makingChargeAmount ?? item.making_charge_amount)
+        : weight * mcRate;
+      const customerLineAmount = pureWeight * sellingRate + makingCharge;
+      const companyLineAmount = pureWeight * companyRate + makingCharge;
+
+      totals.totalWeight += weight;
+      totals.customerSubtotal += customerLineAmount;
+      totals.companySubtotal += companyLineAmount;
+      return totals;
+    },
+    {
+      totalWeight: 0,
+      customerSubtotal: 0,
+      companySubtotal: 0
+    }
+  );
+
+  return getBillingTaxModes(payload.billType, payload.taxType).map((mode) => {
+    const customerTax = baseTotals.customerSubtotal * mode.taxRate;
+    const companyTax = baseTotals.companySubtotal * mode.taxRate;
+    const customerTotal = baseTotals.customerSubtotal + customerTax + roundOff;
+    const companyTotal = baseTotals.companySubtotal + companyTax;
+
+    return {
+      ...mode,
+      totalWeight: baseTotals.totalWeight,
+      subtotal: baseTotals.customerSubtotal,
+      customerSubtotal: baseTotals.customerSubtotal,
+      companySubtotal: baseTotals.companySubtotal,
+      customerTotal,
+      totalAmount: customerTotal,
+      companyTotal,
+      employeeMargin: customerTotal - companyTotal
+    };
+  });
+}
+
+function validateBillingTotals(payload) {
+  const expectedCandidates = calculateExpectedBillingTotals(payload);
+  const submittedTotal = toNumber(payload.totalAmount || payload.customerTotal);
+  const submittedCustomerTotal = toNumber(payload.customerTotal || payload.totalAmount);
+  const submittedSubtotal = toNumber(payload.customerSubtotal || payload.subtotal);
+  const submittedCompanyTotal = toNumber(payload.companyTotal);
+  const submittedEmployeeMargin = toNumber(payload.employeeMargin);
+  const submittedTotalWeight = toNumber(payload.totalWeight);
+  const paidAmount = toNumber(payload.paidAmount);
+  const dueAmount = toNumber(payload.dueAmount);
+
+  const matches = expectedCandidates.some((expected) => {
+    const subtotalOk = isAmountClose(submittedSubtotal, expected.subtotal);
+    const totalOk =
+      isAmountClose(submittedTotal, expected.totalAmount) &&
+      isAmountClose(submittedCustomerTotal, expected.customerTotal);
+    const companyTotalOk = isAmountClose(submittedCompanyTotal, expected.companyTotal);
+    const marginOk = isAmountClose(submittedEmployeeMargin, expected.employeeMargin);
+    const weightOk = isWeightClose(submittedTotalWeight, expected.totalWeight);
+
+    return subtotalOk && totalOk && companyTotalOk && marginOk && weightOk;
+  });
+
+  if (!matches) {
+    return {
+      ok: false,
+      message: "Billing total mismatch. Please recalculate and try again."
+    };
+  }
+
+  if (paidAmount < 0 || dueAmount < 0) {
+    return {
+      ok: false,
+      message: "Billing total mismatch. Please recalculate and try again."
+    };
+  }
+
+  const maxPayable = Math.max(submittedTotal, submittedCustomerTotal, submittedCompanyTotal);
+  if (paidAmount + dueAmount > maxPayable + BILLING_AMOUNT_TOLERANCE) {
+    return {
+      ok: false,
+      message: "Billing total mismatch. Please recalculate and try again."
+    };
+  }
+
+  return {
+    ok: true
+  };
+}
+
 function getTodayDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -4716,16 +4855,6 @@ app.get("/:page", (req, res, next) => {
 
 app.get("/api/test", (req, res) => {
   return res.status(200).send("API TEST OK");
-});
-
-app.get("/debug/ping-login", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    method: "GET",
-    time: new Date().toISOString(),
-    origin: String(req.headers.origin || ""),
-    ip: getRequestIpAddress(req)
-  });
 });
 
 app.get("/health", async (req, res) => {
@@ -10729,6 +10858,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       paymentStatus = "",
       paidAmount = 0,
       dueAmount = 0,
+      billType = "",
+      taxType = "",
       totalAmount = 0,
       totalItems = 0,
       totalCount = 0,
@@ -10777,6 +10908,34 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     const finalTotalWeight = Number(
       totalWeight || items.reduce((sum, item) => sum + Number(item.weight || 0), 0)
     );
+
+    const billingTotalsValidation = validateBillingTotals({
+      billType,
+      taxType,
+      totalAmount,
+      totalWeight: finalTotalWeight,
+      ratePerGram,
+      sellingRatePerGram,
+      companyRatePerGram,
+      mcRate,
+      roundOff,
+      subtotal,
+      customerSubtotal,
+      customerTotal,
+      companyTotal,
+      employeeMargin,
+      paidAmount,
+      dueAmount,
+      items
+    });
+
+    if (!billingTotalsValidation.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: billingTotalsValidation.message
+      });
+    }
 
     const [saleInsert] = await connection.query(
       `
@@ -12685,39 +12844,12 @@ app.put("/rejectStaffRequest/:id", authMiddleware, checkRole(["SUPERADMIN", "OWN
    LOGIN
 ========================= */
 app.post("/login", loginRateLimiter, async (req, res) => {
-  const loginDebugId = crypto.randomBytes(4).toString("hex");
-  const loginDebugStartedAt = new Date();
-
-  console.log("[LOGIN_DEBUG] request_received", {
-    id: loginDebugId,
-    time: loginDebugStartedAt.toISOString(),
-    ip: getRequestIpAddress(req),
-    origin: String(req.headers.origin || ""),
-    userAgent: String(req.headers["user-agent"] || ""),
-    contentType: String(req.headers["content-type"] || ""),
-    hasBody: Boolean(req.body && Object.keys(req.body || {}).length),
-    emailOrMobile: maskDebugIdentifier(req.body?.email || req.body?.mobile || "")
-  });
-
-  const sendLoginDebugJson = (statusCode, payload) => {
-    console.log("[LOGIN_DEBUG] response_sending", {
-      id: loginDebugId,
-      time: new Date().toISOString(),
-      status: statusCode,
-      success: Boolean(payload?.success),
-      message: String(payload?.message || ""),
-      durationMs: Date.now() - loginDebugStartedAt.getTime()
-    });
-
-    return res.status(statusCode).json(payload);
-  };
-
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "").trim();
 
     if (!email || !password) {
-      return sendLoginDebugJson(200, {
+      return res.status(200).json({
         success: false,
         message: "Email and password are required"
       });
@@ -12726,12 +12858,12 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     const user = await findUserByEmail(email);
 
     if (!user) {
-      return sendLoginDebugJson(200, { success: false, message: "Invalid login" });
+      return res.status(200).json({ success: false, message: "Invalid login" });
     }
 
     const passwordMatches = await verifyPasswordForUser(user, password);
     if (!passwordMatches) {
-      return sendLoginDebugJson(200, { success: false, message: "Invalid login" });
+      return res.status(200).json({ success: false, message: "Invalid login" });
     }
 
     if (isSuperAdminUser(user)) {
@@ -12743,18 +12875,18 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     }
 
     if (String(user.status || "").toLowerCase() !== "approved") {
-      return sendLoginDebugJson(200, { success: false, message: "Pending approval" });
+      return res.status(200).json({ success: false, message: "Pending approval" });
     }
 
     if (!String(user.role || "").trim()) {
-      return sendLoginDebugJson(200, { success: false, message: "Role not assigned yet" });
+      return res.status(200).json({ success: false, message: "Role not assigned yet" });
     }
 
     const token = signAuthToken(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
-    return sendLoginDebugJson(200, {
+    return res.status(200).json({
       success: true,
       token,
       user: {
@@ -12773,7 +12905,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error("Login error:", error);
-    return sendLoginDebugJson(500, {
+    return res.status(500).json({
       success: false,
       message: "Server error",
       error: getErrorDetail(error)
