@@ -1070,58 +1070,91 @@ function getBillingTaxModes(billType, taxType) {
   ];
 }
 
-function calculateExpectedBillingTotals(payload) {
+function calculateBillingServerTotals(payload) {
   const items = Array.isArray(payload.items) ? payload.items : [];
   const sellingRate = toNumber(payload.sellingRatePerGram || payload.ratePerGram);
   const companyRate = toNumber(payload.companyRatePerGram || payload.ratePerGram);
   const mcRate = toNumber(payload.mcRate);
   const roundOff = toNumber(payload.roundOff);
 
-  const baseTotals = items.reduce(
-    (totals, item) => {
-      const weight = toNumber(item.weight);
-      const purity = toNumber(item.purity) > 0 ? toNumber(item.purity) : 100;
-      const pureWeight = (weight * purity) / 100;
-      const makingCharge = hasMeaningfulNumber(item.makingChargeAmount ?? item.making_charge_amount)
-        ? toNumber(item.makingChargeAmount ?? item.making_charge_amount)
-        : weight * mcRate;
-      const customerLineAmount = pureWeight * sellingRate + makingCharge;
-      const companyLineAmount = pureWeight * companyRate + makingCharge;
+  const lines = items.map((item, index) => {
+    const weight = toNumber(item.weight);
+    const purity = toNumber(item.purity) > 0 ? toNumber(item.purity) : 100;
+    const pureWeight = (weight * purity) / 100;
+    const makingCharge = hasMeaningfulNumber(item.makingChargeAmount ?? item.making_charge_amount)
+      ? toNumber(item.makingChargeAmount ?? item.making_charge_amount)
+      : weight * mcRate;
+    const customerLineAmount = pureWeight * sellingRate + makingCharge;
+    const companyLineAmount = pureWeight * companyRate + makingCharge;
+    const employeeMarginAmount = customerLineAmount - companyLineAmount;
 
-      totals.totalWeight += weight;
-      totals.customerSubtotal += customerLineAmount;
-      totals.companySubtotal += companyLineAmount;
-      return totals;
-    },
-    {
-      totalWeight: 0,
-      customerSubtotal: 0,
-      companySubtotal: 0
-    }
-  );
+    return {
+      lineNo: index + 1,
+      barcode: String(item.barcode || "").trim(),
+      itemName: String(item.itemName || item.productName || item.product_name || "").trim(),
+      lotNumber: String(item.lot || item.lot_number || "").trim(),
+      weight,
+      purity,
+      pureWeight,
+      makingCharge,
+      sellingRatePerGram: sellingRate,
+      companyRatePerGram: companyRate,
+      customerLineAmount,
+      companyLineAmount,
+      employeeMarginAmount
+    };
+  });
 
-  return getBillingTaxModes(payload.billType, payload.taxType).map((mode) => {
-    const customerTax = baseTotals.customerSubtotal * mode.taxRate;
-    const companyTax = baseTotals.companySubtotal * mode.taxRate;
-    const customerTotal = baseTotals.customerSubtotal + customerTax + roundOff;
-    const companyTotal = baseTotals.companySubtotal + companyTax;
+  const totalWeight = lines.reduce((sum, line) => sum + line.weight, 0);
+  const customerSubtotal = lines.reduce((sum, line) => sum + line.customerLineAmount, 0);
+  const companySubtotal = lines.reduce((sum, line) => sum + line.companyLineAmount, 0);
+
+  const candidates = getBillingTaxModes(payload.billType, payload.taxType).map((mode) => {
+    const customerTax = customerSubtotal * mode.taxRate;
+    const companyTax = companySubtotal * mode.taxRate;
+    const customerTotal = customerSubtotal + customerTax + roundOff;
+    const companyTotal = companySubtotal + companyTax;
+    const isCgstSgst = mode.billType === "GST" && mode.taxType !== "IGST";
+    const isIgst = mode.billType === "GST" && mode.taxType === "IGST";
 
     return {
       ...mode,
-      totalWeight: baseTotals.totalWeight,
-      subtotal: baseTotals.customerSubtotal,
-      customerSubtotal: baseTotals.customerSubtotal,
-      companySubtotal: baseTotals.companySubtotal,
+      totalItems: lines.length,
+      totalWeight,
+      subtotal: customerSubtotal,
+      customerSubtotal,
+      companySubtotal,
+      cgst: isCgstSgst ? customerTax / 2 : 0,
+      sgst: isCgstSgst ? customerTax / 2 : 0,
+      igst: isIgst ? customerTax : 0,
+      gstAmount: customerTax,
+      companyCgst: isCgstSgst ? companyTax / 2 : 0,
+      companySgst: isCgstSgst ? companyTax / 2 : 0,
+      companyIgst: isIgst ? companyTax : 0,
+      companyGstAmount: companyTax,
+      roundOff,
       customerTotal,
       totalAmount: customerTotal,
       companyTotal,
-      employeeMargin: customerTotal - companyTotal
+      employeeMargin: customerTotal - companyTotal,
+      lines
     };
   });
+
+  return {
+    totalItems: lines.length,
+    totalWeight,
+    subtotal: customerSubtotal,
+    customerSubtotal,
+    companySubtotal,
+    lines,
+    candidates
+  };
 }
 
 function validateBillingTotals(payload) {
-  const expectedCandidates = calculateExpectedBillingTotals(payload);
+  const serverTotals = calculateBillingServerTotals(payload);
+  const expectedCandidates = serverTotals.candidates;
   const submittedTotal = toNumber(payload.totalAmount || payload.customerTotal);
   const submittedCustomerTotal = toNumber(payload.customerTotal || payload.totalAmount);
   const submittedSubtotal = toNumber(payload.customerSubtotal || payload.subtotal);
