@@ -39,6 +39,57 @@
       z-index: 2;
     }
 
+    .process-guide-card {
+      background: #fffaf1;
+      border: 1px solid #eadfca;
+      border-left: 4px solid #d4af37;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin: 14px 0;
+      color: #2e2a24;
+    }
+
+    .process-guide-card h4 {
+      margin: 0 0 8px;
+      color: #b8901f;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .process-guide-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .process-guide-item {
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid rgba(234, 223, 202, 0.72);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .process-guide-label {
+      display: block;
+      color: #7a6f5c;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 5px;
+    }
+
+    .process-guide-value {
+      color: #2e2a24;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .process-guide-ready {
+      color: #9a7418;
+    }
+
     @media (max-width: 980px) {
       .process-two-col,
       .process-page-grid {
@@ -197,6 +248,24 @@
           <div class="sub-card" style="margin-top:16px;">
             <h3>Process-wise Loss Tracking</h3>
             <p>Track each process step input, output, and loss for a saved lot.</p>
+
+            <div id="processGuideCard" class="process-guide-card">
+              <h4>Process Guide</h4>
+              <div class="process-guide-grid">
+                <div class="process-guide-item">
+                  <span class="process-guide-label">Completed Steps</span>
+                  <span id="processGuideCompleted" class="process-guide-value">Select a lot</span>
+                </div>
+                <div class="process-guide-item">
+                  <span class="process-guide-label">Next Suggested Step</span>
+                  <span id="processGuideNext" class="process-guide-value">-</span>
+                </div>
+                <div class="process-guide-item">
+                  <span class="process-guide-label">Progress</span>
+                  <span id="processGuideProgress" class="process-guide-value">0/6</span>
+                </div>
+              </div>
+            </div>
 
             <div class="form-grid">
               <div class="input-box">
@@ -552,6 +621,15 @@
     };
     let processLotLoadTimer = null;
 
+    const DEFAULT_PROCESS_TEMPLATE = [
+      "Patta",
+      "Hydraulic Press",
+      "Soldering",
+      "Acid Poda",
+      "Cutting",
+      "Fitting"
+    ];
+
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
     function saveSidebarState(isCollapsed) {
@@ -726,6 +804,59 @@
       const num = Number(value || 0);
       if (!Number.isFinite(num)) return "0";
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
+    }
+
+    function normalizeProcessTemplateName(value) {
+      return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    }
+
+    function getCompletedTemplateSteps() {
+      const completedNames = new Set(
+        processStepData
+          .filter((step) => String(step.status || "").toUpperCase() === "COMPLETED")
+          .map((step) => normalizeProcessTemplateName(step.processName))
+          .filter(Boolean)
+      );
+
+      return DEFAULT_PROCESS_TEMPLATE.filter((name) => completedNames.has(normalizeProcessTemplateName(name)));
+    }
+
+    function getNextSuggestedProcessStep() {
+      const completedNames = new Set(getCompletedTemplateSteps().map(normalizeProcessTemplateName));
+      return DEFAULT_PROCESS_TEMPLATE.find((name) => !completedNames.has(normalizeProcessTemplateName(name))) || "";
+    }
+
+    function prefillSuggestedProcessName() {
+      if (currentOpenProcessStep) return;
+
+      const input = document.getElementById("stepProcessName");
+      if (!input || input.value.trim()) return;
+
+      const suggested = getNextSuggestedProcessStep();
+      if (suggested) input.value = suggested;
+    }
+
+    function renderProcessGuide() {
+      const completedEl = document.getElementById("processGuideCompleted");
+      const nextEl = document.getElementById("processGuideNext");
+      const progressEl = document.getElementById("processGuideProgress");
+      if (!completedEl || !nextEl || !progressEl) return;
+
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const completedSteps = getCompletedTemplateSteps();
+      const nextStep = getNextSuggestedProcessStep();
+      const isReady = completedSteps.length >= DEFAULT_PROCESS_TEMPLATE.length;
+
+      completedEl.textContent = lotNo
+        ? (completedSteps.length ? completedSteps.join(", ") : "No fixed steps completed")
+        : "Select a lot";
+      nextEl.textContent = lotNo
+        ? (isReady ? "Ready to Complete Lot" : nextStep)
+        : "-";
+      nextEl.classList.toggle("process-guide-ready", isReady);
+      progressEl.textContent = `${completedSteps.length}/${DEFAULT_PROCESS_TEMPLATE.length}`;
+
+      prefillSuggestedProcessName();
     }
 
     function getSelectedRecoveryTotal() {
@@ -1108,6 +1239,7 @@
       document.getElementById("stepLossQty").value = "";
       document.getElementById("stepLossReason").value = step?.lossReason || "";
       renderRecoveryStockOptions();
+      renderProcessGuide();
     }
 
     function renderProcessStepTable() {
@@ -1116,6 +1248,7 @@
 
       if (!processStepData.length) {
         tbody.innerHTML = `<tr><td colspan="12">No process steps found</td></tr>`;
+        renderProcessGuide();
         return;
       }
 
@@ -1138,6 +1271,8 @@
           </tr>
         `;
       }).join("");
+
+      renderProcessGuide();
     }
 
     async function loadProcessSteps(lotNo) {
@@ -1173,6 +1308,7 @@
         document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint();
         renderRecoveryStockOptions();
+        renderProcessGuide();
         return;
       }
 
@@ -1206,6 +1342,7 @@
         document.getElementById("stepLossQty").value = "";
         setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty: ${formatProcessQty(data?.inputQty || 0)}`);
         renderRecoveryStockOptions();
+        renderProcessGuide();
       } catch (error) {
         console.log("Next process input error:", error);
         currentOpenProcessStep = null;
@@ -1215,6 +1352,7 @@
         document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint(error.message || "Unable to load next input weight.");
         renderRecoveryStockOptions();
+        renderProcessGuide();
       }
     }
 
@@ -1370,6 +1508,7 @@
       currentOpenProcessStep = null;
       setProcessStepHint();
       renderRecoveryStockOptions();
+      renderProcessGuide();
       renderLiveProcessSummary();
     }
 
