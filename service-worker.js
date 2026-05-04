@@ -1,4 +1,4 @@
-const CACHE_NAME = "erp-panel-pwa-v3";
+const CACHE_NAME = "erp-panel-pwa-v4";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -58,7 +58,7 @@ self.addEventListener("fetch", (event) => {
 
   if (isNavigation) {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-store" })
         .then((response) => {
           if (response.ok && !response.redirected) {
             const cloned = response.clone();

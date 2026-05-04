@@ -11124,14 +11124,104 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       });
     }
 
+    if (toNumber(finalStep.output_weight) <= 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Latest completed process step must have output weight greater than zero before completing the lot"
+      });
+    }
+
+    const [negativeLossRows] = await connection.query(
+      `
+      SELECT id, step_no, process_name, loss_weight
+      FROM process_steps
+      WHERE company_id = ?
+        AND lot_no = ?
+        AND status = 'COMPLETED'
+        AND COALESCE(loss_weight, 0) < 0
+      LIMIT 1
+      `,
+      [access.companyScope, lotNo]
+    );
+
+    if (negativeLossRows.length) {
+      const badStep = negativeLossRows[0];
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Process step ${badStep.step_no || badStep.id} has negative loss. Correct the process loss before completing the lot.`
+      });
+    }
+
+    const [pendingAdditiveRows] = await connection.query(
+      `
+      SELECT
+        COUNT(*) AS issue_count,
+        COALESCE(SUM(GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)), 0) AS pending_weight
+      FROM process_step_additive_issues
+      WHERE company_id = ?
+        AND lot_no = ?
+      `,
+      [access.companyScope, lotNo]
+    );
+    const additiveIssueCount = Number(pendingAdditiveRows[0]?.issue_count || 0);
+    const pendingAdditiveWeight = toNumber(pendingAdditiveRows[0]?.pending_weight);
+
+    if (additiveIssueCount > 0 && pendingAdditiveWeight > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot complete this lot. Pending KDM/Solder return weight is ${pendingAdditiveWeight.toFixed(3)}g. Return all issued material before completing the lot.`
+      });
+    }
+
+    const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
+    const hasAssignedTemplate = Number(processLot.template_id || 0) > 0;
+    const templateSteps = templateContext.steps || [];
+
+    if (hasAssignedTemplate && templateSteps.length) {
+      const [completedStepRows] = await connection.query(
+        `
+        SELECT process_name
+        FROM process_steps
+        WHERE company_id = ?
+          AND lot_no = ?
+          AND status = 'COMPLETED'
+        ORDER BY step_no ASC, id ASC
+        `,
+        [access.companyScope, lotNo]
+      );
+      const completedNameSet = new Set(
+        completedStepRows
+          .map((row) => normalizeTemplateStepName(row.process_name))
+          .filter(Boolean)
+      );
+      const missingTemplateStep = templateSteps.find((step) => {
+        return !completedNameSet.has(normalizeTemplateStepName(step.stepName));
+      });
+      const finalTemplateStep = templateSteps[templateSteps.length - 1];
+      const finalStepReached = completedNameSet.has(normalizeTemplateStepName(finalTemplateStep?.stepName));
+
+      if (missingTemplateStep || !finalStepReached) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Process template is not complete. Complete final step "${finalTemplateStep?.stepName || "Final Step"}" before completing the lot.`
+        });
+      }
+    }
+
     await connection.query(
       `
       UPDATE process_lots
       SET status = 'COMPLETED',
+          completed_at = NOW(),
+          completed_by = ?,
           updated_at = NOW()
       WHERE id = ?
       `,
-      [processLot.id]
+      [access.actingUserId || null, processLot.id]
     );
 
     const [savedRows] = await connection.query(
