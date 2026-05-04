@@ -311,6 +311,26 @@
                 <input id="stepOutputWeight" type="number" step="0.001" placeholder="Finished output weight" />
               </div>
 
+              <div id="additiveMaterialFields" class="summary" style="grid-column: 1 / -1; display:none;">
+                <h3 id="additiveMaterialTitle">Solder/KDM Material</h3>
+                <div class="form-grid">
+                  <div class="input-box">
+                    <label id="additiveGivenLabel" for="stepAdditiveGivenWeight">Solder/KDM Given Weight</label>
+                    <input id="stepAdditiveGivenWeight" type="number" step="0.001" placeholder="0.000" />
+                  </div>
+
+                  <div class="input-box">
+                    <label id="additiveReturnedLabel" for="stepAdditiveReturnedWeight">Solder/KDM Returned Weight</label>
+                    <input id="stepAdditiveReturnedWeight" type="number" step="0.001" placeholder="0.000" />
+                  </div>
+
+                  <div class="input-box">
+                    <label id="additiveUsedLabel" for="stepAdditiveUsedWeight">Solder/KDM Used Weight</label>
+                    <input id="stepAdditiveUsedWeight" type="number" step="0.001" readonly />
+                  </div>
+                </div>
+              </div>
+
               <div class="input-box">
                 <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
                 <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
@@ -813,7 +833,10 @@
         completedSteps,
         nextStep,
         progress,
-        isReadyToComplete: Boolean(data.isReadyToComplete)
+        isReadyToComplete: Boolean(data.isReadyToComplete),
+        usesAdditiveMaterial: Boolean(data.usesAdditiveMaterial),
+        additiveMaterialLabel: String(data.additiveMaterialLabel || "").trim(),
+        additiveAffectsOutputWeight: Boolean(data.additiveAffectsOutputWeight)
       };
     }
 
@@ -849,6 +872,7 @@
       progressEl.textContent = lotNo ? progress : "0/0";
 
       prefillSuggestedProcessName(nextStep);
+      renderAdditiveMaterialFields();
     }
 
     async function loadProcessGuide(lotNo) {
@@ -880,6 +904,107 @@
       }
     }
 
+    function getAdditiveMaterialLabel() {
+      return String(processGuideData?.additiveMaterialLabel || "Solder/KDM").trim() || "Solder/KDM";
+    }
+
+    function isAdditiveMaterialStepActive() {
+      return Boolean(processGuideData?.usesAdditiveMaterial && !processGuideData?.isReadyToComplete && !currentOpenProcessStep);
+    }
+
+    function clearAdditiveMaterialFields() {
+      ["stepAdditiveGivenWeight", "stepAdditiveReturnedWeight", "stepAdditiveUsedWeight"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) {
+          input.value = "";
+          input.setCustomValidity("");
+        }
+      });
+    }
+
+    function renderAdditiveMaterialFields() {
+      const wrap = document.getElementById("additiveMaterialFields");
+      if (!wrap) return;
+
+      const isActive = isAdditiveMaterialStepActive();
+      wrap.style.display = isActive ? "" : "none";
+
+      if (!isActive) {
+        clearAdditiveMaterialFields();
+        return;
+      }
+
+      const label = getAdditiveMaterialLabel();
+      const title = document.getElementById("additiveMaterialTitle");
+      const givenLabel = document.getElementById("additiveGivenLabel");
+      const returnedLabel = document.getElementById("additiveReturnedLabel");
+      const usedLabel = document.getElementById("additiveUsedLabel");
+
+      if (title) title.textContent = `${label} Material`;
+      if (givenLabel) givenLabel.textContent = `${label} Given Weight`;
+      if (returnedLabel) returnedLabel.textContent = `${label} Returned Weight`;
+      if (usedLabel) usedLabel.textContent = `${label} Used Weight`;
+
+      updateAdditiveMaterialUsage();
+    }
+
+    function validateAdditiveMaterialInputs(showMessage = false) {
+      if (!isAdditiveMaterialStepActive()) return { ok: true, usedWeight: 0 };
+
+      const givenInput = document.getElementById("stepAdditiveGivenWeight");
+      const returnedInput = document.getElementById("stepAdditiveReturnedWeight");
+      const label = getAdditiveMaterialLabel();
+      const givenRaw = givenInput?.value;
+      const returnedRaw = returnedInput?.value;
+      const given = Number(givenRaw || 0);
+      const returned = Number(returnedRaw || 0);
+
+      givenInput?.setCustomValidity("");
+      returnedInput?.setCustomValidity("");
+
+      if (givenRaw !== "" && given < 0) {
+        givenInput?.setCustomValidity(`${label} given weight cannot be negative`);
+        if (showMessage) showToast(`${label} given weight cannot be negative`, "error");
+        return { ok: false, usedWeight: 0 };
+      }
+
+      if (returnedRaw !== "" && returned < 0) {
+        returnedInput?.setCustomValidity(`${label} returned weight cannot be negative`);
+        if (showMessage) showToast(`${label} returned weight cannot be negative`, "error");
+        return { ok: false, usedWeight: 0 };
+      }
+
+      if (returned > given) {
+        returnedInput?.setCustomValidity(`${label} returned weight cannot be greater than given weight`);
+        if (showMessage) showToast(`${label} returned weight cannot be greater than given weight`, "error");
+        return { ok: false, usedWeight: 0 };
+      }
+
+      return { ok: true, usedWeight: given - returned };
+    }
+
+    function updateAdditiveMaterialUsage() {
+      if (!isAdditiveMaterialStepActive()) return;
+
+      const usedInput = document.getElementById("stepAdditiveUsedWeight");
+      const outputInput = document.getElementById("stepOutputWeight");
+      const validation = validateAdditiveMaterialInputs(false);
+
+      if (!validation.ok) {
+        if (usedInput) usedInput.value = "";
+        return;
+      }
+
+      const usedWeight = validation.usedWeight;
+      if (usedInput) usedInput.value = formatProcessWeight(usedWeight);
+
+      if (processGuideData?.additiveAffectsOutputWeight && outputInput) {
+        const suggestedOutput = Number(document.getElementById("stepInputWeight")?.value || 0) + usedWeight;
+        outputInput.value = suggestedOutput > 0 ? formatProcessWeight(suggestedOutput) : "";
+        updateProcessStepLoss();
+      }
+    }
+
     function getSelectedRecoveryTotal() {
       return recoveryStockData
         .filter((item) => selectedRecoveryStockIds.has(Number(item.id)))
@@ -901,6 +1026,7 @@
       if (totalEl) totalEl.textContent = formatProcessWeight(totalInput);
 
       updateProcessStepLoss();
+      updateAdditiveMaterialUsage();
     }
 
     function setBaseProcessInputWeight(value) {
@@ -1429,6 +1555,7 @@
       const finishedOutputWeight = Number(outputRaw || 0);
       const recoveryWeight = Number(recoveryRaw || 0);
       const calculatedLossWeight = inputWeight - finishedOutputWeight - recoveryWeight;
+      const additiveValidation = validateAdditiveMaterialInputs(true);
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
@@ -1437,6 +1564,10 @@
 
       if (!currentOpenProcessStep && !processName) {
         showToast("Please enter the process name.", "error", "Missing Field");
+        return;
+      }
+
+      if (!additiveValidation.ok) {
         return;
       }
 
@@ -1526,6 +1657,7 @@
       document.getElementById("stepInputQty").value = "";
       document.getElementById("stepInputQty").readOnly = false;
       document.getElementById("stepOutputWeight").value = "";
+      clearAdditiveMaterialFields();
       document.getElementById("stepRecoveryWeight").value = "";
       document.getElementById("stepOutputQty").value = "";
       document.getElementById("stepLossWeight").value = "";
@@ -1832,6 +1964,8 @@
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
+    document.getElementById("stepAdditiveGivenWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
+    document.getElementById("stepAdditiveReturnedWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
     document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);
 
