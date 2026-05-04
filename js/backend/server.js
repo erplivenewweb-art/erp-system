@@ -6285,7 +6285,8 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
     }
 
     const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
-    const template = templateContext.steps;
+    const templateSteps = templateContext.steps;
+    const template = templateSteps.map((step) => step.stepName);
 
     const [completedRows] = await connection.query(
       `
@@ -6306,17 +6307,23 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
     const completedTemplateSteps = template.filter((stepName) => {
       return completedNameSet.has(normalizeTemplateStepName(stepName));
     });
-    const nextStep = template.find((stepName) => {
-      return !completedNameSet.has(normalizeTemplateStepName(stepName));
+    const nextTemplateStep = templateSteps.find((step) => {
+      return !completedNameSet.has(normalizeTemplateStepName(step.stepName));
     }) || null;
+    const nextStep = nextTemplateStep?.stepName || null;
     const totalSteps = template.length;
     const completedCount = completedTemplateSteps.length;
+    const usesAdditiveMaterial = Boolean(nextTemplateStep?.usesAdditiveMaterial);
 
     return res.json({
       success: true,
       template,
+      templateSteps,
       completedSteps,
       nextStep,
+      usesAdditiveMaterial,
+      additiveMaterialLabel: usesAdditiveMaterial ? String(nextTemplateStep?.additiveMaterialLabel || "") : "",
+      additiveAffectsOutputWeight: usesAdditiveMaterial ? Boolean(nextTemplateStep?.additiveAffectsOutputWeight) : false,
       progress: `${completedCount}/${totalSteps}`,
       isReadyToComplete: totalSteps > 0 && completedCount >= totalSteps
     });
@@ -6429,7 +6436,11 @@ async function getProcessTemplateStepsForLot(connection, companyId, processLot) 
 
   const [stepRows] = await connection.query(
     `
-    SELECT step_name
+    SELECT
+      step_name,
+      uses_additive_material,
+      additive_material_label,
+      additive_affects_output_weight
     FROM process_template_steps
     WHERE company_id = ?
       AND template_id = ?
@@ -6441,7 +6452,19 @@ async function getProcessTemplateStepsForLot(connection, companyId, processLot) 
 
   return {
     templateId,
-    steps: stepRows.map((row) => String(row.step_name || "").trim()).filter(Boolean)
+    steps: stepRows
+      .map((row) => {
+        const stepName = String(row.step_name || "").trim();
+        if (!stepName) return null;
+
+        return {
+          stepName,
+          usesAdditiveMaterial: Boolean(Number(row.uses_additive_material || 0)),
+          additiveMaterialLabel: String(row.additive_material_label || ""),
+          additiveAffectsOutputWeight: Boolean(Number(row.additive_affects_output_weight ?? 1))
+        };
+      })
+      .filter(Boolean)
   };
 }
 
