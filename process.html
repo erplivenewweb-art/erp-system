@@ -90,6 +90,63 @@
       color: #9a7418;
     }
 
+    .additive-issue-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    .additive-issue-metric {
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(234, 223, 202, 0.8);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .additive-issue-metric span {
+      display: block;
+      color: #7a6f5c;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .additive-issue-metric strong {
+      color: #2e2a24;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .additive-issue-note {
+      color: #7a6f5c;
+      font-size: 13px;
+      margin: 8px 0;
+    }
+
+    .additive-status-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #fff4cf;
+      color: #9a7418;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .additive-return-control {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      min-width: 180px;
+    }
+
+    .additive-return-control input {
+      min-width: 90px;
+    }
+
     @media (max-width: 980px) {
       .process-two-col,
       .process-page-grid {
@@ -98,6 +155,10 @@
 
       .process-side-column {
         position: static;
+      }
+
+      .additive-issue-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 
@@ -313,7 +374,7 @@
 
               <div id="additiveMaterialFields" class="summary" style="grid-column: 1 / -1; display:none;">
                 <h3 id="additiveMaterialTitle">Solder/KDM Material</h3>
-                <div class="form-grid">
+                <div id="additiveQuickFields" class="form-grid" style="display:none;">
                   <div class="input-box">
                     <label id="additiveGivenLabel" for="stepAdditiveGivenWeight">Solder/KDM Given Weight</label>
                     <input id="stepAdditiveGivenWeight" type="number" step="0.001" placeholder="0.000" />
@@ -327,6 +388,67 @@
                   <div class="input-box">
                     <label id="additiveUsedLabel" for="stepAdditiveUsedWeight">Solder/KDM Used Weight</label>
                     <input id="stepAdditiveUsedWeight" type="number" step="0.001" readonly />
+                  </div>
+                </div>
+
+                <div id="additiveIssuePanel" style="margin-top: 10px;">
+                  <div class="form-grid">
+                    <div class="input-box">
+                      <label id="additiveIssueGivenLabel" for="additiveIssueGivenWeight">Solder/KDM Given Weight</label>
+                      <input id="additiveIssueGivenWeight" type="number" step="0.001" placeholder="Issue weight" />
+                    </div>
+
+                    <div class="input-box">
+                      <label for="additiveIssueKarigarName">Karigar</label>
+                      <input id="additiveIssueKarigarName" type="text" placeholder="Karigar Name" />
+                    </div>
+
+                    <div class="input-box" style="grid-column: span 2;">
+                      <label for="additiveIssueNotes">Notes</label>
+                      <input id="additiveIssueNotes" type="text" placeholder="Optional note" />
+                    </div>
+                  </div>
+
+                  <div class="btn-row" style="margin-top:10px;">
+                    <button id="additiveIssueButton" class="secondary-btn" type="button" onclick="issueAdditiveMaterial()">Issue KDM</button>
+                    <button class="secondary-btn" type="button" onclick="loadAdditiveIssues()">Refresh Pending</button>
+                  </div>
+
+                  <p id="additiveIssueHelp" class="additive-issue-note"></p>
+
+                  <div class="additive-issue-grid">
+                    <div class="additive-issue-metric">
+                      <span>Total Given</span>
+                      <strong id="additiveIssueTotalGiven">0.000g</strong>
+                    </div>
+                    <div class="additive-issue-metric">
+                      <span>Total Returned</span>
+                      <strong id="additiveIssueTotalReturned">0.000g</strong>
+                    </div>
+                    <div class="additive-issue-metric">
+                      <span>Total Used</span>
+                      <strong id="additiveIssueTotalUsed">0.000g</strong>
+                    </div>
+                    <div class="additive-issue-metric">
+                      <span>Pending Weight</span>
+                      <strong id="additiveIssuePendingWeight">0.000g</strong>
+                    </div>
+                  </div>
+
+                  <div class="table-wrap" style="margin-top:10px;">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Given Weight</th>
+                          <th>Returned Weight</th>
+                          <th>Used Weight</th>
+                          <th>Pending Weight</th>
+                          <th>Status</th>
+                          <th>Return</th>
+                        </tr>
+                      </thead>
+                      <tbody id="additiveIssueListBody"></tbody>
+                    </table>
                   </div>
                 </div>
               </div>
@@ -635,6 +757,12 @@
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processGuideData = null;
+    let additiveIssueData = {
+      totalGiven: 0,
+      totalReturned: 0,
+      pendingWeight: 0,
+      issues: []
+    };
     let processLossSummaryData = {
       lotSummary: [],
       karigarSummary: [],
@@ -908,12 +1036,36 @@
       return String(processGuideData?.additiveMaterialLabel || "Solder/KDM").trim() || "Solder/KDM";
     }
 
+    function normalizeStepNameForMatch(value = "") {
+      return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    }
+
+    function isSolderingLikeStepName(value = "") {
+      return ["soldering", "solding", "solder", "kdm"].includes(normalizeStepNameForMatch(value));
+    }
+
     function isAdditiveMaterialStepActive() {
-      return Boolean(processGuideData?.usesAdditiveMaterial && !processGuideData?.isReadyToComplete && !currentOpenProcessStep);
+      const processName = document.getElementById("stepProcessName")?.value || "";
+      return Boolean(
+        !processGuideData?.isReadyToComplete &&
+        (
+          processGuideData?.usesAdditiveMaterial ||
+          isSolderingLikeStepName(processGuideData?.nextStep) ||
+          isSolderingLikeStepName(currentOpenProcessStep?.processName) ||
+          isSolderingLikeStepName(processName)
+        )
+      );
     }
 
     function clearAdditiveMaterialFields() {
       ["stepAdditiveGivenWeight", "stepAdditiveReturnedWeight", "stepAdditiveUsedWeight"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) {
+          input.value = "";
+          input.setCustomValidity("");
+        }
+      });
+      ["additiveIssueGivenWeight", "additiveIssueNotes"].forEach((id) => {
         const input = document.getElementById(id);
         if (input) {
           input.value = "";
@@ -931,6 +1083,7 @@
 
       if (!isActive) {
         clearAdditiveMaterialFields();
+        resetAdditiveIssueData();
         return;
       }
 
@@ -945,11 +1098,38 @@
       if (returnedLabel) returnedLabel.textContent = `${label} Returned Weight`;
       if (usedLabel) usedLabel.textContent = `${label} Used Weight`;
 
+      const issueLabel = document.getElementById("additiveIssueGivenLabel");
+      if (issueLabel) issueLabel.textContent = `${label} Given Weight`;
+
+      const karigarInput = document.getElementById("additiveIssueKarigarName");
+      if (karigarInput && !karigarInput.value.trim()) {
+        karigarInput.value = document.getElementById("stepKarigarName")?.value?.trim() || "";
+      }
+
+      const issueButton = document.getElementById("additiveIssueButton");
+      const help = document.getElementById("additiveIssueHelp");
+      const canIssue = Boolean(currentOpenProcessStep?.id);
+      if (issueButton) {
+        issueButton.disabled = !canIssue;
+        issueButton.textContent = `Issue ${label}`;
+      }
+      if (help) {
+        help.textContent = canIssue
+          ? `${label} can be issued and returned here without completing the process step.`
+          : `Save this ${label} process step as OPEN before issuing material.`;
+      }
+
+      renderAdditiveIssueList();
       updateAdditiveMaterialUsage();
     }
 
     function validateAdditiveMaterialInputs(showMessage = false) {
       if (!isAdditiveMaterialStepActive()) return { ok: true, usedWeight: 0 };
+
+      if (currentOpenProcessStep || additiveIssueData.issues.length) {
+        const usedWeight = Math.max(Number(additiveIssueData.totalGiven || 0) - Number(additiveIssueData.totalReturned || 0), 0);
+        return { ok: true, usedWeight };
+      }
 
       const givenInput = document.getElementById("stepAdditiveGivenWeight");
       const returnedInput = document.getElementById("stepAdditiveReturnedWeight");
@@ -993,6 +1173,17 @@
         };
       }
 
+      if (currentOpenProcessStep || additiveIssueData.issues.length) {
+        const given = Number(additiveIssueData.totalGiven || 0);
+        const returned = Number(additiveIssueData.totalReturned || 0);
+        return {
+          additiveGivenWeight: given,
+          additiveReturnedWeight: returned,
+          additiveUsedWeight: Math.max(given - returned, 0),
+          additiveMaterialLabel: given > 0 ? getAdditiveMaterialLabel() : ""
+        };
+      }
+
       const validation = validateAdditiveMaterialInputs(false);
       const given = Number(document.getElementById("stepAdditiveGivenWeight")?.value || 0);
       const returned = Number(document.getElementById("stepAdditiveReturnedWeight")?.value || 0);
@@ -1020,10 +1211,226 @@
       const usedWeight = validation.usedWeight;
       if (usedInput) usedInput.value = formatProcessWeight(usedWeight);
 
-      if (processGuideData?.additiveAffectsOutputWeight && outputInput) {
+      if (processGuideData?.additiveAffectsOutputWeight && outputInput && !currentOpenProcessStep) {
         const suggestedOutput = Number(document.getElementById("stepInputWeight")?.value || 0) + usedWeight;
         outputInput.value = suggestedOutput > 0 ? formatProcessWeight(suggestedOutput) : "";
         updateProcessStepLoss();
+      }
+    }
+
+    function resetAdditiveIssueData() {
+      additiveIssueData = {
+        totalGiven: 0,
+        totalReturned: 0,
+        pendingWeight: 0,
+        issues: []
+      };
+      renderAdditiveIssueList();
+    }
+
+    function normalizeAdditiveIssue(item = {}) {
+      const given = Number(item.givenWeight ?? item.given_weight ?? 0);
+      const returned = Number(item.returnedWeight ?? item.returned_weight ?? 0);
+      const used = Number(item.usedWeight ?? item.used_weight ?? Math.max(given - returned, 0));
+      return {
+        id: Number(item.id || 0),
+        givenWeight: given,
+        returnedWeight: returned,
+        usedWeight: used,
+        pendingWeight: Math.max(given - returned, 0),
+        status: String(item.status || "ISSUED").toUpperCase(),
+        materialLabel: String(item.materialLabel ?? item.material_label ?? getAdditiveMaterialLabel()).trim(),
+        karigarName: String(item.karigarName ?? item.karigar_name ?? "").trim()
+      };
+    }
+
+    function syncAdditiveIssueTotals(data = {}) {
+      const issues = Array.isArray(data.issues) ? data.issues.map(normalizeAdditiveIssue) : [];
+      const totalGiven = Number(data.totalGiven ?? data.total_given ?? issues.reduce((sum, issue) => sum + issue.givenWeight, 0));
+      const totalReturned = Number(data.totalReturned ?? data.total_returned ?? issues.reduce((sum, issue) => sum + issue.returnedWeight, 0));
+      const pendingWeight = Number(data.pendingWeight ?? data.pending_weight ?? Math.max(totalGiven - totalReturned, 0));
+
+      additiveIssueData = {
+        totalGiven,
+        totalReturned,
+        pendingWeight,
+        issues
+      };
+    }
+
+    function renderAdditiveIssueList() {
+      const totalGivenEl = document.getElementById("additiveIssueTotalGiven");
+      const totalReturnedEl = document.getElementById("additiveIssueTotalReturned");
+      const totalUsedEl = document.getElementById("additiveIssueTotalUsed");
+      const pendingEl = document.getElementById("additiveIssuePendingWeight");
+      const body = document.getElementById("additiveIssueListBody");
+      const totalUsed = Math.max(Number(additiveIssueData.totalGiven || 0) - Number(additiveIssueData.totalReturned || 0), 0);
+
+      if (totalGivenEl) totalGivenEl.textContent = `${formatProcessWeight(additiveIssueData.totalGiven)}g`;
+      if (totalReturnedEl) totalReturnedEl.textContent = `${formatProcessWeight(additiveIssueData.totalReturned)}g`;
+      if (totalUsedEl) totalUsedEl.textContent = `${formatProcessWeight(totalUsed)}g`;
+      if (pendingEl) pendingEl.textContent = `${formatProcessWeight(additiveIssueData.pendingWeight)}g`;
+
+      if (!body) return;
+
+      if (!additiveIssueData.issues.length) {
+        body.innerHTML = `<tr><td colspan="6">No pending ${escapeHtml(getAdditiveMaterialLabel())} issues found</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = additiveIssueData.issues.map((issue) => {
+        const canReturn = issue.pendingWeight > 0;
+        return `
+          <tr>
+            <td>${formatProcessWeight(issue.givenWeight)}</td>
+            <td>${formatProcessWeight(issue.returnedWeight)}</td>
+            <td>${formatProcessWeight(issue.usedWeight)}</td>
+            <td>${formatProcessWeight(issue.pendingWeight)}</td>
+            <td><span class="additive-status-badge">${escapeHtml(issue.status)}</span></td>
+            <td>
+              <div class="additive-return-control">
+                <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Return" ${canReturn ? "" : "disabled"} />
+                <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      updateAdditiveMaterialUsage();
+      updateProcessStepLoss();
+    }
+
+    async function loadAdditiveIssues(lotNo = "") {
+      const cleanLotNo = String(lotNo || document.getElementById("stepLotNo")?.value || "").trim();
+      if (!cleanLotNo || !isAdditiveMaterialStepActive()) {
+        resetAdditiveIssueData();
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        params.set("lotNo", cleanLotNo);
+        const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "KDM issue fetch failed");
+        }
+
+        syncAdditiveIssueTotals(data);
+      } catch (error) {
+        console.log("Additive issue load error:", error);
+        resetAdditiveIssueData();
+        showToast(error.message || "Unable to load KDM/Solder issues", "error");
+      }
+
+      renderAdditiveIssueList();
+    }
+
+    async function issueAdditiveMaterial() {
+      if (!isAdditiveMaterialStepActive()) return;
+
+      if (!currentOpenProcessStep?.id) {
+        showToast("Save this Soldering/KDM process step as OPEN before issuing material.", "error", "Open Step Required");
+        return;
+      }
+
+      const givenInput = document.getElementById("additiveIssueGivenWeight");
+      const karigarInput = document.getElementById("additiveIssueKarigarName");
+      const notesInput = document.getElementById("additiveIssueNotes");
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || currentOpenProcessStep.lotNo || "";
+      const givenWeight = Number(givenInput?.value || 0);
+      const karigar = String(karigarInput?.value || document.getElementById("stepKarigarName")?.value || currentOpenProcessStep.karigarName || "").trim();
+      const notes = String(notesInput?.value || "").trim();
+
+      givenInput?.setCustomValidity("");
+      if (!givenWeight || givenWeight <= 0) {
+        givenInput?.setCustomValidity("Given weight must be greater than zero");
+        showToast("Enter KDM/Solder given weight greater than zero.", "error", "Invalid Weight");
+        return;
+      }
+
+      if (!karigar) {
+        showToast("Please enter karigar name before issuing KDM/Solder.", "error", "Missing Karigar");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/process/steps/${currentOpenProcessStep.id}/additive-issue`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAuthPayload({
+            lot_no: lotNo,
+            karigar,
+            given_weight: givenWeight,
+            material_label: getAdditiveMaterialLabel(),
+            notes
+          }))
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "KDM issue failed");
+        }
+
+        showToast(data?.message || "KDM/Solder issued successfully", "success", "Issued");
+        if (givenInput) givenInput.value = "";
+        if (notesInput) notesInput.value = "";
+        await loadAdditiveIssues(lotNo);
+      } catch (error) {
+        console.log("Additive issue save error:", error);
+        showToast(error.message || "KDM/Solder issue failed", "error", "Issue Failed");
+      }
+    }
+
+    async function returnAdditiveIssue(issueId) {
+      const id = Number(issueId || 0);
+      const issue = additiveIssueData.issues.find((item) => item.id === id);
+      const input = document.getElementById(`additiveReturnWeight_${id}`);
+      const returnedWeight = Number(input?.value || 0);
+
+      if (!id || !issue) return;
+
+      input?.setCustomValidity("");
+      if (returnedWeight < 0) {
+        input?.setCustomValidity("Return weight cannot be negative");
+        showToast("Return weight cannot be negative.", "error", "Invalid Weight");
+        return;
+      }
+
+      if (returnedWeight > issue.givenWeight) {
+        input?.setCustomValidity("Return weight cannot be greater than given weight");
+        showToast("Return weight cannot be greater than given weight.", "error", "Invalid Weight");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/process/additive-issues/${id}/return`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAuthPayload({
+            returned_weight: returnedWeight
+          }))
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "KDM return failed");
+        }
+
+        showToast(data?.message || "KDM/Solder returned successfully", "success", "Returned");
+        await loadAdditiveIssues();
+        await loadProcessSteps(document.getElementById("stepLotNo")?.value?.trim() || "");
+      } catch (error) {
+        console.log("Additive issue return error:", error);
+        showToast(error.message || "KDM/Solder return failed", "error", "Return Failed");
       }
     }
 
@@ -1374,13 +1781,14 @@
       const lossQtyInput = document.getElementById("stepLossQty");
       const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
       const hasRecovery = recoveryRaw !== "" && recoveryRaw !== null && recoveryRaw !== undefined;
+      const additiveUsed = getAdditiveMaterialPayload().additiveUsedWeight || 0;
 
       if (lossInput && !hasOutput && !hasRecovery) {
         lossInput.value = "";
       } else if (lossInput) {
         const output = Number(outputRaw || 0);
         const recovery = Number(recoveryRaw || 0);
-        lossInput.value = Math.max(input - (output + recovery), 0).toFixed(3);
+        lossInput.value = Math.max(input + additiveUsed - output - recovery, 0).toFixed(3);
       }
 
       if (lossQtyInput && (outputQtyRaw === "" || outputQtyRaw === null || outputQtyRaw === undefined)) {
@@ -1473,6 +1881,7 @@
         currentOpenProcessStep = null;
         processGuideData = null;
         selectedRecoveryStockIds.clear();
+        resetAdditiveIssueData();
         setBaseProcessInputWeight(0);
         document.getElementById("stepInputQty").value = "";
         document.getElementById("stepInputQty").readOnly = false;
@@ -1517,6 +1926,7 @@
         console.log("Next process input error:", error);
         currentOpenProcessStep = null;
         selectedRecoveryStockIds.clear();
+        resetAdditiveIssueData();
         setBaseProcessInputWeight(0);
         document.getElementById("stepInputQty").value = "";
         document.getElementById("stepInputQty").readOnly = false;
@@ -1532,6 +1942,7 @@
         processStepData = [];
         currentOpenProcessStep = null;
         processGuideData = null;
+        resetAdditiveIssueData();
         renderProcessStepTable();
         renderProcessLossSummary();
         await loadNextProcessInput("");
@@ -1544,6 +1955,7 @@
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
       await loadProcessGuide(lotNo);
+      await loadAdditiveIssues(lotNo);
     }
 
     function scheduleProcessStepContextLoad() {
@@ -1690,6 +2102,7 @@
       document.getElementById("stepLossReason").value = "";
       currentOpenProcessStep = null;
       processGuideData = null;
+      resetAdditiveIssueData();
       setProcessStepHint();
       renderRecoveryStockOptions();
       renderProcessGuide();
@@ -1987,6 +2400,16 @@
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
+    document.getElementById("stepProcessName")?.addEventListener("input", () => {
+      renderAdditiveMaterialFields();
+      loadAdditiveIssues();
+    });
+    document.getElementById("stepKarigarName")?.addEventListener("input", () => {
+      const issueKarigar = document.getElementById("additiveIssueKarigarName");
+      if (issueKarigar && !issueKarigar.value.trim()) {
+        issueKarigar.value = document.getElementById("stepKarigarName")?.value?.trim() || "";
+      }
+    });
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepAdditiveGivenWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
