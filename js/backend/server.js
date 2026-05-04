@@ -2228,6 +2228,25 @@ async function seedDefaultProcessTemplatesForCompanies() {
   }
 }
 
+async function backfillSolderingAdditiveTemplateMetadata() {
+  if (!(await tableExists("process_template_steps"))) {
+    return;
+  }
+
+  const [result] = await pool.query(
+    `
+    UPDATE process_template_steps
+    SET uses_additive_material = 1,
+        additive_material_label = 'Solder/KDM',
+        additive_affects_output_weight = 1
+    WHERE LOWER(TRIM(step_name)) IN ('soldering', 'solding', 'solder', 'kdm')
+      AND COALESCE(uses_additive_material, 0) = 0
+    `
+  );
+
+  console.log(`Solder/KDM additive template metadata backfilled: ${Number(result.affectedRows || 0)} row(s) updated`);
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -3362,6 +3381,7 @@ async function ensureSchema() {
   }
 
   await seedDefaultProcessTemplatesForCompanies();
+  await backfillSolderingAdditiveTemplateMetadata();
 
   console.log("Schema ensured ✅");
 }
