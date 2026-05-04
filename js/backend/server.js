@@ -773,6 +773,25 @@ function normalizeProcessStepRow(row) {
   };
 }
 
+function normalizeAdditiveIssueRow(row) {
+  return {
+    ...row,
+    company_id: row.company_id === null || row.company_id === undefined ? null : Number(row.company_id),
+    process_step_id: Number(row.process_step_id || 0),
+    karigar_id: row.karigar_id === null || row.karigar_id === undefined ? null : Number(row.karigar_id),
+    given_weight: toNumber(row.given_weight),
+    returned_weight: toNumber(row.returned_weight),
+    used_weight: toNumber(row.used_weight),
+    givenWeight: toNumber(row.given_weight),
+    returnedWeight: toNumber(row.returned_weight),
+    usedWeight: toNumber(row.used_weight),
+    pendingWeight: Math.max(toNumber(row.given_weight) - toNumber(row.returned_weight), 0),
+    materialLabel: String(row.material_label || ""),
+    karigarName: String(row.karigar_name || ""),
+    lotNo: String(row.lot_no || "")
+  };
+}
+
 async function ensureProcessRecoveryStockEntry(connection, {
   companyId,
   createdBy,
@@ -2797,6 +2816,29 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_step_additive_issues (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_step_id INT NOT NULL,
+      lot_no VARCHAR(120) DEFAULT '',
+      karigar_id INT DEFAULT NULL,
+      karigar_name VARCHAR(255) DEFAULT '',
+      material_label VARCHAR(120) DEFAULT '',
+      given_weight DECIMAL(14,3) DEFAULT 0.000,
+      returned_weight DECIMAL(14,3) DEFAULT 0.000,
+      used_weight DECIMAL(14,3) DEFAULT 0.000,
+      status VARCHAR(30) DEFAULT 'ISSUED',
+      issued_by INT DEFAULT NULL,
+      issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      returned_by INT DEFAULT NULL,
+      returned_at DATETIME DEFAULT NULL,
+      notes TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS process_step_recovery_inputs (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -3179,6 +3221,26 @@ async function ensureSchema() {
     await addColumnIfMissing("process_steps", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_step_additive_issues")) {
+    await addColumnIfMissing("process_step_additive_issues", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "process_step_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "lot_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_step_additive_issues", "karigar_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "karigar_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_step_additive_issues", "material_label", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_step_additive_issues", "given_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_step_additive_issues", "returned_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_step_additive_issues", "used_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_step_additive_issues", "status", "VARCHAR(30) DEFAULT 'ISSUED'");
+    await addColumnIfMissing("process_step_additive_issues", "issued_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "issued_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_step_additive_issues", "returned_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "returned_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "notes", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_step_additive_issues", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("process_step_recovery_inputs")) {
     await addColumnIfMissing("process_step_recovery_inputs", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_recovery_inputs", "process_step_id", "INT NOT NULL");
@@ -3343,6 +3405,12 @@ async function ensureSchema() {
     await addIndexIfMissing("process_steps", "idx_process_steps_process_lot", "(process_lot_id)");
     await addIndexIfMissing("process_steps", "idx_process_steps_completed", "(company_id, completed_at)");
     await addUniqueIndexIfMissing("process_steps", "uq_process_steps_company_lot_step", "(company_id, lot_no, step_no)");
+  }
+
+  if (await tableExists("process_step_additive_issues")) {
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_step", "(company_id, process_step_id)");
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_lot", "(company_id, lot_no, status)");
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_karigar", "(company_id, karigar_id)");
   }
 
   if (await tableExists("process_templates")) {
@@ -6766,6 +6834,191 @@ app.get("/process/recovery-stock", authMiddleware, async (req, res) => {
       message: "Process recovery stock fetch failed",
       error: getErrorDetail(error)
     });
+  }
+});
+
+app.get("/process/additive-issues", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const params = [access.companyScope];
+    const whereParts = ["company_id = ?"];
+
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM process_step_additive_issues
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY issued_at DESC, id DESC
+      `,
+      params
+    );
+
+    const issues = rows.map(normalizeAdditiveIssueRow);
+    const totalGiven = issues.reduce((sum, issue) => sum + issue.givenWeight, 0);
+    const totalReturned = issues.reduce((sum, issue) => sum + issue.returnedWeight, 0);
+
+    return res.json({
+      success: true,
+      lotNo: lotNo || null,
+      totalGiven,
+      totalReturned,
+      pendingWeight: Math.max(totalGiven - totalReturned, 0),
+      issues
+    });
+  } catch (error) {
+    console.error("Get process additive issues error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process additive issues fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const stepId = Number(req.params.id || 0);
+    const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const givenRaw = req.body.given_weight ?? req.body.givenWeight;
+    const parsedGiven = parseRequiredNumber(givenRaw, "KDM/Solder given weight");
+    const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
+    const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
+    const karigarName = normalizeKarigarName(req.body.karigar || req.body.karigarName || req.body.karigar_name || "");
+    const materialLabel = String(req.body.materialLabel || req.body.material_label || req.body.additiveMaterialLabel || "Solder/KDM").trim() || "Solder/KDM";
+    const notes = String(req.body.notes || req.body.note || "").trim();
+
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        message: "Process step id is required"
+      });
+    }
+
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "Lot No is required"
+      });
+    }
+
+    if (!parsedGiven.ok || parsedGiven.value <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: parsedGiven.ok ? "KDM/Solder given weight must be greater than zero" : parsedGiven.message
+      });
+    }
+
+    if (karigarIdRaw !== null && karigarIdRaw !== undefined && karigarIdRaw !== "" && (!Number.isInteger(karigarId) || karigarId <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Karigar id must be valid"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [stepRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+        AND company_id = ?
+        AND lot_no = ?
+      LIMIT 1
+      `,
+      [stepId, access.companyScope, lotNo]
+    );
+
+    if (!stepRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process step not found for this lot"
+      });
+    }
+
+    const step = normalizeProcessStepRow(stepRows[0]);
+    const finalKarigarId = karigarId ?? step.karigar_id ?? null;
+    const finalKarigarName = karigarName || step.karigar_name || "";
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_step_additive_issues
+      (
+        company_id, process_step_id, lot_no, karigar_id, karigar_name,
+        material_label, given_weight, returned_weight, used_weight, status,
+        issued_by, issued_at, notes
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, 0.000, 'ISSUED', ?, NOW(), ?)
+      `,
+      [
+        access.companyScope,
+        stepId,
+        lotNo,
+        finalKarigarId,
+        finalKarigarName,
+        materialLabel,
+        parsedGiven.value,
+        access.actingUserId,
+        notes
+      ]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_step_additive_issues
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "KDM/Solder issue saved",
+      issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Save process additive issue error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process additive issue save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
