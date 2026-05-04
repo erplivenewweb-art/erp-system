@@ -147,6 +147,35 @@
       min-width: 90px;
     }
 
+    .workflow-card {
+      margin-top: 16px;
+    }
+
+    .step-section {
+      border-top: 1px solid rgba(234, 223, 202, 0.78);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+
+    .step-section:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+      margin-top: 0;
+    }
+
+    .step-section-title {
+      margin: 0 0 10px;
+      color: #9a7418;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .step-section .summary {
+      margin-top: 0;
+    }
+
     @media (max-width: 980px) {
       .process-two-col,
       .process-page-grid {
@@ -306,51 +335,66 @@
             </div>
           </div>
 
-          <div class="sub-card" style="margin-top:16px;">
-            <h3>Process-wise Loss Tracking</h3>
-            <p>Track each process step input, output, and loss for a saved lot.</p>
+          <div id="processGuideCard" class="process-guide-card workflow-card">
+            <h4>Process Guide</h4>
+            <div class="process-guide-grid">
+              <div class="process-guide-item">
+                <span class="process-guide-label">Completed Steps</span>
+                <span id="processGuideCompleted" class="process-guide-value">Select a lot</span>
+              </div>
+              <div class="process-guide-item">
+                <span class="process-guide-label">Next Suggested Step</span>
+                <span id="processGuideNext" class="process-guide-value">-</span>
+              </div>
+              <div class="process-guide-item">
+                <span class="process-guide-label">Progress</span>
+                <span id="processGuideProgress" class="process-guide-value">0/6</span>
+              </div>
+            </div>
+          </div>
 
-            <div id="processGuideCard" class="process-guide-card">
-              <h4>Process Guide</h4>
-              <div class="process-guide-grid">
-                <div class="process-guide-item">
-                  <span class="process-guide-label">Completed Steps</span>
-                  <span id="processGuideCompleted" class="process-guide-value">Select a lot</span>
+          <div class="sub-card workflow-card">
+            <h3>Step Entry</h3>
+            <p>Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
+
+            <div class="step-section">
+              <h4 class="step-section-title">Basic Info</h4>
+              <div class="form-grid">
+                <div class="input-box">
+                  <label for="stepLotNo">Lot No</label>
+                  <input id="stepLotNo" type="text" placeholder="Enter saved Lot No" onblur="loadProcessStepContext()" />
                 </div>
-                <div class="process-guide-item">
-                  <span class="process-guide-label">Next Suggested Step</span>
-                  <span id="processGuideNext" class="process-guide-value">-</span>
+
+                <div class="input-box">
+                  <label for="stepProcessName">Process Name</label>
+                  <input id="stepProcessName" type="text" placeholder="Example: Cutting / Polish" />
                 </div>
-                <div class="process-guide-item">
-                  <span class="process-guide-label">Progress</span>
-                  <span id="processGuideProgress" class="process-guide-value">0/6</span>
+
+                <div class="input-box">
+                  <label for="stepKarigarName">Karigar</label>
+                  <input id="stepKarigarName" type="text" placeholder="Karigar Name" />
                 </div>
               </div>
             </div>
 
-            <div class="form-grid">
-              <div class="input-box">
-                <label for="stepLotNo">Lot No</label>
-                <input id="stepLotNo" type="text" placeholder="Enter saved Lot No" onblur="loadProcessStepContext()" />
-              </div>
+            <div class="step-section">
+              <h4 class="step-section-title">Input</h4>
+              <div class="form-grid">
+                <div class="input-box">
+                  <label for="stepInputWeight">Input Weight</label>
+                  <input id="stepInputWeight" type="number" step="0.001" readonly />
+                </div>
 
-              <div class="input-box">
-                <label for="stepProcessName">Process Name</label>
-                <input id="stepProcessName" type="text" placeholder="Example: Cutting / Polish" />
+                <div class="input-box">
+                  <label for="stepInputQty">Input Qty</label>
+                  <input id="stepInputQty" type="number" step="1" placeholder="Pair/count" />
+                </div>
               </div>
+            </div>
 
-              <div class="input-box">
-                <label for="stepKarigarName">Karigar</label>
-                <input id="stepKarigarName" type="text" placeholder="Karigar Name" />
-              </div>
-
-              <div class="input-box">
-                <label for="stepInputWeight">Input Weight</label>
-                <input id="stepInputWeight" type="number" step="0.001" readonly />
-              </div>
-
-              <div class="summary" style="grid-column: 1 / -1;">
-                <h3>Recovery Input</h3>
+            <div class="step-section">
+              <h4 class="step-section-title">Recovery Input</h4>
+              <div class="summary">
                 <p>
                   Base Input Weight: <span id="recoveryBaseInputWeight">0.000</span>g |
                   Recovery Added: <span id="recoveryAddedWeight">0.000</span>g |
@@ -361,18 +405,11 @@
                   <button class="secondary-btn" type="button" onclick="loadRecoveryStockOptions()">Refresh Recovery</button>
                 </div>
               </div>
+            </div>
 
-              <div class="input-box">
-                <label for="stepInputQty">Input Qty</label>
-                <input id="stepInputQty" type="number" step="1" placeholder="Pair/count" />
-              </div>
-
-              <div class="input-box">
-                <label for="stepOutputWeight">Output Weight</label>
-                <input id="stepOutputWeight" type="number" step="0.001" placeholder="Finished output weight" />
-              </div>
-
-              <div id="additiveMaterialFields" class="summary" style="grid-column: 1 / -1; display:none;">
+            <div id="additiveMaterialFields" class="step-section" style="display:none;">
+              <h4 class="step-section-title">KDM / Solder</h4>
+              <div class="summary">
                 <h3 id="additiveMaterialTitle">Solder/KDM Material</h3>
                 <div id="additiveQuickFields" class="form-grid" style="display:none;">
                   <div class="input-box">
@@ -452,83 +489,80 @@
                   </div>
                 </div>
               </div>
-
-              <div class="input-box">
-                <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
-                <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
-              </div>
-
-              <div class="input-box">
-                <label for="stepOutputQty">Output Qty</label>
-                <input id="stepOutputQty" type="number" step="1" placeholder="Returned count" />
-              </div>
-
-              <div class="input-box">
-                <label for="stepLossWeight">Loss Weight</label>
-                <input id="stepLossWeight" type="number" step="0.001" readonly />
-              </div>
-
-              <div class="input-box">
-                <label for="stepLossQty">Loss Qty</label>
-                <input id="stepLossQty" type="number" step="1" readonly />
-              </div>
-
-              <div class="input-box">
-                <label for="stepLossReason">Loss Reason</label>
-                <input id="stepLossReason" type="text" placeholder="Optional note" />
-              </div>
             </div>
 
-            <div class="btn-row" style="margin-top:12px;">
-              <button class="primary-btn" type="button" onclick="saveOrCompleteProcessStep()">Save/Complete Step</button>
-              <button class="secondary-btn" type="button" onclick="clearProcessStepForm()">Clear</button>
-              <button class="secondary-btn" type="button" onclick="loadProcessStepContext()">Refresh</button>
-            </div>
+            <div class="step-section">
+              <h4 class="step-section-title">Output</h4>
+              <div class="form-grid">
+                <div class="input-box">
+                  <label for="stepOutputWeight">Output Weight</label>
+                  <input id="stepOutputWeight" type="number" step="0.001" placeholder="Finished output weight" />
+                </div>
 
-            <div id="processStepHint" class="summary" style="margin-top:16px;">
-              <h3>Next Input</h3>
-              <p>Select a saved lot to auto-load the next process input weight.</p>
-            </div>
+                <div class="input-box">
+                  <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
+                  <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
+                </div>
 
-            <div class="process-two-col">
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Step</th>
-                      <th>Process</th>
-                      <th>Karigar</th>
-                      <th>Input Wt</th>
-                      <th>Input Qty</th>
-                      <th>Output Wt</th>
-                      <th>Recovery Wt</th>
-                      <th>Output Qty</th>
-                      <th>Loss Wt</th>
-                      <th>Loss Qty</th>
-                      <th>Status</th>
-                      <th>Completed</th>
-                    </tr>
-                  </thead>
-                  <tbody id="processStepTableBody"></tbody>
-                </table>
-              </div>
+                <div class="input-box">
+                  <label for="stepOutputQty">Output Qty</label>
+                  <input id="stepOutputQty" type="number" step="1" placeholder="Returned count" />
+                </div>
 
-              <div>
-                <h3>Process-wise Loss Summary</h3>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Process</th>
-                        <th>Steps</th>
-                        <th>Total Loss</th>
-                        <th>Qty Loss</th>
-                      </tr>
-                    </thead>
-                    <tbody id="processNameSummaryBody"></tbody>
-                  </table>
+                <div class="input-box">
+                  <label for="stepLossWeight">Loss Weight</label>
+                  <input id="stepLossWeight" type="number" step="0.001" readonly />
+                </div>
+
+                <div class="input-box">
+                  <label for="stepLossQty">Loss Qty</label>
+                  <input id="stepLossQty" type="number" step="1" readonly />
+                </div>
+
+                <div class="input-box">
+                  <label for="stepLossReason">Loss Reason</label>
+                  <input id="stepLossReason" type="text" placeholder="Optional note" />
                 </div>
               </div>
+            </div>
+
+            <div class="step-section">
+              <h4 class="step-section-title">Actions</h4>
+              <div class="btn-row">
+                <button class="primary-btn" type="button" onclick="saveOrCompleteProcessStep()">Save/Complete Step</button>
+                <button class="secondary-btn" type="button" onclick="clearProcessStepForm()">Clear</button>
+                <button class="secondary-btn" type="button" onclick="loadProcessStepContext()">Refresh</button>
+              </div>
+
+              <div id="processStepHint" class="summary" style="margin-top:16px;">
+                <h3>Next Input</h3>
+                <p>Select a saved lot to auto-load the next process input weight.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-card workflow-card">
+            <h3>Step History</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Step</th>
+                    <th>Process</th>
+                    <th>Karigar</th>
+                    <th>Input Wt</th>
+                    <th>Input Qty</th>
+                    <th>Output Wt</th>
+                    <th>Recovery Wt</th>
+                    <th>Output Qty</th>
+                    <th>Loss Wt</th>
+                    <th>Loss Qty</th>
+                    <th>Status</th>
+                    <th>Completed</th>
+                  </tr>
+                </thead>
+                <tbody id="processStepTableBody"></tbody>
+              </table>
             </div>
           </div>
 
@@ -654,6 +688,23 @@
                     <label>Total Qty Loss</label>
                     <input id="liveTotalQtyLoss" type="text" readonly />
                   </div>
+                </div>
+              </div>
+
+              <div class="sub-card" style="margin-top:16px;">
+                <h3>Process-wise Loss Summary</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Process</th>
+                        <th>Steps</th>
+                        <th>Total Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processNameSummaryBody"></tbody>
+                  </table>
                 </div>
               </div>
 
