@@ -792,21 +792,41 @@ function normalizeAdditiveIssueRow(row) {
   };
 }
 
-async function recalcProcessStepAdditiveTotals(connection, companyId, processStepId) {
+async function getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, { forUpdate = false } = {}) {
   const [issueRows] = await connection.query(
     `
     SELECT given_weight, returned_weight, used_weight, material_label
     FROM process_step_additive_issues
     WHERE company_id = ?
       AND process_step_id = ?
+    ${forUpdate ? "FOR UPDATE" : ""}
     `,
     [companyId, processStepId]
   );
 
   const totalGiven = issueRows.reduce((sum, row) => sum + toNumber(row.given_weight), 0);
   const totalReturned = issueRows.reduce((sum, row) => sum + toNumber(row.returned_weight), 0);
-  const totalUsed = issueRows.reduce((sum, row) => sum + toNumber(row.used_weight), 0);
+  const totalUsed = issueRows.reduce((sum, row) => {
+    const usedWeight = hasProvidedValue(row.used_weight)
+      ? toNumber(row.used_weight)
+      : toNumber(row.given_weight) - toNumber(row.returned_weight);
+    return sum + Math.max(usedWeight, 0);
+  }, 0);
+  const pendingWeight = Math.max(totalGiven - totalReturned, 0);
   const materialLabel = String(issueRows.find((row) => String(row.material_label || "").trim())?.material_label || "").trim();
+
+  return {
+    additiveGivenWeight: totalGiven,
+    additiveReturnedWeight: totalReturned,
+    additiveUsedWeight: totalUsed,
+    additiveMaterialLabel: materialLabel,
+    pendingWeight,
+    issueCount: issueRows.length
+  };
+}
+
+async function recalcProcessStepAdditiveTotals(connection, companyId, processStepId, options = {}) {
+  const totals = await getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, options);
 
   await connection.query(
     `
@@ -818,15 +838,17 @@ async function recalcProcessStepAdditiveTotals(connection, companyId, processSte
     WHERE company_id = ?
       AND id = ?
     `,
-    [totalGiven, totalReturned, totalUsed, materialLabel, companyId, processStepId]
+    [
+      totals.additiveGivenWeight,
+      totals.additiveReturnedWeight,
+      totals.additiveUsedWeight,
+      totals.additiveMaterialLabel,
+      companyId,
+      processStepId
+    ]
   );
 
-  return {
-    additiveGivenWeight: totalGiven,
-    additiveReturnedWeight: totalReturned,
-    additiveUsedWeight: totalUsed,
-    additiveMaterialLabel: materialLabel
-  };
+  return totals;
 }
 
 async function ensureProcessRecoveryStockEntry(connection, {
@@ -7827,10 +7849,25 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    const additiveGivenWeight = additivePayload.givenWeight;
-    const additiveReturnedWeight = additivePayload.returnedWeight;
-    const additiveUsedWeight = additivePayload.usedWeight;
-    const additiveMaterialLabel = additivePayload.materialLabel;
+    const issueTotals = await recalcProcessStepAdditiveTotals(connection, access.companyScope, stepId, {
+      forUpdate: true
+    });
+    const hasIssueLedger = issueTotals.issueCount > 0;
+
+    if (hasIssueLedger && issueTotals.pendingWeight > 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot complete this step. Pending KDM/Solder return weight is ${issueTotals.pendingWeight.toFixed(3)}g. Return all issued material before completing the process step.`
+      });
+    }
+
+    const additiveGivenWeight = hasIssueLedger ? issueTotals.additiveGivenWeight : additivePayload.givenWeight;
+    const additiveReturnedWeight = hasIssueLedger ? issueTotals.additiveReturnedWeight : additivePayload.returnedWeight;
+    const additiveUsedWeight = hasIssueLedger ? issueTotals.additiveUsedWeight : additivePayload.usedWeight;
+    const additiveMaterialLabel = hasIssueLedger
+      ? (issueTotals.additiveMaterialLabel || additivePayload.materialLabel)
+      : additivePayload.materialLabel;
     const allowedInputWeight = step.input_weight + additiveUsedWeight;
 
     if (outputWeight + recoveryWeight > allowedInputWeight) {
