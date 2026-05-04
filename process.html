@@ -170,16 +170,6 @@
                 <h3>Summary</h3>
                 <p>Raw: 0 | Final: 0 | Loss: 0</p>
               </div>
-
-              <div id="recoveryDebugBox" class="summary" style="margin-top: 16px;">
-                <h3>Recovery Debug</h3>
-                <p id="recoveryDebugTotal">Total items: -</p>
-                <p id="recoveryDebugFirst">First item preview: -</p>
-                <div id="recoveryDebugList"></div>
-                <div class="btn-row" style="margin-top:10px;">
-                  <button class="secondary-btn" type="button" onclick="loadRecoveryDebugStock()">Refresh Recovery Debug</button>
-                </div>
-              </div>
             </div>
 
             <div class="sub-card">
@@ -226,7 +216,20 @@
 
               <div class="input-box">
                 <label for="stepInputWeight">Input Weight</label>
-                <input id="stepInputWeight" type="number" step="0.001" placeholder="Auto-filled or manual input" />
+                <input id="stepInputWeight" type="number" step="0.001" readonly />
+              </div>
+
+              <div class="summary" style="grid-column: 1 / -1;">
+                <h3>Recovery Input</h3>
+                <p>
+                  Base Input Weight: <span id="recoveryBaseInputWeight">0.000</span>g |
+                  Recovery Added: <span id="recoveryAddedWeight">0.000</span>g |
+                  Total Input Weight: <span id="recoveryTotalInputWeight">0.000</span>g
+                </p>
+                <div id="recoveryStockList" style="margin-top:8px;"></div>
+                <div class="btn-row" style="margin-top:10px;">
+                  <button class="secondary-btn" type="button" onclick="loadRecoveryStockOptions()">Refresh Recovery</button>
+                </div>
               </div>
 
               <div class="input-box">
@@ -538,6 +541,9 @@
     let lotData = [];
     let karigarData = [];
     let processStepData = [];
+    let recoveryStockData = [];
+    let selectedRecoveryStockIds = new Set();
+    let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processLossSummaryData = {
       lotSummary: [],
@@ -722,63 +728,109 @@
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
     }
 
-    function renderRecoveryDebug(data, errorMessage = "") {
-      const totalEl = document.getElementById("recoveryDebugTotal");
-      const firstEl = document.getElementById("recoveryDebugFirst");
-      const listEl = document.getElementById("recoveryDebugList");
-      const items = Array.isArray(data?.recoveryStock) ? data.recoveryStock : [];
+    function getSelectedRecoveryTotal() {
+      return recoveryStockData
+        .filter((item) => selectedRecoveryStockIds.has(Number(item.id)))
+        .reduce((sum, item) => sum + Number(item.weight || 0), 0);
+    }
 
-      if (errorMessage || data?.success === false) {
-        const message = errorMessage || "Login required or session expired";
-        if (totalEl) totalEl.textContent = message;
-        if (firstEl) firstEl.textContent = "First item preview: -";
-        if (listEl) listEl.innerHTML = "";
+    function syncRecoveryInputTotals() {
+      const recoveryTotal = getSelectedRecoveryTotal();
+      const totalInput = Number(baseProcessInputWeight || 0) + recoveryTotal;
+
+      const input = document.getElementById("stepInputWeight");
+      if (input) input.value = totalInput > 0 ? formatProcessWeight(totalInput) : "";
+
+      const baseEl = document.getElementById("recoveryBaseInputWeight");
+      const addedEl = document.getElementById("recoveryAddedWeight");
+      const totalEl = document.getElementById("recoveryTotalInputWeight");
+      if (baseEl) baseEl.textContent = formatProcessWeight(baseProcessInputWeight);
+      if (addedEl) addedEl.textContent = formatProcessWeight(recoveryTotal);
+      if (totalEl) totalEl.textContent = formatProcessWeight(totalInput);
+
+      updateProcessStepLoss();
+    }
+
+    function setBaseProcessInputWeight(value) {
+      baseProcessInputWeight = Number(value || 0);
+      syncRecoveryInputTotals();
+    }
+
+    function renderRecoveryStockOptions(message = "") {
+      const listEl = document.getElementById("recoveryStockList");
+      if (!listEl) return;
+
+      if (message) {
+        listEl.innerHTML = `<p>${escapeHtml(message)}</p>`;
+        syncRecoveryInputTotals();
         return;
       }
 
-      if (totalEl) totalEl.textContent = `Total items: ${items.length}`;
-
-      const first = items[0] || null;
-      if (firstEl) {
-        firstEl.textContent = first
-          ? `First item preview: Lot ${first.lot_number || "-"} | Weight ${formatProcessWeight(first.weight)}g`
-          : "First item preview: -";
+      if (currentOpenProcessStep) {
+        listEl.innerHTML = `<p>Recovery input cannot be changed while completing an open step.</p>`;
+        syncRecoveryInputTotals();
+        return;
       }
 
-      if (listEl) {
-        listEl.innerHTML = items.length
-          ? `
-            <ul style="margin:8px 0 0; padding-left:18px;">
-              ${items.map((item) => `
-                <li>
-                  Lot ${escapeHtml(item.lot_number || "-")} |
-                  ${formatProcessWeight(item.weight)}g |
-                  Step ${escapeHtml(item.reference_step_id || "-")}
-                </li>
-              `).join("")}
-            </ul>
-          `
-          : "";
+      if (!recoveryStockData.length) {
+        listEl.innerHTML = `<p>No unused recovery stock available.</p>`;
+        syncRecoveryInputTotals();
+        return;
       }
+
+      listEl.innerHTML = recoveryStockData.map((item) => {
+        const id = Number(item.id);
+        const checked = selectedRecoveryStockIds.has(id) ? "checked" : "";
+        return `
+          <label style="display:block; margin:6px 0;">
+            <input type="checkbox" ${checked} onchange="toggleRecoveryStockSelection(${id}, this.checked)" />
+            Lot ${escapeHtml(item.lot_number || "-")} |
+            ${formatProcessWeight(item.weight)}g |
+            Step ${escapeHtml(item.reference_step_id || "-")}
+          </label>
+        `;
+      }).join("");
+
+      syncRecoveryInputTotals();
     }
 
-    async function loadRecoveryDebugStock() {
+    function toggleRecoveryStockSelection(stockId, checked) {
+      const id = Number(stockId || 0);
+      if (!id || currentOpenProcessStep) return;
+
+      if (checked) {
+        selectedRecoveryStockIds.add(id);
+      } else {
+        selectedRecoveryStockIds.delete(id);
+      }
+
+      renderRecoveryStockOptions();
+    }
+
+    async function loadRecoveryStockOptions() {
       try {
         const res = await fetch("/process/recovery-stock", {
-          credentials: "include"
+          credentials: "include",
+          cache: "no-store"
         });
         const data = await res.json();
-        console.log("Recovery API Response:", data);
 
         if (!res.ok || data?.success === false) {
-          renderRecoveryDebug(data);
+          recoveryStockData = [];
+          selectedRecoveryStockIds.clear();
+          renderRecoveryStockOptions("Login required or session expired");
           return;
         }
 
-        renderRecoveryDebug(data);
+        recoveryStockData = Array.isArray(data?.recoveryStock) ? data.recoveryStock : [];
+        selectedRecoveryStockIds = new Set(
+          [...selectedRecoveryStockIds].filter((id) => recoveryStockData.some((item) => Number(item.id) === id))
+        );
+        renderRecoveryStockOptions();
       } catch (error) {
-        console.log("Recovery API Response:", { success: false, error: error.message });
-        renderRecoveryDebug(null, error.message || "Recovery stock API failed");
+        recoveryStockData = [];
+        selectedRecoveryStockIds.clear();
+        renderRecoveryStockOptions(error.message || "Recovery stock API failed");
       }
     }
 
@@ -1041,6 +1093,8 @@
 
     function fillProcessStepFormFromOpenStep(step) {
       currentOpenProcessStep = step || null;
+      selectedRecoveryStockIds.clear();
+      baseProcessInputWeight = Number(step?.inputWeight || 0);
       document.getElementById("stepLotNo").value = step?.lotNo || "";
       document.getElementById("stepProcessName").value = step?.processName || "";
       document.getElementById("stepKarigarName").value = step?.karigarName || "";
@@ -1053,6 +1107,7 @@
       document.getElementById("stepLossWeight").value = "";
       document.getElementById("stepLossQty").value = "";
       document.getElementById("stepLossReason").value = step?.lossReason || "";
+      renderRecoveryStockOptions();
     }
 
     function renderProcessStepTable() {
@@ -1112,10 +1167,12 @@
     async function loadNextProcessInput(lotNo) {
       if (!lotNo) {
         currentOpenProcessStep = null;
-        document.getElementById("stepInputWeight").value = "";
+        selectedRecoveryStockIds.clear();
+        setBaseProcessInputWeight(0);
         document.getElementById("stepInputQty").value = "";
         document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint();
+        renderRecoveryStockOptions();
         return;
       }
 
@@ -1139,7 +1196,7 @@
         }
 
         currentOpenProcessStep = null;
-        document.getElementById("stepInputWeight").value = formatProcessWeight(data?.inputWeight || 0);
+        setBaseProcessInputWeight(data?.inputWeight || 0);
         document.getElementById("stepInputQty").value = data?.inputQty ? formatProcessQty(data.inputQty) : "";
         document.getElementById("stepInputQty").readOnly = Number(data?.stepNo || 1) > 1;
         document.getElementById("stepOutputWeight").value = "";
@@ -1148,13 +1205,16 @@
         document.getElementById("stepLossWeight").value = "";
         document.getElementById("stepLossQty").value = "";
         setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty: ${formatProcessQty(data?.inputQty || 0)}`);
+        renderRecoveryStockOptions();
       } catch (error) {
         console.log("Next process input error:", error);
         currentOpenProcessStep = null;
-        document.getElementById("stepInputWeight").value = "";
+        selectedRecoveryStockIds.clear();
+        setBaseProcessInputWeight(0);
         document.getElementById("stepInputQty").value = "";
         document.getElementById("stepInputQty").readOnly = false;
         setProcessStepHint(error.message || "Unable to load next input weight.");
+        renderRecoveryStockOptions();
       }
     }
 
@@ -1264,6 +1324,7 @@
               inputQty: hasInputQty ? Number(inputQtyRaw) : undefined,
               outputWeight: hasOutput ? finishedOutputWeight : undefined,
               recoveryWeight: hasOutput || hasRecovery ? recoveryWeight : undefined,
+              recoveryStockIds: [...selectedRecoveryStockIds],
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason,
               status: hasOutput ? "COMPLETED" : "OPEN"
@@ -1282,6 +1343,8 @@
         }
         clearProcessStepForm(false);
         document.getElementById("stepLotNo").value = lotNo;
+        selectedRecoveryStockIds.clear();
+        await loadRecoveryStockOptions();
         await loadProcessStepContext();
       } catch (error) {
         console.log("Save process step error:", error);
@@ -1293,6 +1356,8 @@
       if (clearLot) document.getElementById("stepLotNo").value = "";
       document.getElementById("stepProcessName").value = "";
       document.getElementById("stepKarigarName").value = "";
+      selectedRecoveryStockIds.clear();
+      baseProcessInputWeight = 0;
       document.getElementById("stepInputWeight").value = "";
       document.getElementById("stepInputQty").value = "";
       document.getElementById("stepInputQty").readOnly = false;
@@ -1304,6 +1369,7 @@
       document.getElementById("stepLossReason").value = "";
       currentOpenProcessStep = null;
       setProcessStepHint();
+      renderRecoveryStockOptions();
       renderLiveProcessSummary();
     }
 
@@ -1598,7 +1664,6 @@
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
-    document.getElementById("stepInputWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
@@ -1615,7 +1680,7 @@
       renderProcessStepTable();
       await loadProcessLossSummary();
       updateProcessCalculations();
-      await loadRecoveryDebugStock();
+      await loadRecoveryStockOptions();
     });
   </script>
 

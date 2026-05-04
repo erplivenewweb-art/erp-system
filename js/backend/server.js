@@ -6460,11 +6460,30 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const outputQtyProvided = hasProvidedValue(outputQtyRaw);
     const lossReason = String(req.body.lossReason || req.body.loss_reason || "").trim();
     const requestedStatus = normalizeProcessStepStatus(req.body.status || (outputProvided ? "COMPLETED" : "OPEN"));
+    const recoveryStockIdsRaw = req.body.recoveryStockIds ?? req.body.recovery_stock_ids ?? [];
 
     if (!lotNo || !processName) {
       return res.status(400).json({
         success: false,
         message: "Lot number and process name are required"
+      });
+    }
+
+    if (!Array.isArray(recoveryStockIdsRaw)) {
+      return res.status(400).json({
+        success: false,
+        message: "recoveryStockIds must be an array"
+      });
+    }
+
+    const recoveryStockIds = [...new Set(
+      recoveryStockIdsRaw.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    )];
+
+    if (recoveryStockIds.length !== recoveryStockIdsRaw.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid recovery stock selection"
       });
     }
 
@@ -6481,7 +6500,74 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (context.inputWeight <= 0) {
+    let selectedRecoveryRows = [];
+    let selectedRecoveryWeight = 0;
+    if (recoveryStockIds.length) {
+      const placeholders = recoveryStockIds.map(() => "?").join(", ");
+      const [stockRows] = await connection.query(
+        `
+        SELECT
+          id,
+          category,
+          source,
+          status,
+          weight,
+          company_id,
+          used_in_process_step_id
+        FROM stock
+        WHERE company_id = ?
+          AND id IN (${placeholders})
+        FOR UPDATE
+        `,
+        [companyId, ...recoveryStockIds]
+      );
+
+      if (stockRows.length !== recoveryStockIds.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "One or more selected recovery stock items are unavailable for this company"
+        });
+      }
+
+      const alreadyUsedRow = stockRows.find((row) => {
+        return (
+          String(row.status || "").trim().toUpperCase() !== "IN_STOCK" ||
+          row.used_in_process_step_id
+        );
+      });
+
+      if (alreadyUsedRow) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Selected recovery stock has already been used"
+        });
+      }
+
+      const invalidRecoveryRow = stockRows.find((row) => {
+        return (
+          String(row.category || "").trim().toUpperCase() !== "RECOVERY" ||
+          String(row.source || "").trim().toUpperCase() !== "PROCESS_RECOVERY" ||
+          toNumber(row.weight) <= 0
+        );
+      });
+
+      if (invalidRecoveryRow) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Selected stock must be unused process recovery stock"
+        });
+      }
+
+      selectedRecoveryRows = stockRows;
+      selectedRecoveryWeight = selectedRecoveryRows.reduce((sum, row) => sum + toNumber(row.weight), 0);
+    }
+
+    const effectiveInputWeight = toNumber(context.inputWeight) + selectedRecoveryWeight;
+
+    if (effectiveInputWeight <= 0) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -6520,7 +6606,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight > context.inputWeight) {
+    if (requestedStatus === "COMPLETED" && outputWeight > effectiveInputWeight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -6549,7 +6635,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > context.inputWeight) {
+    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > effectiveInputWeight) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -6619,7 +6705,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
     const finalRecoveryWeight = finalStatus === "COMPLETED" ? recoveryWeight : 0;
-    const lossWeight = finalStatus === "COMPLETED" ? context.inputWeight - finalOutputWeight - finalRecoveryWeight : 0;
+    const lossWeight = finalStatus === "COMPLETED" ? effectiveInputWeight - finalOutputWeight - finalRecoveryWeight : 0;
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
     const warnings = [];
@@ -6633,7 +6719,9 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     }
 
     console.log("[PROCESS_STEP_SAVE]", {
-      inputWeight: context.inputWeight,
+      inputWeight: effectiveInputWeight,
+      baseInputWeight: context.inputWeight,
+      recoveryInputWeight: selectedRecoveryWeight,
       outputWeight: finalOutputWeight,
       recoveryWeight: finalRecoveryWeight,
       lossWeight
@@ -6661,7 +6749,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         processName,
         karigarId,
         karigarName,
-        context.inputWeight,
+        effectiveInputWeight,
         finalOutputWeight,
         finalRecoveryWeight,
         lossWeight,
@@ -6674,6 +6762,66 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         userId
       ]
     );
+
+    for (const recoveryRow of selectedRecoveryRows) {
+      try {
+        await connection.query(
+          `
+          INSERT INTO process_step_recovery_inputs
+          (
+            company_id,
+            process_step_id,
+            stock_id,
+            weight,
+            created_by,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, NOW())
+          `,
+          [
+            companyId,
+            insertResult.insertId,
+            recoveryRow.id,
+            toNumber(recoveryRow.weight),
+            userId
+          ]
+        );
+      } catch (insertError) {
+        if (insertError?.code === "ER_DUP_ENTRY") {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: "Selected recovery stock has already been used"
+          });
+        }
+        throw insertError;
+      }
+    }
+
+    if (selectedRecoveryRows.length) {
+      const placeholders = selectedRecoveryRows.map(() => "?").join(", ");
+      const [updateResult] = await connection.query(
+        `
+        UPDATE stock
+        SET status = 'USED',
+            used_in_process_step_id = ?,
+            used_at = NOW(),
+            used_by = ?
+        WHERE company_id = ?
+          AND id IN (${placeholders})
+          AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        `,
+        [insertResult.insertId, userId, companyId, ...selectedRecoveryRows.map((row) => row.id)]
+      );
+
+      if (updateResult.affectedRows !== selectedRecoveryRows.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Selected recovery stock has already been used"
+        });
+      }
+    }
 
     await ensureProcessRecoveryStockEntry(connection, {
       companyId,
