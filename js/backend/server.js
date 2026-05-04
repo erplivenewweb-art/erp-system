@@ -1250,6 +1250,52 @@ async function requireSuperAdminAccess(req, res) {
   return access;
 }
 
+const DUPLICATE_BARCODE_MESSAGE = "Duplicate barcode found. Contact admin.";
+
+function createBarcodeSafetyError(message = DUPLICATE_BARCODE_MESSAGE) {
+  const error = new Error(message);
+  error.status = 409;
+  error.statusCode = 409;
+  error.isBarcodeSafetyError = true;
+  return error;
+}
+
+async function ensureSingleStockBarcode(companyId, barcode, db = pool) {
+  const cleanBarcode = String(barcode || "").trim();
+  if (!cleanBarcode) return cleanBarcode;
+
+  const [rows] = await db.query(
+    `
+    SELECT COUNT(*) AS count
+    FROM stock
+    WHERE company_id = ? AND barcode = ?
+    `,
+    [companyId, cleanBarcode]
+  );
+
+  if (Number(rows?.[0]?.count || 0) > 1) {
+    throw createBarcodeSafetyError();
+  }
+
+  return cleanBarcode;
+}
+
+function assertSingleStockRowAffected(result) {
+  const affectedRows = Number(result?.affectedRows || 0);
+  if (affectedRows > 1) {
+    throw createBarcodeSafetyError();
+  }
+  return affectedRows;
+}
+
+function getBarcodeSafetyStatus(error, fallback = 500) {
+  return error?.isBarcodeSafetyError ? Number(error.status || error.statusCode || 409) : fallback;
+}
+
+function getBarcodeSafetyMessage(error, fallback) {
+  return error?.isBarcodeSafetyError ? error.message : fallback;
+}
+
 async function validateInvoiceSaveRequest(connection, invoiceNumber, items, companyId) {
   const cleanInvoiceNumber = String(invoiceNumber || "").trim();
 
@@ -1291,6 +1337,8 @@ async function validateInvoiceSaveRequest(connection, invoiceNumber, items, comp
     const barcode = String(item.barcode || "").trim();
 
     if (!barcode) continue;
+
+    await ensureSingleStockBarcode(companyId, barcode, connection);
 
     const [stockRows] = await connection.query(
       `
@@ -1460,8 +1508,10 @@ async function setSaleStatusAndSyncStock(connection, invoiceNumber, companyId, s
 
     if (!barcode) continue;
 
+    await ensureSingleStockBarcode(companyId, barcode, connection);
+
     if (saleStatus === "DELETED") {
-      await connection.query(
+      const [stockResult] = await connection.query(
         `
         UPDATE stock
         SET status = 'IN_STOCK',
@@ -1471,10 +1521,11 @@ async function setSaleStatusAndSyncStock(connection, invoiceNumber, companyId, s
         `,
         [barcode, companyId]
       );
+      assertSingleStockRowAffected(stockResult);
       continue;
     }
 
-    await connection.query(
+    const [stockResult] = await connection.query(
       `
       UPDATE stock
       SET status = 'SOLD',
@@ -1484,6 +1535,7 @@ async function setSaleStatusAndSyncStock(connection, invoiceNumber, companyId, s
       `,
       [cleanInvoiceNumber, barcode, companyId]
     );
+    assertSingleStockRowAffected(stockResult);
   }
 
   return {
@@ -8377,6 +8429,7 @@ app.get("/getSticker/:barcode", async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    await ensureSingleStockBarcode(companyId, barcode);
 
     const [rows] = await pool.query(
       `
@@ -8402,9 +8455,9 @@ app.get("/getSticker/:barcode", async (req, res) => {
     });
   } catch (error) {
     console.error("Get sticker error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Fetch failed",
+      message: getBarcodeSafetyMessage(error, "Fetch failed"),
       error: getErrorDetail(error)
     });
   }
@@ -8431,6 +8484,8 @@ app.get("/getReturnItem/:barcode", async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    await ensureSingleStockBarcode(companyId, barcode);
+
     const [rows] = await pool.query(
       `
       SELECT
@@ -8485,9 +8540,9 @@ app.get("/getReturnItem/:barcode", async (req, res) => {
     });
   } catch (error) {
     console.error("Get return item error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Return item fetch failed",
+      message: getBarcodeSafetyMessage(error, "Return item fetch failed"),
       error: getErrorDetail(error)
     });
   }
@@ -8531,6 +8586,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    await ensureSingleStockBarcode(finalCompanyId, barcode, connection);
 
     const [stockRows] = await connection.query(
       `
@@ -8635,7 +8691,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       returnType === "RETURN_TO_STOCK" ? "IN_STOCK" : "DAMAGED_RETURN";
 
     if (returnType === "RETURN_TO_STOCK") {
-      await connection.query(
+      const [stockResult] = await connection.query(
         `
         UPDATE stock
         SET status = 'IN_STOCK',
@@ -8645,8 +8701,9 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         `,
         [barcode, finalCompanyId]
       );
+      assertSingleStockRowAffected(stockResult);
     } else {
-      await connection.query(
+      const [stockResult] = await connection.query(
         `
         UPDATE stock
         SET status = 'DAMAGED_RETURN'
@@ -8654,6 +8711,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         `,
         [barcode, finalCompanyId]
       );
+      assertSingleStockRowAffected(stockResult);
     }
 
     const transactionPosting = await postReturnToTransactionFoundation(connection, {
@@ -8766,9 +8824,9 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     }
 
     console.error("Save return error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Return save failed",
+      message: getBarcodeSafetyMessage(error, "Return save failed"),
       error: getErrorDetail(error)
     });
   } finally {
@@ -9460,6 +9518,8 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     const cleanLot = String(lot).trim();
     const cleanSerial = String(serial).trim();
     const cleanBarcode = String(barcode).trim();
+    await ensureSingleStockBarcode(finalCompanyId, cleanBarcode);
+
     const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
     if (!parsedWeight.ok || parsedWeight.value <= 0) {
       return res.json({
@@ -9577,9 +9637,9 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     });
   } catch (err) {
     console.error("Add sticker error:", err);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(err)).json({
       success: false,
-      message: "Add sticker failed",
+      message: getBarcodeSafetyMessage(err, "Add sticker failed"),
       error: err.message
     });
   }
@@ -9626,6 +9686,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       return res.json({ success: false, message: "Old barcode is missing" });
     }
 
+    await ensureSingleStockBarcode(finalCompanyId, oldBarcode);
+
     if (String(status).toUpperCase() === "SOLD") {
       const soldParams = ["SOLD", String(invoiceNumber || "").trim(), oldBarcode, finalCompanyId];
       const soldSql = `
@@ -9636,8 +9698,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       `;
 
       const [soldResult] = await pool.query(soldSql, soldParams);
+      const soldAffectedRows = assertSingleStockRowAffected(soldResult);
 
-      if (Number(soldResult.affectedRows || 0) === 0) {
+      if (soldAffectedRows === 0) {
         return res.json({ success: false, message: "Sticker item not found" });
       }
 
@@ -9657,6 +9720,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     const cleanLot = String(lot).trim();
     const cleanSerial = String(serial).trim();
     const newBarcode = String(barcode || oldBarcode).trim();
+    await ensureSingleStockBarcode(finalCompanyId, oldBarcode);
+    await ensureSingleStockBarcode(finalCompanyId, newBarcode);
+
     const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
     if (!parsedWeight.ok || parsedWeight.value <= 0) {
       return res.json({
@@ -9790,9 +9856,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     });
   } catch (error) {
     console.error("Update sticker error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Server error",
+      message: getBarcodeSafetyMessage(error, "Server error"),
       error: getErrorDetail(error)
     });
   }
@@ -9821,6 +9887,7 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
     }
 
     const companyId = access.companyScope;
+    await ensureSingleStockBarcode(companyId, barcode);
 
     const query = `
       UPDATE stock
@@ -9831,8 +9898,9 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
     const params = [barcode, companyId];
 
     const [result] = await pool.query(query, params);
+    const affectedRows = assertSingleStockRowAffected(result);
 
-    if (Number(result.affectedRows || 0) === 0) {
+    if (affectedRows === 0) {
       return res.json({
         success: false,
         message: "Sticker item not found"
@@ -9845,9 +9913,9 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
     });
   } catch (error) {
     console.error("Delete sticker error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Server error",
+      message: getBarcodeSafetyMessage(error, "Server error"),
       error: getErrorDetail(error)
     });
   }
@@ -9877,6 +9945,7 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
     }
 
     const companyId = access.companyScope;
+    await ensureSingleStockBarcode(companyId, barcode);
 
     const query = `
       UPDATE stock
@@ -9887,8 +9956,9 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
     const params = [barcode, companyId];
 
     const [result] = await pool.query(query, params);
+    const affectedRows = assertSingleStockRowAffected(result);
 
-    if (Number(result.affectedRows || 0) === 0) {
+    if (affectedRows === 0) {
       return res.json({
         success: false,
         message: "No item was found to restore"
@@ -9901,9 +9971,9 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
     });
   } catch (err) {
     console.error("Restore error:", err);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(err)).json({
       success: false,
-      message: "Restore failed",
+      message: getBarcodeSafetyMessage(err, "Restore failed"),
       error: err.message
     });
   }
@@ -10036,6 +10106,7 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
     connection = await pool.getConnection();
     const actingUserId = access.actingUserId ?? getRequestedUserId(req);
     const draftRow = await getOrCreateCurrentInvoiceDraft(connection, access.companyScope, actingUserId);
+    await ensureSingleStockBarcode(access.companyScope, barcode, connection);
 
     const [duplicateRows] = await connection.query(
       `
@@ -10594,7 +10665,8 @@ app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), asy
           [cleanInvoiceNumber, barcode, finalCompanyId]
         );
 
-        if (Number(stockUpdateResult.affectedRows || 0) === 0) {
+        const affectedRows = assertSingleStockRowAffected(stockUpdateResult);
+        if (affectedRows === 0) {
           await connection.rollback();
           return res.status(400).json({
             success: false,
@@ -10617,9 +10689,9 @@ app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), asy
       } catch (_) {}
     }
     console.error("Save invoice error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Invoice save failed",
+      message: getBarcodeSafetyMessage(error, "Invoice save failed"),
       error: getErrorDetail(error)
     });
   } finally {
@@ -10837,7 +10909,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           [cleanInvoiceNumber, barcode, finalCompanyId]
         );
 
-        if (Number(stockUpdateResult.affectedRows || 0) === 0) {
+        const affectedRows = assertSingleStockRowAffected(stockUpdateResult);
+        if (affectedRows === 0) {
           await connection.rollback();
           return res.status(400).json({
             success: false,
@@ -10938,9 +11011,9 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     }
 
     console.error("Save billing error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Server error",
+      message: getBarcodeSafetyMessage(error, "Server error"),
       error: getErrorDetail(error)
     });
   } finally {
@@ -11275,6 +11348,7 @@ app.get("/sales-history/payment-history/:invoiceNumber", async (req, res) => {
     }
 
     const companyId = access.companyScope;
+
     const [rows] = await pool.query(
       `
       SELECT
@@ -11828,6 +11902,7 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
     }
 
     const companyId = access.companyScope;
+    await ensureSingleStockBarcode(companyId, barcode);
 
     const [result] = await pool.query(
       `
@@ -11839,8 +11914,9 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
       `,
       [barcode, companyId]
     );
+    const affectedRows = assertSingleStockRowAffected(result);
 
-    if (Number(result.affectedRows || 0) === 0) {
+    if (affectedRows === 0) {
       return res.json({
         success: false,
         message: "Item not found"
@@ -11853,9 +11929,9 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
     });
   } catch (error) {
     console.error("Return item error:", error);
-    return res.status(500).json({
+    return res.status(getBarcodeSafetyStatus(error)).json({
       success: false,
-      message: "Return failed",
+      message: getBarcodeSafetyMessage(error, "Return failed"),
       error: getErrorDetail(error)
     });
   }
