@@ -5693,7 +5693,7 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
 /* =========================
    EXPENSE MANAGER
 ========================= */
-app.get("/expenses", async (req, res) => {
+app.get("/expenses", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -6430,7 +6430,7 @@ app.get("/getStock", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/process/data", async (req, res) => {
+app.get("/process/data", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -8408,7 +8408,7 @@ app.post("/process/karigar-work", authMiddleware, checkRole(["SUPERADMIN", "OWNE
 /* =========================
    GET ITEM BY BARCODE
 ========================= */
-app.get("/getSticker/:barcode", async (req, res) => {
+app.get("/getSticker/:barcode", authMiddleware, async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
     const access = await resolveAccessContext(req, {
@@ -8463,7 +8463,7 @@ app.get("/getSticker/:barcode", async (req, res) => {
   }
 });
 
-app.get("/getReturnItem/:barcode", async (req, res) => {
+app.get("/getReturnItem/:barcode", authMiddleware, async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
     const access = await resolveAccessContext(req, {
@@ -9204,7 +9204,7 @@ app.put("/materialStock/items/:id", authMiddleware, checkRole(["SUPERADMIN", "OW
   }
 });
 
-app.get("/materialStock/items", async (req, res) => {
+app.get("/materialStock/items", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9390,7 +9390,7 @@ app.post("/materialStock/movements", authMiddleware, checkRole(["SUPERADMIN", "O
   }
 });
 
-app.get("/materialStock/movements", async (req, res) => {
+app.get("/materialStock/movements", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -9445,7 +9445,7 @@ app.get("/materialStock/movements", async (req, res) => {
   }
 });
 
-app.get("/materialStock/summary", async (req, res) => {
+app.get("/materialStock/summary", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -11105,7 +11105,7 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 /* =========================
    INVOICE ITEMS
 ========================= */
-app.get("/getInvoiceItems/:invoiceNumber", async (req, res) => {
+app.get("/getInvoiceItems/:invoiceNumber", authMiddleware, async (req, res) => {
   try {
     const invoiceNumber = String(req.params.invoiceNumber || "").trim();
     const access = await resolveAccessContext(req, {
@@ -11327,7 +11327,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
   }
 });
 
-app.get("/sales-history/payment-history/:invoiceNumber", async (req, res) => {
+app.get("/sales-history/payment-history/:invoiceNumber", authMiddleware, async (req, res) => {
   try {
     const invoiceNumber = String(req.params.invoiceNumber || "").trim();
     const access = await resolveAccessContext(req, {
@@ -12018,7 +12018,7 @@ app.post("/requestCompanySignup", async (req, res) => {
   }
 });
 
-app.get("/pendingCompanyRequests", async (req, res) => {
+app.get("/pendingCompanyRequests", authMiddleware, async (req, res) => {
   try {
     const access = await requireSuperAdminAccess(req, res);
     if (!access) return;
@@ -12233,7 +12233,7 @@ app.put("/rejectCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]), 
   }
 });
 
-app.get("/approvedCompanies", async (req, res) => {
+app.get("/approvedCompanies", authMiddleware, async (req, res) => {
   try {
     const access = await requireSuperAdminAccess(req, res);
     if (!access) return;
@@ -12261,7 +12261,7 @@ app.get("/approvedCompanies", async (req, res) => {
 /* =========================
    USERS / STAFF
 ========================= */
-app.get("/companyUsers", async (req, res) => {
+app.get("/companyUsers", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -12470,7 +12470,7 @@ app.post("/requestStaffJoin", async (req, res) => {
   }
 });
 
-app.get("/pendingUsers", async (req, res) => {
+app.get("/pendingUsers", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -12519,7 +12519,7 @@ app.get("/pendingUsers", async (req, res) => {
   }
 });
 
-app.get("/pendingStaffRequests", async (req, res) => {
+app.get("/pendingStaffRequests", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -12568,7 +12568,7 @@ app.get("/pendingStaffRequests", async (req, res) => {
   }
 });
 
-app.get("/approvedUsers", async (req, res) => {
+app.get("/approvedUsers", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -12789,7 +12789,7 @@ app.post("/auth/logout", (_req, res) => {
   });
 });
 
-app.get("/userByEmail", async (req, res) => {
+app.get("/userByEmail", authMiddleware, async (req, res) => {
   try {
     const email = normalizeEmail(req.query.email);
 
@@ -13754,7 +13754,7 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/transaction/reports/party-ledger", async (req, res) => {
+app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -13950,7 +13950,7 @@ app.get("/transaction/reports/party-ledger", async (req, res) => {
   }
 });
 
-app.get("/transaction/reports/customer-due", async (req, res) => {
+app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -14087,7 +14087,7 @@ app.get("/transaction/reports/customer-due", async (req, res) => {
   }
 });
 
-app.get("/transaction/reports/metal-ledger", async (req, res) => {
+app.get("/transaction/reports/metal-ledger", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
