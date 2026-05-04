@@ -732,6 +732,71 @@ function normalizeProcessStepRow(row) {
   };
 }
 
+async function ensureProcessRecoveryStockEntry(connection, {
+  companyId,
+  createdBy,
+  lotNo,
+  stepId,
+  recoveryWeight
+}) {
+  const cleanStepId = String(stepId || "").trim();
+  const cleanLotNo = normalizeProcessLotNo(lotNo);
+  const safeRecoveryWeight = toNumber(recoveryWeight);
+
+  if (!cleanStepId || safeRecoveryWeight <= 0) {
+    return { inserted: false, reason: "NO_RECOVERY" };
+  }
+
+  const [existingRows] = await connection.query(
+    `
+    SELECT id
+    FROM stock
+    WHERE company_id = ?
+      AND reference_step_id = ?
+    LIMIT 1
+    `,
+    [companyId, cleanStepId]
+  );
+
+  if (existingRows.length) {
+    return { inserted: false, reason: "DUPLICATE_EXISTS", stockId: existingRows[0].id };
+  }
+
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO stock
+    (
+      product_name,
+      category,
+      weight,
+      qty,
+      lot_number,
+      status,
+      source,
+      reference_step_id,
+      company_id,
+      created_by,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `,
+    [
+      cleanLotNo ? `Recovery Silver (${cleanLotNo})` : "Recovery Silver",
+      "RECOVERY",
+      Number(safeRecoveryWeight.toFixed(3)),
+      0,
+      cleanLotNo,
+      "IN_STOCK",
+      "PROCESS_RECOVERY",
+      cleanStepId,
+      companyId,
+      createdBy || null
+    ]
+  );
+
+  return { inserted: true, stockId: insertResult.insertId };
+}
+
 function normalizeExpenseRow(row) {
   return {
     ...row,
@@ -2083,10 +2148,16 @@ async function ensureSchema() {
       size VARCHAR(100) DEFAULT '',
       weight DECIMAL(10,3) DEFAULT 0.000,
       qty INT DEFAULT 1,
+      category VARCHAR(120) DEFAULT '',
       lot_number VARCHAR(100) DEFAULT '',
       barcode VARCHAR(255) DEFAULT '',
       metal_type VARCHAR(50) DEFAULT '',
       process_type VARCHAR(100) DEFAULT '',
+      source VARCHAR(120) DEFAULT '',
+      reference_step_id VARCHAR(50) DEFAULT '',
+      used_in_process_step_id INT DEFAULT NULL,
+      used_at DATETIME DEFAULT NULL,
+      used_by INT DEFAULT NULL,
       status VARCHAR(50) DEFAULT 'IN_STOCK',
       invoice_number VARCHAR(100) DEFAULT '',
       sold_at DATETIME DEFAULT NULL,
@@ -2534,6 +2605,19 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_step_recovery_inputs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_step_id INT NOT NULL,
+      stock_id INT NOT NULL,
+      weight DECIMAL(14,3) DEFAULT 0.000,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_process_step_recovery_stock (company_id, stock_id)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS karigar_work (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -2723,6 +2807,12 @@ async function ensureSchema() {
   if (await tableExists("stock")) {
     await addColumnIfMissing("stock", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "qty", "INT DEFAULT 1");
+    await addColumnIfMissing("stock", "category", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("stock", "source", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("stock", "reference_step_id", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("stock", "used_in_process_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("stock", "used_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("stock", "used_by", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("stock", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
@@ -2864,6 +2954,15 @@ async function ensureSchema() {
     await addColumnIfMissing("process_steps", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_step_recovery_inputs")) {
+    await addColumnIfMissing("process_step_recovery_inputs", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_recovery_inputs", "process_step_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_recovery_inputs", "stock_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_recovery_inputs", "weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_step_recovery_inputs", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_recovery_inputs", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("karigar_work")) {
     await addColumnIfMissing("karigar_work", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("karigar_work", "karigar_name", "VARCHAR(255) NOT NULL");
@@ -2985,6 +3084,13 @@ async function ensureSchema() {
     await addIndexIfMissing("stock", "idx_stock_company_status", "(company_id, status)");
     await addIndexIfMissing("stock", "idx_stock_company_invoice", "(company_id, invoice_number)");
     await addIndexIfMissing("stock", "idx_stock_company_created", "(company_id, created_at)");
+    await addIndexIfMissing("stock", "idx_stock_recovery_step", "(company_id, reference_step_id)");
+    await addIndexIfMissing("stock", "idx_stock_recovery_unused", "(company_id, category, source, status)");
+  }
+
+  if (await tableExists("process_step_recovery_inputs")) {
+    await addIndexIfMissing("process_step_recovery_inputs", "idx_recovery_inputs_step", "(company_id, process_step_id)");
+    await addUniqueIndexIfMissing("process_step_recovery_inputs", "uq_process_step_recovery_stock", "(company_id, stock_id)");
   }
 
   if (await tableExists("sales_history")) {
@@ -6219,6 +6325,64 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/process/recovery-stock", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        product_name,
+        category,
+        weight,
+        qty,
+        lot_number,
+        status,
+        source,
+        reference_step_id,
+        company_id,
+        created_by,
+        created_at,
+        updated_at
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(COALESCE(category, '')) = 'RECOVERY'
+        AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        AND COALESCE(weight, 0) > 0
+        AND deleted_at IS NULL
+      ORDER BY created_at ASC, id ASC
+      `,
+      [access.companyScope]
+    );
+
+    return res.json({
+      success: true,
+      recoveryStock: rows.map((row) => ({
+        ...row,
+        weight: toNumber(row.weight),
+        qty: toNumber(row.qty)
+      }))
+    });
+  } catch (error) {
+    console.error("Get process recovery stock error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process recovery stock fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.get("/process/next-input", authMiddleware, async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -6511,6 +6675,14 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       ]
     );
 
+    await ensureProcessRecoveryStockEntry(connection, {
+      companyId,
+      createdBy: userId,
+      lotNo,
+      stepId: insertResult.insertId,
+      recoveryWeight: finalRecoveryWeight
+    });
+
     const [savedRows] = await connection.query(
       `
       SELECT *
@@ -6735,6 +6907,14 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       `,
       [outputWeight, recoveryWeight, lossWeight, outputQty, lossQty, lossReason || step.loss_reason || "", stepId]
     );
+
+    await ensureProcessRecoveryStockEntry(connection, {
+      companyId: access.companyScope,
+      createdBy: access.actingUserId,
+      lotNo: step.lot_no,
+      stepId,
+      recoveryWeight
+    });
 
     const [savedRows] = await connection.query(
       `
