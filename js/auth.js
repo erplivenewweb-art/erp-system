@@ -42,7 +42,9 @@ const ERP_MENU_PAGE_BY_HREF = {
 
 const ERP_AUTH_TOKEN_STORAGE_KEY = "erpAuthToken";
 const ERP_SELECTED_COMPANY_STORAGE_KEY = "selectedCompanyId";
+const ERP_ALL_COMPANIES_VALUE = "__ALL__";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction"]);
 
 function getLoggedInUser() {
   if (typeof window.getErpLoggedInUser === "function") {
@@ -163,11 +165,25 @@ function isAdminUser(user = null) {
 function getSelectedCompanyId() {
   const raw = localStorage.getItem(ERP_SELECTED_COMPANY_STORAGE_KEY);
   if (raw === null || raw === undefined || raw === "") return null;
+  if (raw === ERP_ALL_COMPANIES_VALUE) return null;
   const parsed = Number(raw);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+function getSelectedCompanyValue() {
+  return String(localStorage.getItem(ERP_SELECTED_COMPANY_STORAGE_KEY) || "").trim();
+}
+
+function isAllCompaniesSelected() {
+  return isSuperAdmin() && getSelectedCompanyValue() === ERP_ALL_COMPANIES_VALUE;
+}
+
 function setSelectedCompanyId(companyId) {
+  if (String(companyId || "").trim() === ERP_ALL_COMPANIES_VALUE) {
+    localStorage.setItem(ERP_SELECTED_COMPANY_STORAGE_KEY, ERP_ALL_COMPANIES_VALUE);
+    return ERP_ALL_COMPANIES_VALUE;
+  }
+
   const parsed = Number(companyId);
   if (!parsed || Number.isNaN(parsed)) {
     localStorage.removeItem(ERP_SELECTED_COMPANY_STORAGE_KEY);
@@ -182,10 +198,11 @@ function getEffectiveCompanyId() {
 }
 
 function hasSelectedCompanyForSuperAdmin() {
-  return !isSuperAdmin() || getSelectedCompanyId() !== null;
+  return !isSuperAdmin() || getSelectedCompanyValue() !== "";
 }
 
 function getSelectedCompanyName() {
+  if (isAllCompaniesSelected()) return "Super Admin (All Companies)";
   const selectedId = getSelectedCompanyId();
   if (!selectedId) return "";
   const select = document.getElementById("superAdminCompanySelect");
@@ -196,7 +213,7 @@ function getSelectedCompanyName() {
 function isCompanySelectionRequiredForPage(pageKey = getCurrentPageKey()) {
   if (!isSuperAdmin()) return false;
   if (!pageKey) return true;
-  return !ERP_ADMIN_ALL_COMPANY_PAGES.has(pageKey);
+  return ERP_COMPANY_REQUIRED_PAGES.has(pageKey);
 }
 
 function escapeHtml(value) {
@@ -210,7 +227,7 @@ function escapeHtml(value) {
 }
 
 function renderCompanyOptions(companies = []) {
-  return `<option value="">Please select a company</option>${companies
+  return `<option value="${ERP_ALL_COMPANIES_VALUE}">Super Admin (All Companies)</option><option value="">Please select a company</option>${companies
     .map((company) => {
       const id = Number(company.id ?? company.company_id ?? company.companyId ?? 0);
       const name = String(company.company_name || company.companyName || company.name || `Company ${id}`).trim();
@@ -221,23 +238,42 @@ function renderCompanyOptions(companies = []) {
 
 function applySelectedCompanyToSelect(select) {
   if (!select) return;
+  if (isAllCompaniesSelected() && select.querySelector(`option[value="${ERP_ALL_COMPANIES_VALUE}"]`)) {
+    select.value = ERP_ALL_COMPANIES_VALUE;
+    return;
+  }
+
+  const selectedValue = getSelectedCompanyValue();
+  if (!selectedValue && isSuperAdmin() && select.querySelector(`option[value="${ERP_ALL_COMPANIES_VALUE}"]`)) {
+    setSelectedCompanyId(ERP_ALL_COMPANIES_VALUE);
+    select.value = ERP_ALL_COMPANIES_VALUE;
+    return;
+  }
+
   const selectedId = getSelectedCompanyId();
   if (selectedId && select.querySelector(`option[value="${selectedId}"]`)) {
     select.value = String(selectedId);
   } else {
-    select.value = "";
+    select.value = select.querySelector(`option[value="${ERP_ALL_COMPANIES_VALUE}"]`) ? ERP_ALL_COMPANIES_VALUE : "";
     if (selectedId) setSelectedCompanyId("");
   }
 }
 
 function handleSuperAdminCompanyChange(value) {
   setSelectedCompanyId(value);
-  if (getSelectedCompanyId()) {
-    clearCompanySelectionBlock();
-    window.location.reload();
-  } else {
+  clearCompanySelectionBlock();
+  clearCompanySelectionWarning();
+
+  if (isCompanySelectionRequiredForPage() && !getSelectedCompanyId()) {
     showCompanySelectionBlock();
+    return;
   }
+
+  if (!isCompanySelectionRequiredForPage() && !getSelectedCompanyId()) {
+    showCompanySelectionWarning();
+  }
+
+  window.location.reload();
 }
 
 async function populateSuperAdminCompanySelect(select) {
@@ -249,7 +285,7 @@ async function populateSuperAdminCompanySelect(select) {
 }
 
 function showCompanySelectionBlock() {
-  if (!isCompanySelectionRequiredForPage() || hasSelectedCompanyForSuperAdmin()) return;
+  if (!isCompanySelectionRequiredForPage() || getSelectedCompanyId()) return;
   document.body.classList.add("superadmin-company-missing");
 
   if (!document.getElementById("superAdminCompanyBlock")) {
@@ -257,31 +293,35 @@ function showCompanySelectionBlock() {
     block.id = "superAdminCompanyBlock";
     block.innerHTML = `
       <div class="superadmin-company-block-card">
-        <strong>Please select a company</strong>
-        <select id="superAdminCompanyOverlaySelect" aria-label="Select company">
-          <option value="">Loading companies...</option>
-        </select>
-        <p id="superAdminCompanyLoadMessage"></p>
+        <strong>Please select a company to continue</strong>
       </div>
     `;
     document.body.appendChild(block);
-    const overlaySelect = block.querySelector("#superAdminCompanyOverlaySelect");
-    overlaySelect?.addEventListener("change", () => {
-      handleSuperAdminCompanyChange(overlaySelect.value);
-    });
-    populateSuperAdminCompanySelect(overlaySelect).catch(() => {
-      overlaySelect.innerHTML = `<option value="">Please select a company</option>`;
-      const message = document.getElementById("superAdminCompanyLoadMessage");
-      if (message) message.textContent = "Company list could not be loaded. Please refresh.";
-    });
   }
 
-  showAccessMessage("Please select a company");
+  showAccessMessage("Please select a company to continue");
 }
 
 function clearCompanySelectionBlock() {
   document.body.classList.remove("superadmin-company-missing");
   document.getElementById("superAdminCompanyBlock")?.remove();
+}
+
+function showCompanySelectionWarning() {
+  if (!isSuperAdmin() || isCompanySelectionRequiredForPage() || ERP_ADMIN_ALL_COMPANY_PAGES.has(getCurrentPageKey())) return;
+  if (getSelectedCompanyId()) return;
+
+  const topbar = document.querySelector(".topbar");
+  if (!topbar || document.getElementById("superAdminCompanyWarning")) return;
+
+  const warning = document.createElement("div");
+  warning.id = "superAdminCompanyWarning";
+  warning.textContent = "Select a company to use ERP modules";
+  topbar.insertAdjacentElement("afterend", warning);
+}
+
+function clearCompanySelectionWarning() {
+  document.getElementById("superAdminCompanyWarning")?.remove();
 }
 
 async function loadSuperAdminCompanies() {
@@ -296,6 +336,9 @@ async function loadSuperAdminCompanies() {
     credentials: "include"
   });
   const data = await res.json();
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || "Company list could not be loaded. Please refresh.");
+  }
   return Array.isArray(data.companies) ? data.companies : [];
 }
 
@@ -317,7 +360,8 @@ async function initSuperAdminCompanySelector() {
   try {
     await populateSuperAdminCompanySelect(select);
   } catch (_) {
-    select.innerHTML = `<option value="">Please select a company</option>`;
+    select.innerHTML = `<option value="${ERP_ALL_COMPANIES_VALUE}">Super Admin (All Companies)</option><option value="">Please select a company</option>`;
+    applySelectedCompanyToSelect(select);
     showAccessMessage("Company list could not be loaded. Please refresh.");
   }
 
@@ -326,6 +370,7 @@ async function initSuperAdminCompanySelector() {
   });
 
   showCompanySelectionBlock();
+  showCompanySelectionWarning();
 }
 
 function injectSuperAdminCompanyStyles() {
@@ -333,8 +378,7 @@ function injectSuperAdminCompanyStyles() {
   const style = document.createElement("style");
   style.id = "superAdminCompanyStyles";
   style.textContent = `
-    .superadmin-company-select-wrap select,
-    #superAdminCompanyOverlaySelect {
+    .superadmin-company-select-wrap select {
       min-height: 44px;
       border-radius: 13px;
       border: 1px solid var(--erp-border, #e3d7c3);
@@ -343,6 +387,10 @@ function injectSuperAdminCompanyStyles() {
       padding: 10px 14px;
       font-weight: 800;
       max-width: 260px;
+    }
+    body.superadmin-company-missing .topbar {
+      position: relative;
+      z-index: 6001;
     }
     body.superadmin-company-missing main .content,
     body.superadmin-company-missing main section.content {
@@ -358,7 +406,7 @@ function injectSuperAdminCompanyStyles() {
       place-items: center;
       background: rgba(255, 250, 242, 0.74);
       backdrop-filter: blur(4px);
-      pointer-events: auto;
+      pointer-events: none;
     }
     .superadmin-company-block-card {
       border: 1px solid rgba(197, 139, 43, 0.35);
@@ -373,17 +421,16 @@ function injectSuperAdminCompanyStyles() {
       gap: 14px;
       min-width: min(420px, calc(100vw - 36px));
     }
-    #superAdminCompanyOverlaySelect {
-      width: 100%;
-      max-width: none;
-      cursor: pointer;
-    }
-    #superAdminCompanyLoadMessage {
-      min-height: 18px;
-      margin: 0;
-      color: #9a3412;
-      font-size: 13px;
-      font-weight: 700;
+    #superAdminCompanyWarning {
+      margin: 0 24px 16px;
+      border: 1px solid rgba(197, 139, 43, 0.34);
+      border-radius: 14px;
+      background: linear-gradient(180deg, #fffaf0 0%, #fff3de 100%);
+      color: #8a5a12;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 800;
+      box-shadow: 0 10px 28px rgba(82, 58, 24, 0.08);
     }
   `;
   document.head.appendChild(style);
@@ -546,7 +593,7 @@ function patchFetchWithAuthHeader() {
         showCompanySelectionBlock();
         return Promise.resolve(new Response(JSON.stringify({
           success: false,
-          message: "Please select a company"
+          message: "Please select a company to continue"
         }), {
           status: 400,
           headers: { "Content-Type": "application/json" }

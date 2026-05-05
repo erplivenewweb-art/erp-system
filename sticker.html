@@ -203,6 +203,43 @@
       color: #334155;
     }
 
+    .manual-lot-panel {
+      display: none;
+      margin: 0 0 14px;
+      border: 1px solid rgba(197, 139, 43, 0.28);
+      border-radius: 14px;
+      background: linear-gradient(180deg, #fffdf8 0%, #fff4df 100%);
+      padding: 14px;
+      box-shadow: 0 10px 24px rgba(82, 58, 24, 0.08);
+    }
+
+    .manual-lot-panel.show {
+      display: block;
+    }
+
+    .manual-lot-title {
+      font-size: 14px;
+      font-weight: 900;
+      color: #7c5a1d;
+      margin-bottom: 10px;
+    }
+
+    .manual-lot-warning {
+      display: none;
+      margin: 10px 0;
+      border: 1px solid rgba(197, 139, 43, 0.32);
+      border-radius: 12px;
+      background: #fff8eb;
+      color: #8a5a12;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .manual-lot-warning.show {
+      display: block;
+    }
+
     .lot-buttons-wrap {
       display: flex;
       gap: 8px;
@@ -445,11 +482,30 @@
       <div class="section-box sticker-pro-box">
         <div id="companyInfoChip" class="company-info-chip">Company: --</div>
 
+        <div id="manualLotPanel" class="manual-lot-panel">
+          <div class="manual-lot-title">Manual Lot Entry</div>
+          <div class="form-grid" style="grid-template-columns: 1fr 2fr auto;">
+            <div class="input-box">
+              <label for="manualLotNo">Lot No</label>
+              <input type="text" id="manualLotNo" placeholder="TEMP-001" />
+            </div>
+            <div class="input-box">
+              <label for="manualLotReason">Reason</label>
+              <input type="text" id="manualLotReason" placeholder="Old ready stock/manual entry" />
+            </div>
+            <div class="input-box">
+              <label>&nbsp;</label>
+              <button class="primary-btn save-btn" type="button" onclick="createManualLot()">Create Manual Lot</button>
+            </div>
+          </div>
+        </div>
+
         <div style="font-size:14px; margin-bottom:12px; color:#475569; font-weight:600;">
           Choose lot to continue:
         </div>
 
         <div id="lotButtonsWrap" class="lot-buttons-wrap"></div>
+        <div id="manualLotWarning" class="manual-lot-warning">Manual lot: old stock/manual entry. No process loss tracking.</div>
 
         <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr 2fr;">
           <div class="input-box">
@@ -600,6 +656,7 @@
     let editingPendingBarcode = null;
     let lotOptions = [];
     let processLotStatusMap = new Map();
+    let processLotInfoMap = new Map();
 
     function getLoggedInUser() {
       try {
@@ -631,6 +688,15 @@
       const role = String(user?.role || "").trim().toLowerCase();
       const email = String(user?.email || "").trim().toLowerCase();
       return role === "superadmin" || email === "grudrapratap0@gmail.com";
+    }
+
+    function getNormalizedRole() {
+      const role = String(getLoggedInUser()?.role || "").trim().toLowerCase();
+      return role === "admin" ? "owner" : role;
+    }
+
+    function canCreateManualLot() {
+      return isSuperAdmin() || getNormalizedRole() === "owner";
     }
 
     function getPendingStorageKey() {
@@ -787,7 +853,9 @@
       if (!chip) return;
 
       if (isSuperAdmin()) {
-        chip.textContent = "Company: Please select a company";
+        const selectedName =
+          typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "";
+        chip.textContent = `Company: ${selectedName || "Please select a company"}`;
         return;
       }
 
@@ -1035,6 +1103,28 @@
       return String(processLotStatusMap.get(cleanLot) || "").trim().toUpperCase();
     }
 
+    function getProcessLotInfo(lotValue) {
+      return processLotInfoMap.get(normalizeText(lotValue)) || null;
+    }
+
+    function isManualLot(lotValue) {
+      return Number(getProcessLotInfo(lotValue)?.is_manual_lot || 0) === 1;
+    }
+
+    function getLotLabel(lotValue) {
+      const cleanLot = normalizeText(lotValue);
+      return isManualLot(cleanLot) ? `${cleanLot} (Manual)` : cleanLot;
+    }
+
+    function renderManualLotControls() {
+      document.getElementById("manualLotPanel")?.classList.toggle("show", canCreateManualLot());
+    }
+
+    function renderManualLotWarning() {
+      const lotValue = document.getElementById("lotSelector")?.value.trim() || "";
+      document.getElementById("manualLotWarning")?.classList.toggle("show", Boolean(lotValue && isManualLot(lotValue)));
+    }
+
     async function loadProcessLotStatuses() {
       try {
         const params = buildAuthParams();
@@ -1048,15 +1138,23 @@
         }
 
         processLotStatusMap = new Map();
+        processLotInfoMap = new Map();
         const lots = Array.isArray(data?.lots) ? data.lots : [];
         lots.forEach((lot) => {
           const lotNo = normalizeText(lot?.lotNo ?? lot?.lot_no ?? "");
           if (!lotNo) return;
           processLotStatusMap.set(lotNo, String(lot?.status || "OPEN").trim().toUpperCase() || "OPEN");
+          processLotInfoMap.set(lotNo, {
+            ...lot,
+            id: Number(lot?.id || 0) || null,
+            lot_no: lotNo,
+            is_manual_lot: Number(lot?.is_manual_lot || lot?.isManualLot || 0) ? 1 : 0
+          });
         });
       } catch (error) {
         console.log("Process lot status load error:", error);
         processLotStatusMap = new Map();
+        processLotInfoMap = new Map();
       }
     }
 
@@ -1071,12 +1169,70 @@
         await loadProcessLotStatuses();
       }
 
+      if (isManualLot(cleanLot)) {
+        return true;
+      }
+
       if (getProcessLotStatus(cleanLot) !== "COMPLETED") {
         showToast(`Lot ${cleanLot} is not completed. Complete the lot before creating stickers.`, "error");
         return false;
       }
 
       return true;
+    }
+
+    async function createManualLot() {
+      if (!canCreateManualLot()) {
+        showToast("Only Admin or SuperAdmin can create manual lots.", "error");
+        return;
+      }
+
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      if (companyId === null || Number.isNaN(companyId)) {
+        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+        return;
+      }
+
+      const lotNo = normalizeText(document.getElementById("manualLotNo")?.value || "");
+      const reason = normalizeText(document.getElementById("manualLotReason")?.value || "");
+
+      if (!lotNo) {
+        showToast("Please enter the manual lot number.", "error");
+        return;
+      }
+
+      if (!reason) {
+        showToast("Please enter the manual lot reason.", "error");
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        const res = await fetch(`${API_BASE}/process/manual-lots${params.toString() ? `?${params.toString()}` : ""}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lotNo, reason })
+        });
+        const result = await res.json();
+
+        if (!res.ok || !result?.success) {
+          showToast(result?.message || "Manual lot could not be created.", "error");
+          return;
+        }
+
+        document.getElementById("manualLotNo").value = "";
+        document.getElementById("manualLotReason").value = "";
+        document.getElementById("lotSelector").value = lotNo;
+        await loadProcessLotStatuses();
+        collectLotsFromData();
+        renderLotButtons();
+        syncLotPreview();
+        updateNextSerialForCurrentLot();
+        showToast("Manual lot created successfully.", "success");
+      } catch (error) {
+        console.log("Manual lot create error:", error);
+        showToast("Manual lot could not be created.", "error");
+      }
     }
 
     function collectLotsFromData() {
@@ -1111,7 +1267,7 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `mini-btn lot-btn ${currentLot === lot ? "active" : ""}`;
-        btn.textContent = lot;
+        btn.textContent = getLotLabel(lot);
         btn.onclick = () => setQuickLot(lot);
         wrap.appendChild(btn);
       });
@@ -1127,6 +1283,7 @@
       document.getElementById("processPreviewText").textContent = processValue || "--";
 
       renderLotButtons();
+      renderManualLotWarning();
     }
 
     function handleLotInputChange() {
@@ -1203,6 +1360,7 @@
         await loadProcessLotStatuses();
         collectLotsFromData();
         renderLotButtons();
+        renderManualLotWarning();
         renderHistory();
       } catch (err) {
         console.log("Load error:", err);
@@ -1936,6 +2094,7 @@
       renderProfileBox();
       renderCompanyInfo();
       renderPageTitle();
+      renderManualLotControls();
 
       loadProcessTypesFromLocal();
       loadProcessTypeOptions();

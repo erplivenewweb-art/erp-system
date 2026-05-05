@@ -7212,6 +7212,10 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     };
   }
 
+  if (isManualProcessLot(processLot)) {
+    return { ok: true };
+  }
+
   const finalStep = await getLastCompletedProcessStep(connection, companyId, cleanLot);
   if (!finalStep) {
     return {
@@ -10230,6 +10234,9 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       });
     }
 
+    const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
+    const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+
     await pool.query(
       `
       INSERT INTO stock (
@@ -10245,11 +10252,13 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         barcode,
         metal_type,
         process_type,
+        source,
+        manual_lot_id,
         status,
         company_id,
         created_by,
         deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cleanSerial,
@@ -10264,6 +10273,8 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         cleanBarcode,
         String(metalType || "").trim(),
         String(processType || "").trim(),
+        isManualStickerLot ? "MANUAL_ENTRY" : "",
+        isManualStickerLot ? Number(stickerProcessLot.id || 0) || null : null,
         "IN_STOCK",
         finalCompanyId,
         finalUserId,
@@ -10451,6 +10462,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       });
     }
 
+    const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
+    const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+
     await pool.query(
       `
       UPDATE stock
@@ -10467,6 +10481,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         barcode = ?,
         metal_type = ?,
         process_type = ?,
+        source = ?,
+        manual_lot_id = ?,
         status = ?,
         deleted_at = CASE WHEN ? = 'DELETED' THEN NOW() ELSE NULL END
       WHERE id = ?
@@ -10484,6 +10500,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         newBarcode,
         String(metalType || "").trim(),
         String(processType || "").trim(),
+        isManualStickerLot ? "MANUAL_ENTRY" : "",
+        isManualStickerLot ? Number(stickerProcessLot.id || 0) || null : null,
         String(status || "IN_STOCK").trim(),
         String(status || "IN_STOCK").trim(),
         currentId
