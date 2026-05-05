@@ -11102,9 +11102,20 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     } = req.body;
 
     const finalCompanyId = access.companyScope;
+    let finalInvoiceNumber = String(invoiceNumber || "").trim();
+
+    if (!finalInvoiceNumber) {
+      finalInvoiceNumber = await generateInvoiceNumberForCompany(
+        connection,
+        finalCompanyId,
+        billDate,
+        "BILL"
+      );
+    }
+
     const validation = await validateInvoiceSaveRequest(
       connection,
-      invoiceNumber,
+      finalInvoiceNumber,
       items,
       finalCompanyId
     );
@@ -11401,7 +11412,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
 
     return res.json({
       success: true,
-      message: "Billing saved successfully"
+      message: "Billing saved successfully",
+      invoiceNumber: cleanInvoiceNumber
     });
   } catch (error) {
     if (connection) {
