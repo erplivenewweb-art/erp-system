@@ -737,13 +737,13 @@
     function buildProtectedParams(includeCompany = false) {
       const params = new URLSearchParams();
       const userId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       if (userId !== null) {
         params.set("actingUserId", String(userId));
       }
 
-      if (includeCompany && companyId !== null) {
+      if ((includeCompany || isSuperAdmin()) && companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 

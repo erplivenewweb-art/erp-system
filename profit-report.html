@@ -422,7 +422,7 @@
     function buildProfitParams() {
       const params = new URLSearchParams();
       const userId = getCurrentUserIdSafe();
-      const companyId = getCurrentCompanyIdSafe();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyIdSafe();
       const from = document.getElementById("fromDate")?.value || "";
       const to = document.getElementById("toDate")?.value || "";
 
@@ -444,7 +444,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = isSuperAdminSafe() ? "All Companies" : (getCurrentCompanyNameSafe() || "No Company");
+      const companyName = isSuperAdminSafe() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "No Company");
       profile.innerHTML = `<i class="fas fa-user-circle"></i><span>${escapeHtml(role)} | ${escapeHtml(companyName)}</span>`;
     }
 
@@ -452,7 +452,7 @@
       const chip = document.getElementById("companyInfoChip");
       if (!chip) return;
       chip.textContent = isSuperAdminSafe()
-        ? "Company: Super Admin View"
+        ? "Company: Please select a company"
         : `Company: ${getCurrentCompanyNameSafe() || "Unknown Company"}`;
     }
 

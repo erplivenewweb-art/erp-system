@@ -635,13 +635,15 @@
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
       const finalCompanyId =
-        companyId !== null && companyId !== undefined ? Number(companyId) : getCurrentCompanyId();
+        companyId !== null && companyId !== undefined
+          ? Number(companyId)
+          : (typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId());
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if (includeCompany && finalCompanyId !== null && !Number.isNaN(finalCompanyId)) {
+      if ((includeCompany || isSuperAdmin()) && finalCompanyId !== null && !Number.isNaN(finalCompanyId)) {
         params.set("companyId", String(finalCompanyId));
       }
 
@@ -656,7 +658,7 @@
       const companyChip = document.getElementById("companyInfoChip");
       const name = safeText(user.name || "User");
       const role = safeText(user.role || "-");
-      const companyName = safeText(user.company_name || user.companyName || "All Companies");
+      const companyName = safeText(isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (user.company_name || user.companyName || "No Company"));
 
       if (profileBox) {
         profileBox.innerHTML = `
@@ -667,7 +669,7 @@
 
       if (companyChip) {
         companyChip.textContent = isSuperAdmin()
-          ? "Company Scope: Super Admin / All Companies"
+          ? "Company Scope: Please select a company"
           : `Company Scope: ${companyName}`;
       }
     }
@@ -907,7 +909,7 @@
 
     async function loadReturnDashboard() {
       try {
-        const params = buildProtectedParams(!isSuperAdmin());
+        const params = buildProtectedParams(true);
         const summaryUrl = `${API_BASE}/getReturnSummary${params.toString() ? `?${params.toString()}` : ""}`;
         const historyParams = new URLSearchParams(params);
         historyParams.set("limit", String(RETURN_PAGE_LIMIT));

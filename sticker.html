@@ -634,17 +634,17 @@
     }
 
     function getPendingStorageKey() {
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       return `pendingStickerItems_company_${companyId || "guest"}`;
     }
 
     function getProcessTypeStorageKey() {
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       return `processTypes_company_${companyId || "guest"}`;
     }
 
     function getLotStorageKey() {
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       return `lotOptions_company_${companyId || "guest"}`;
     }
 
@@ -740,12 +740,10 @@
     }
 
     function requireCompanyContext() {
-      if (isSuperAdmin()) return true;
-
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       if (companyId === null || Number.isNaN(companyId)) {
-        showToast("Company access missing", "error");
-        window.location.href = "login.html";
+        showToast(isSuperAdmin() ? "Please select a company" : "Company access missing", "error");
+        if (!isSuperAdmin()) window.location.href = "login.html";
         return false;
       }
 
@@ -754,14 +752,14 @@
 
     function buildAuthParams() {
       const params = new URLSearchParams();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       const actingUserId = getCurrentUserId();
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if (!isSuperAdmin() && companyId !== null && !Number.isNaN(companyId)) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 
@@ -789,7 +787,7 @@
       if (!chip) return;
 
       if (isSuperAdmin()) {
-        chip.textContent = "Company: Super Admin View";
+        chip.textContent = "Company: Please select a company";
         return;
       }
 
@@ -1180,7 +1178,7 @@
 
     async function loadFromServer() {
       try {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         const actingUserId = getCurrentUserId();
         const params = new URLSearchParams();
 
@@ -1188,15 +1186,13 @@
           params.set("actingUserId", String(actingUserId));
         }
 
-        if (!isSuperAdmin()) {
-          if (companyId === null || Number.isNaN(companyId)) {
-      showToast("Company access is missing.", "error");
-            stockItems = [];
-            renderHistory();
-            return;
-          }
-          params.set("companyId", String(companyId));
+        if (companyId === null || Number.isNaN(companyId)) {
+          showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+          stockItems = [];
+          renderHistory();
+          return;
         }
+        params.set("companyId", String(companyId));
 
         const url = `${API_BASE}/getStock${params.toString() ? `?${params.toString()}` : ""}`;
 
@@ -1265,10 +1261,10 @@
     }
 
     async function addStickerItem() {
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
-      if (!isSuperAdmin() && (companyId === null || Number.isNaN(companyId))) {
-      showToast("Company access is missing.", "error");
+      if (companyId === null || Number.isNaN(companyId)) {
+        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
         return;
       }
 
@@ -1356,10 +1352,10 @@
     }
 
     async function savePendingToServer() {
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
-      if (!isSuperAdmin() && (companyId === null || Number.isNaN(companyId))) {
-      showToast("Company access is missing.", "error");
+      if (companyId === null || Number.isNaN(companyId)) {
+        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
         return;
       }
 

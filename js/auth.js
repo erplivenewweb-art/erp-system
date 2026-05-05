@@ -41,6 +41,8 @@ const ERP_MENU_PAGE_BY_HREF = {
 };
 
 const ERP_AUTH_TOKEN_STORAGE_KEY = "erpAuthToken";
+const ERP_SELECTED_COMPANY_STORAGE_KEY = "selectedCompanyId";
+const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 
 function getLoggedInUser() {
   if (typeof window.getErpLoggedInUser === "function") {
@@ -158,10 +160,188 @@ function isAdminUser(user = null) {
   return getNormalizedRole(targetUser) === "owner";
 }
 
+function getSelectedCompanyId() {
+  const raw = localStorage.getItem(ERP_SELECTED_COMPANY_STORAGE_KEY);
+  if (raw === null || raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function setSelectedCompanyId(companyId) {
+  const parsed = Number(companyId);
+  if (!parsed || Number.isNaN(parsed)) {
+    localStorage.removeItem(ERP_SELECTED_COMPANY_STORAGE_KEY);
+    return null;
+  }
+  localStorage.setItem(ERP_SELECTED_COMPANY_STORAGE_KEY, String(parsed));
+  return parsed;
+}
+
+function getEffectiveCompanyId() {
+  return isSuperAdmin() ? getSelectedCompanyId() : getCurrentCompanyId();
+}
+
+function hasSelectedCompanyForSuperAdmin() {
+  return !isSuperAdmin() || getSelectedCompanyId() !== null;
+}
+
+function getSelectedCompanyName() {
+  const selectedId = getSelectedCompanyId();
+  if (!selectedId) return "";
+  const select = document.getElementById("superAdminCompanySelect");
+  const option = select?.querySelector(`option[value="${selectedId}"]`);
+  return String(option?.textContent || "").trim();
+}
+
+function isCompanySelectionRequiredForPage(pageKey = getCurrentPageKey()) {
+  if (!isSuperAdmin()) return false;
+  if (!pageKey) return true;
+  return !ERP_ADMIN_ALL_COMPANY_PAGES.has(pageKey);
+}
+
+function showCompanySelectionBlock() {
+  if (!isCompanySelectionRequiredForPage() || hasSelectedCompanyForSuperAdmin()) return;
+  document.body.classList.add("superadmin-company-missing");
+
+  if (!document.getElementById("superAdminCompanyBlock")) {
+    const block = document.createElement("div");
+    block.id = "superAdminCompanyBlock";
+    block.innerHTML = `
+      <div class="superadmin-company-block-card">
+        <strong>Please select a company</strong>
+      </div>
+    `;
+    document.body.appendChild(block);
+  }
+
+  showAccessMessage("Please select a company");
+}
+
+function clearCompanySelectionBlock() {
+  document.body.classList.remove("superadmin-company-missing");
+  document.getElementById("superAdminCompanyBlock")?.remove();
+}
+
+async function loadSuperAdminCompanies() {
+  const params = new URLSearchParams();
+  const actingUserId = getCurrentUserId();
+  if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+    params.set("actingUserId", String(actingUserId));
+  }
+
+  const res = await fetch(`${window.ERP_API_BASE}/approvedCompanies?${params.toString()}`, {
+    cache: "no-store",
+    credentials: "include"
+  });
+  const data = await res.json();
+  return Array.isArray(data.companies) ? data.companies : [];
+}
+
+async function initSuperAdminCompanySelector() {
+  if (!isSuperAdmin()) return;
+  const topbar = document.querySelector(".top-right");
+  if (!topbar || document.getElementById("superAdminCompanySelect")) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "superadmin-company-select-wrap";
+  wrapper.innerHTML = `
+    <select id="superAdminCompanySelect" aria-label="Select company">
+      <option value="">Please select a company</option>
+    </select>
+  `;
+  topbar.insertBefore(wrapper, topbar.firstChild);
+
+  const select = wrapper.querySelector("select");
+  try {
+    const companies = await loadSuperAdminCompanies();
+    select.innerHTML = `<option value="">Please select a company</option>${companies
+      .map((company) => {
+        const id = Number(company.id ?? company.company_id ?? company.companyId ?? 0);
+        const name = String(company.company_name || company.companyName || company.name || `Company ${id}`).trim();
+        return id ? `<option value="${id}">${name}</option>` : "";
+      })
+      .join("")}`;
+    const selectedId = getSelectedCompanyId();
+    if (selectedId && select.querySelector(`option[value="${selectedId}"]`)) {
+      select.value = String(selectedId);
+    } else if (selectedId) {
+      setSelectedCompanyId("");
+    }
+  } catch (_) {
+    select.innerHTML = `<option value="">Please select a company</option>`;
+  }
+
+  select.addEventListener("change", () => {
+    setSelectedCompanyId(select.value);
+    if (getSelectedCompanyId()) {
+      clearCompanySelectionBlock();
+      window.location.reload();
+    } else {
+      showCompanySelectionBlock();
+    }
+  });
+
+  showCompanySelectionBlock();
+}
+
+function injectSuperAdminCompanyStyles() {
+  if (document.getElementById("superAdminCompanyStyles")) return;
+  const style = document.createElement("style");
+  style.id = "superAdminCompanyStyles";
+  style.textContent = `
+    .superadmin-company-select-wrap select {
+      min-height: 44px;
+      border-radius: 13px;
+      border: 1px solid var(--erp-border, #e3d7c3);
+      background: linear-gradient(180deg, #fffdf9 0%, #fff6e8 100%);
+      color: #364457;
+      padding: 10px 14px;
+      font-weight: 800;
+      max-width: 260px;
+    }
+    body.superadmin-company-missing main .content,
+    body.superadmin-company-missing main section.content {
+      pointer-events: none;
+      opacity: 0.35;
+      filter: grayscale(0.1);
+    }
+    #superAdminCompanyBlock {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 250, 242, 0.74);
+      backdrop-filter: blur(4px);
+      pointer-events: none;
+    }
+    .superadmin-company-block-card {
+      border: 1px solid rgba(197, 139, 43, 0.35);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #fffdf8 0%, #fff3de 100%);
+      box-shadow: 0 20px 48px rgba(82, 58, 24, 0.18);
+      color: #7c5a1d;
+      padding: 22px 28px;
+      font-size: 18px;
+      text-align: center;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function bootstrapSuperAdminCompanyContext() {
+  injectSuperAdminCompanyStyles();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initSuperAdminCompanySelector);
+  } else {
+    initSuperAdminCompanySelector();
+  }
+}
+
 function buildProtectedQueryString({ includeCompany = false, companyId = null } = {}) {
   const params = new URLSearchParams();
   const resolvedCompanyId =
-    companyId === null || companyId === undefined ? getCurrentCompanyId() : Number(companyId);
+    companyId === null || companyId === undefined ? getEffectiveCompanyId() : Number(companyId);
 
   if (includeCompany && resolvedCompanyId !== null && !Number.isNaN(resolvedCompanyId)) {
     params.set("companyId", String(resolvedCompanyId));
@@ -281,12 +461,49 @@ function patchFetchWithAuthHeader() {
     const inputUrl = typeof input === "string" ? input : input?.url || "";
     const apiBase =
       typeof window.ERP_API_BASE === "string" ? String(window.ERP_API_BASE || "").trim() : "";
-    const resolvedUrl =
+    let resolvedUrl =
       typeof window.buildErpApiUrl === "function" && typeof inputUrl === "string" && inputUrl.startsWith("/")
         ? window.buildErpApiUrl(inputUrl)
         : input;
     const requestUrl = typeof resolvedUrl === "string" ? resolvedUrl : resolvedUrl?.url || inputUrl || "";
     const isApiRequest = Boolean(apiBase) && String(requestUrl || "").startsWith(apiBase);
+    const method = String(init.method || (input instanceof Request ? input.method : "GET") || "GET").toUpperCase();
+
+    if (isApiRequest && isCompanySelectionRequiredForPage()) {
+      const selectedCompanyId = getSelectedCompanyId();
+      let apiPath = "";
+      try {
+        apiPath = new URL(requestUrl, window.location.origin).pathname;
+      } catch (_) {}
+
+      const canBypassCompanySelection = [
+        "/approvedCompanies",
+        "/pendingCompanyRequests",
+        "/auth/logout"
+      ].some((path) => apiPath.endsWith(path));
+
+      if (!selectedCompanyId && !canBypassCompanySelection) {
+        showCompanySelectionBlock();
+        return Promise.resolve(new Response(JSON.stringify({
+          success: false,
+          message: "Please select a company"
+        }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        }));
+      }
+
+      if (selectedCompanyId && (method === "GET" || method === "HEAD")) {
+        try {
+          const url = new URL(requestUrl, window.location.origin);
+          if (!url.searchParams.has("companyId") && !canBypassCompanySelection) {
+            url.searchParams.set("companyId", String(selectedCompanyId));
+            resolvedUrl = url.toString();
+          }
+        } catch (_) {}
+      }
+    }
+
     const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined) || {});
 
     if (token && isApiRequest && !headers.has("Authorization")) {
@@ -304,3 +521,4 @@ function patchFetchWithAuthHeader() {
 }
 
 patchFetchWithAuthHeader();
+bootstrapSuperAdminCompanyContext();

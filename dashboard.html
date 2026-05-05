@@ -1468,9 +1468,9 @@
 
     function filterCompanyItems(items) {
       const list = Array.isArray(items) ? items : [];
-      if (isSuperAdmin()) return list;
+      
 
-      const currentCompanyId = getCurrentCompanyId();
+      const currentCompanyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       return list.filter((item) => getItemCompanyId(item) === currentCompanyId);
     }
 
@@ -1676,7 +1676,7 @@
     function buildSmartDashboardParams() {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       params.set("date", getSmartDashboardDate());
 
@@ -1684,7 +1684,7 @@
         params.set("actingUserId", String(actingUserId));
       }
 
-      if (companyId !== null && !isSuperAdmin()) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 
@@ -2057,7 +2057,7 @@
       profileBox.innerHTML = `
         <strong>${name}</strong>
         <span>${role}</span>
-        <span>${isSuperAdmin() ? "All Companies" : companyName}</span>
+        <span>${isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : companyName}</span>
       `;
 
       if (isSuperAdmin()) {
@@ -2313,7 +2313,7 @@
 
       dashboardLoadPromise = (async () => {
       try {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         const actingUserId = getCurrentUserId();
         const stockParams = new URLSearchParams();
         const salesParams = new URLSearchParams();
@@ -2325,7 +2325,7 @@
           returnParams.set("actingUserId", String(actingUserId));
         }
 
-        if (companyId !== null && !isSuperAdmin()) {
+        if (companyId !== null && !Number.isNaN(companyId)) {
           stockParams.set("companyId", String(companyId));
           salesParams.set("companyId", String(companyId));
           returnParams.set("companyId", String(companyId));

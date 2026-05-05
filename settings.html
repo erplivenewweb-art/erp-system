@@ -556,7 +556,7 @@
           <div class="info-box">
           Enter your registered email, request a verification code, and unlock settings before saving.
             These settings will now be saved <strong>company-wise</strong>.
-          A Super Admin can view data for all companies, while a normal admin can only view data for their own company.
+          A Super Admin must select a company before using company ERP settings, while a normal admin can only view data for their own company.
           </div>
         </div>
 
@@ -883,13 +883,13 @@
     function buildAccessParams(forceCompany = false) {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if ((forceCompany || !isSuperAdmin()) && companyId !== null && !Number.isNaN(companyId)) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 
@@ -931,7 +931,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = getCurrentCompanyName() || (isSuperAdmin() ? "All Companies" : "No Company");
+      const companyName = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyName() || "No Company");
 
       box.innerHTML = `<i class="fas fa-user-circle"></i> ${role} | ${companyName}`;
 
@@ -942,7 +942,7 @@
 
     function updateCompanyLabel() {
       const user = getLoggedInUser();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       const label = document.getElementById("currentCompanyLabel");
       const sub = document.getElementById("currentCompanySubLabel");
 

@@ -325,8 +325,8 @@
     }
 
     function companyScopedKey(baseKey) {
-      const companyId = getCurrentCompanyId();
-      const scope = isSuperAdmin() ? "superadmin" : (companyId ?? "no_company");
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      const scope = companyId ?? (isSuperAdmin() ? "select_company" : "no_company");
       return `${baseKey}_${scope}`;
     }
 
@@ -344,7 +344,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = getCurrentCompanyName() || (isSuperAdmin() ? "All Companies" : "No Company");
+      const companyName = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyName() || "No Company");
 
       box.innerHTML = `<i class="fas fa-user-circle"></i> ${role} | ${companyName}`;
 
@@ -434,13 +434,13 @@
     function buildAccessParams(forceCompany = false) {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if ((forceCompany || !isSuperAdmin()) && companyId !== null && !Number.isNaN(companyId)) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 

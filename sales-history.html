@@ -629,7 +629,7 @@
       }
 
       if (!isSuperAdmin()) {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         if (companyId === null || Number.isNaN(companyId)) {
           showToast("Company access missing", "error");
           window.location.href = "login.html";
@@ -726,7 +726,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = isSuperAdmin() ? "All Companies" : (getCurrentCompanyName() || "No Company");
+      const companyName = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyName() || "No Company");
       box.innerHTML = `<i class="fas fa-user-circle"></i> ${role} | ${companyName}`;
     }
 
@@ -735,7 +735,7 @@
       if (!chip) return;
 
       if (isSuperAdmin()) {
-        chip.textContent = "Company: Super Admin View (All Companies)";
+        chip.textContent = "Company: Please select a company";
         return;
       }
 
@@ -801,9 +801,9 @@
     }
 
     function filterCompanySales(items) {
-      if (isSuperAdmin()) return Array.isArray(items) ? items : [];
+      
 
-      const currentCompanyId = getCurrentCompanyId();
+      const currentCompanyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       return (Array.isArray(items) ? items : []).filter((item) => {
         return getItemCompanyId(item) === currentCompanyId;
       });
@@ -829,7 +829,7 @@
 
     async function loadSalesHistory() {
       try {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         const params = new URLSearchParams();
         const actingUserId = getCurrentUserId();
 
@@ -837,7 +837,7 @@
           params.set("actingUserId", String(actingUserId));
         }
 
-        if (!isSuperAdmin() && companyId !== null) {
+        if (companyId !== null && !Number.isNaN(companyId)) {
           params.set("companyId", String(companyId));
         }
 

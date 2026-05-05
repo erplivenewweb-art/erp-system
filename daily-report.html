@@ -1163,7 +1163,7 @@
       }
 
       if (!isSuperAdmin()) {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         if (companyId === null || Number.isNaN(companyId)) {
           showToast("Company access missing", "error");
           window.location.href = "login.html";
@@ -1175,8 +1175,8 @@
     }
 
     function companyScopedKey(baseKey) {
-      const companyId = getCurrentCompanyId();
-      const scope = isSuperAdmin() ? "superadmin" : (companyId ?? "no_company");
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      const scope = companyId ?? (isSuperAdmin() ? "select_company" : "no_company");
       return `${baseKey}_${scope}`;
     }
 
@@ -1253,7 +1253,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "No Company");
+      const companyName = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "No Company");
       box.innerHTML = `<i class="fas fa-user-circle"></i> ${escapeHtml(role)} | ${escapeHtml(companyName)}`;
     }
 
@@ -1262,7 +1262,7 @@
       if (!chip) return;
 
       if (isSuperAdmin()) {
-        chip.textContent = "Company: Super Admin View (All Companies)";
+        chip.textContent = "Company: Please select a company";
         return;
       }
 
@@ -1429,13 +1429,13 @@
     function buildAccessParams(forceCompany = false) {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if ((forceCompany || !isSuperAdmin()) && companyId !== null && !Number.isNaN(companyId)) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 
@@ -1555,7 +1555,7 @@
       if (!pdfHost || !report) return null;
 
       const highlights = buildModuleHighlights(report);
-      const companyLabel = isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "Unknown");
+      const companyLabel = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "Unknown");
 
       const summaryCards = [
         ["🛠️ Process", String(report.summary.totalProcessCount || 0)],
@@ -1836,7 +1836,7 @@
           <td>${escapeHtml(item.product_name || "-")}</td>
           <td>${escapeHtml(item.size || "-")}</td>
           <td>${formatQty(item.weight || 0)}</td>
-          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "-")))}</td>
+          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "-")))}</td>
         </tr>
       `);
       setSectionMeta("stickerSummaryMeta", `${report.sections.sticker.totalCreated || 0} sticker related entries found`);
@@ -1869,7 +1869,7 @@
           <td>${escapeHtml(item.size || "-")}</td>
           <td>${formatQty(item.weight || 0)}</td>
           <td>${escapeHtml(item.invoice_number || "-")}</td>
-          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "-")))}</td>
+          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "-")))}</td>
         </tr>
       `);
 
@@ -1917,7 +1917,7 @@
           <td>${formatMoney(item.customer_total_amount || item.total_amount || 0)}</td>
           <td>${formatMoney(item.company_total_amount || 0)}</td>
           <td>${formatMoney(item.employee_margin_amount || 0)}</td>
-          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "-")))}</td>
+          <td>${escapeHtml(item.company_name || (isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "-")))}</td>
         </tr>
       `);
       setSectionMeta(
@@ -1943,7 +1943,7 @@
             <td><span class="status-pill ${pillType}">${escapeHtml(label)}</span></td>
             <td>${escapeHtml(item.return_reason || "-")}</td>
             <td>${formatQty(item.weight || 0)}</td>
-            <td>${escapeHtml(item.company_name || (isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "-")))}</td>
+            <td>${escapeHtml(item.company_name || (isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "-")))}</td>
           </tr>
         `;
       });
@@ -2060,7 +2060,7 @@
 
       return [
         `📊 DAILY REPORT - ${formatReportDatePretty(report.date)}`,
-        `🏢 ${isSuperAdmin() ? "All Companies" : (getCurrentCompanyNameSafe() || "Unknown")}`,
+        `🏢 ${isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyNameSafe() || "Unknown")}`,
         "",
         `🛠️ Process:`,
         `- ${report.summary.totalProcessCount || 0} lots completed.${firstLots}`,

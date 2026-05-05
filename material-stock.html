@@ -680,7 +680,7 @@
       }
 
       if (!isSuperAdmin()) {
-        const companyId = getCurrentCompanyId();
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         if (companyId === null || Number.isNaN(companyId)) {
           showToast("Company access missing", "error");
           window.location.href = "login.html";
@@ -779,13 +779,13 @@
     function buildProtectedParams(forceCompany = false) {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
-      const companyId = getCurrentCompanyId();
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
 
       if (actingUserId !== null && !Number.isNaN(actingUserId)) {
         params.set("actingUserId", String(actingUserId));
       }
 
-      if ((forceCompany || !isSuperAdmin()) && companyId !== null && !Number.isNaN(companyId)) {
+      if (companyId !== null && !Number.isNaN(companyId)) {
         params.set("companyId", String(companyId));
       }
 
@@ -803,7 +803,7 @@
       }
 
       const role = String(user.role || "-");
-      const companyName = isSuperAdmin() ? "All Companies" : (getCurrentCompanyName() || "No Company");
+      const companyName = isSuperAdmin() ? ((typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "") || "Please select a company") : (getCurrentCompanyName() || "No Company");
       box.innerHTML = `<i class="fas fa-user-circle"></i> ${escapeHtml(role)} | ${escapeHtml(companyName)}`;
     }
 
@@ -812,7 +812,7 @@
       if (!chip) return;
 
       chip.textContent = isSuperAdmin()
-        ? "Company: Super Admin View (All Companies)"
+        ? "Company: Please select a company"
         : `Company: ${getCurrentCompanyName() || "Unknown Company"}`;
     }
 
