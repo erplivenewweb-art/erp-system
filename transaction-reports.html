@@ -942,8 +942,16 @@
     }
 
     async function fetchReport(url, params) {
-      const res = await fetch(`${API_BASE}${url}?${params.toString()}`, { cache: "no-store" });
-      const data = await res.json();
+      const query = params.toString();
+      const reportUrl = `${API_BASE}${url}${query ? `?${query}` : ""}`;
+      const res = await fetch(reportUrl, { cache: "no-store", credentials: "include" });
+      const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : { success: false, message: await res.text() };
+      if (!res.ok) {
+        throw new Error(data.message || `Report request failed (${res.status})`);
+      }
       if (!data.success) {
         throw new Error(data.message || "Report fetch failed");
       }

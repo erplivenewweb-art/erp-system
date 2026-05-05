@@ -3896,7 +3896,45 @@ async function ensureSchema() {
   }
 
   if (await tableExists("transaction_lines")) {
+    await addColumnIfMissing("transaction_lines", "line_no", "INT DEFAULT 1");
+    await addColumnIfMissing("transaction_lines", "item_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("transaction_lines", "item_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_lines", "barcode", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_lines", "lot_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_lines", "metal_type", "VARCHAR(20) DEFAULT ''");
+    await addColumnIfMissing("transaction_lines", "purity", "DECIMAL(8,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "gross_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "net_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "fine_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "rate_per_gram", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "metal_value", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "making_charge", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "hallmark_charge", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "labour_charge", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "other_charge", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "discount_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "gst_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "line_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "remarks", "TEXT DEFAULT NULL");
     await addIndexIfMissing("transaction_lines", "idx_txn_lines_transaction", "(transaction_id)");
+  }
+
+  if (await tableExists("transaction_settlements")) {
+    await addColumnIfMissing("transaction_settlements", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_settlements", "settlement_type", "VARCHAR(40) DEFAULT 'CASH'");
+    await addColumnIfMissing("transaction_settlements", "against_transaction_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_settlements", "against_invoice_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_settlements", "against_voucher_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_settlements", "cash_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_settlements", "metal_type", "VARCHAR(20) DEFAULT ''");
+    await addColumnIfMissing("transaction_settlements", "gross_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_settlements", "fine_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_settlements", "purity", "DECIMAL(8,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_settlements", "rate_basis", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_settlements", "settlement_date", "DATE DEFAULT NULL");
+    await addColumnIfMissing("transaction_settlements", "remarks", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("transaction_settlements", "created_by", "INT DEFAULT NULL");
   }
 
   if (await tableExists("cash_ledger")) {

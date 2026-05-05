@@ -1863,8 +1863,10 @@
       showToast("History data has been loaded into the form. Saving will create a new transaction.", "info");
     }
 
-    function deleteTransaction(id) {
-      showToast("The delete API is not enabled yet.", "info");
+    function showTransactionActionStatus(id) {
+      const txnId = Number(id || 0);
+      const suffix = txnId ? ` Reference #${txnId}.` : "";
+      showToast(`Transaction delete is coming soon with approval controls.${suffix}`, "info");
     }
 
     function updateTransactionPagination() {
@@ -1947,7 +1949,7 @@
                 <div class="history-actions">
                   ${canReuse
                     ? `<button type="button" class="primary-btn" onclick="editTransaction(${item.id})">Reuse</button>`
-                    : `<button type="button" class="secondary-btn" onclick="deleteTransaction(${item.id})">Info</button>`}
+                    : `<button type="button" class="secondary-btn" onclick="showTransactionActionStatus(${item.id})">Coming Soon</button>`}
                 </div>
               </td>
             </tr>
