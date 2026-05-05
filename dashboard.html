@@ -20,15 +20,15 @@
     .summary-row.summary-row-6 {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 16px;
-      margin-bottom: 22px;
+      gap: 18px;
+      margin-bottom: 24px;
     }
 
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 22px;
+      gap: 18px;
+      margin-bottom: 24px;
     }
 
     .panel {
@@ -147,12 +147,16 @@
 
     .table-wrap {
       overflow-x: auto;
+      overflow-y: hidden;
       border: 1px solid #e5e7eb;
       border-radius: 14px;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
     }
 
     .dashboard-table {
       width: 100%;
+      min-width: 640px;
       border-collapse: collapse;
       background: #fff;
     }
@@ -311,8 +315,8 @@
     .dashboard-upgrade-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
+      gap: 16px;
+      margin-bottom: 18px;
     }
 
     .dashboard-upgrade-card {
@@ -327,6 +331,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      min-width: 0;
     }
 
     .dashboard-upgrade-icon {
@@ -370,7 +375,7 @@
     }
 
     .billing-summary-panel {
-      margin-bottom: 16px;
+      margin-bottom: 20px;
       border-color: rgba(201, 157, 81, 0.22);
     }
 
@@ -412,8 +417,8 @@
     .smart-highlight-alerts {
       display: none;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 14px;
+      gap: 12px;
+      margin-bottom: 20px;
     }
 
     .smart-highlight-alerts.active {
@@ -507,15 +512,15 @@
     .dashboard-detail-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-bottom: 16px;
+      gap: 18px;
+      margin-bottom: 24px;
     }
 
     .dashboard-chart-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-bottom: 22px;
+      gap: 18px;
+      margin-bottom: 24px;
     }
 
     .dashboard-chart-panel {
@@ -536,10 +541,18 @@
     .chart-canvas-wrap {
       height: 240px;
       position: relative;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
       border: 1px solid #eee1c8;
       border-radius: 12px;
       padding: 10px;
       background: linear-gradient(180deg, #fffdf8, #fff);
+    }
+
+    .chart-canvas-wrap canvas {
+      display: block;
+      max-width: 100%;
     }
 
     .chart-fallback {
@@ -568,7 +581,7 @@
     .compact-detail-table {
       border-color: #eee1c8;
       border-radius: 12px;
-      overflow-x: hidden;
+      overflow-x: auto;
     }
 
     .compact-detail-table table {
@@ -602,7 +615,7 @@
     }
 
     .smart-alert-panel {
-      margin-bottom: 16px;
+      margin-bottom: 22px;
       padding: 14px;
     }
 
@@ -654,15 +667,30 @@
     }
 
     @media (max-width: 900px) {
-      .summary-row.summary-row-6,
       .dashboard-upgrade-grid,
       .lot-status-grid,
-      .billing-summary-metrics,
-      .smart-highlight-alerts,
+      .billing-summary-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .summary-row.summary-row-6 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
       .dashboard-detail-grid,
       .dashboard-chart-grid,
       .grid-2 {
         grid-template-columns: 1fr;
+      }
+
+      .smart-highlight-alerts.active {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .smart-highlight-alerts {
+        gap: 12px;
       }
 
       .summary-card {
@@ -670,7 +698,7 @@
       }
 
       .chart-canvas-wrap {
-        height: 210px;
+        height: 230px;
       }
 
       .summary-icon {
@@ -691,6 +719,135 @@
       .profile-box {
         min-width: 100%;
         text-align: left;
+      }
+
+      .panel h3,
+      .dashboard-chart-panel h3,
+      .dashboard-detail-panel h3,
+      .smart-alert-panel h3,
+      .billing-summary-panel h3 {
+        font-size: 20px;
+      }
+
+      .smart-highlight-title {
+        margin-top: 8px;
+        font-size: 14px;
+      }
+
+      .smart-highlight-alert {
+        min-height: 64px;
+        padding: 14px;
+      }
+
+      .smart-highlight-alert span {
+        font-size: 14px;
+      }
+
+      .smart-highlight-alert strong {
+        min-width: 44px;
+        padding: 7px 11px;
+        font-size: 13px;
+        text-align: center;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .summary-row.summary-row-6,
+      .dashboard-upgrade-grid,
+      .lot-status-grid,
+      .billing-summary-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .section-box,
+      .panel,
+      .billing-summary-panel,
+      .smart-alert-panel {
+        margin-bottom: 18px;
+      }
+
+      .dashboard-upgrade-card,
+      .summary-card {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .dashboard-upgrade-card p,
+      .summary-card p {
+        font-size: 20px;
+      }
+
+      .dashboard-upgrade-card h4,
+      .summary-card h4 {
+        font-size: 12px;
+      }
+
+      .dashboard-table th,
+      .dashboard-table td {
+        padding: 11px 12px;
+        font-size: 13px;
+      }
+
+      .chart-canvas-wrap {
+        height: 220px;
+        padding: 8px;
+      }
+
+      .top-left .title {
+        text-align: left;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .summary-row.summary-row-6,
+      .dashboard-upgrade-grid,
+      .lot-status-grid,
+      .billing-summary-metrics {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .dashboard-upgrade-grid,
+      .summary-row.summary-row-6,
+      .dashboard-chart-grid,
+      .dashboard-detail-grid,
+      .grid-2 {
+        margin-bottom: 20px;
+      }
+
+      .dashboard-upgrade-card,
+      .summary-card,
+      .billing-summary-metric,
+      .smart-highlight-alert {
+        padding: 14px;
+      }
+
+      .dashboard-upgrade-card,
+      .summary-card {
+        min-height: auto;
+      }
+
+      .panel h3,
+      .dashboard-chart-panel h3,
+      .dashboard-detail-panel h3,
+      .smart-alert-panel h3,
+      .billing-summary-panel h3 {
+        font-size: 21px;
+      }
+
+      .chart-canvas-wrap {
+        height: 205px;
+      }
+
+      .dashboard-table {
+        min-width: 600px;
+      }
+
+      .dashboard-table th,
+      .dashboard-table td {
+        padding: 10px;
       }
     }
   </style>

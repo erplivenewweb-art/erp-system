@@ -35,10 +35,13 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(228, 187, 108, 0.16), transparent 22%),
     radial-gradient(circle at top right, rgba(64, 95, 149, 0.12), transparent 24%),
@@ -108,7 +111,9 @@ textarea::placeholder {
   display: flex;
   min-height: 100vh;
   width: 100%;
+  max-width: 100%;
   position: relative;
+  overflow-x: clip;
 }
 
 .sidebar {
@@ -257,6 +262,7 @@ textarea::placeholder {
   padding: 18px;
   transition: padding 0.28s ease;
   min-width: 0;
+  max-width: 100%;
 }
 
 .topbar {
@@ -279,6 +285,7 @@ textarea::placeholder {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .hamburger {
@@ -315,12 +322,14 @@ textarea::placeholder {
   font-weight: 800;
   letter-spacing: -0.02em;
   color: #111827;
+  overflow-wrap: anywhere;
 }
 
 .title p {
   margin-top: 4px;
   font-size: 13px;
   color: var(--erp-text-soft);
+  overflow-wrap: anywhere;
 }
 
 .top-right select,
@@ -394,6 +403,7 @@ textarea::placeholder {
   margin-bottom: 16px;
   padding: 20px;
   border-radius: 22px;
+  min-width: 0;
 }
 
 .section-box::before,
@@ -437,6 +447,7 @@ textarea::placeholder {
 .summary-card {
   position: relative;
   overflow: hidden;
+  min-width: 0;
   min-height: 98px;
   padding: 18px;
   border-radius: 20px;
@@ -479,6 +490,7 @@ textarea::placeholder {
 .panel {
   position: relative;
   overflow: hidden;
+  min-width: 0;
   min-height: 320px;
   padding: 16px;
   border-radius: 22px;
@@ -662,6 +674,12 @@ textarea::placeholder {
   gap: 14px;
 }
 
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .dashboard-grid,
 .stats-grid {
   display: grid;
@@ -752,6 +770,7 @@ textarea::placeholder {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .btn-row {
@@ -859,12 +878,14 @@ textarea::placeholder {
 .approval-table-wrap {
   overflow-x: auto;
   overflow-y: hidden;
+  max-width: 100%;
   margin-top: 14px;
   border-radius: 18px;
   border: 1px solid var(--erp-border);
   background: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 table {
@@ -921,6 +942,7 @@ table tbody tr:hover {
 .history-card {
   border-radius: 18px;
   padding: 16px;
+  min-width: 0;
 }
 
 .sub-card {
@@ -1045,6 +1067,7 @@ table tbody tr:hover {
 
 .scanner-right {
   flex: 1;
+  min-width: 0;
 }
 
 .summary {
@@ -1235,6 +1258,15 @@ table tbody tr:hover {
   pointer-events: auto;
 }
 
+.modal,
+.modal-content,
+.popup,
+.popup-content,
+.dialog,
+.dialog-content {
+  max-width: calc(100vw - 32px);
+}
+
 @keyframes fadeInPage {
   from {
     opacity: 0;
@@ -1248,6 +1280,18 @@ table tbody tr:hover {
 }
 
 @media (max-width: 1200px) {
+  .dashboard-grid,
+  .stats-grid,
+  .summary-row,
+  .report-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid-3,
+  .stock-search-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .compact-grid {
     grid-template-columns: 1fr;
   }
@@ -1255,31 +1299,13 @@ table tbody tr:hover {
   .top-filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .scanner-layout {
+    gap: 16px;
+  }
 }
 
 @media (max-width: 1000px) {
-  .summary-row,
-  .grid-2,
-  .form-grid,
-  .dashboard-grid,
-  .stats-grid,
-  .top-filter-bar,
-  .report-filter-row,
-  .report-summary-row,
-  .stock-search-row,
-  .lot-report-row {
-    grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .top-right {
-    width: 100%;
-  }
-
   .sidebar {
     position: absolute;
     inset: 0 auto 0 0;
@@ -1296,6 +1322,32 @@ table tbody tr:hover {
   .sidebar:not(.collapsed) {
     transform: translateX(0);
   }
+}
+
+@media (max-width: 900px) {
+  .summary-row,
+  .grid-2,
+  .form-grid,
+  .form-grid-3,
+  .dashboard-grid,
+  .stats-grid,
+  .top-filter-bar,
+  .report-filter-row,
+  .report-summary-row,
+  .stock-search-row,
+  .lot-report-row {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .top-left,
+  .top-right {
+    width: 100%;
+  }
 
   .scanner-layout {
     flex-direction: column;
@@ -1310,6 +1362,10 @@ table tbody tr:hover {
   .lot-report-row button {
     width: 100%;
   }
+
+  .panel {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1319,6 +1375,10 @@ table tbody tr:hover {
 
   .main {
     padding: 12px;
+  }
+
+  .layout {
+    min-width: 0;
   }
 
   .topbar,
@@ -1355,6 +1415,7 @@ table tbody tr:hover {
   .topbar {
     gap: 12px;
     padding: 14px;
+    margin-bottom: 12px;
   }
 
   .top-right,
@@ -1385,10 +1446,66 @@ table tbody tr:hover {
     padding: 16px;
   }
 
+  .section-box {
+    margin-bottom: 12px;
+  }
+
+  .section-box h2 {
+    font-size: 21px;
+  }
+
+  .panel h3 {
+    font-size: 18px;
+  }
+
+  .summary-card {
+    min-height: 86px;
+  }
+
+  .summary-card p {
+    font-size: 24px;
+  }
+
+  .primary-btn,
+  .secondary-btn,
+  .mini-btn,
+  .btn-blue,
+  .add-btn,
+  .action-btn-small,
+  .remove-btn,
+  .top-right select,
+  .top-right button,
+  .refresh-btn,
+  .logout-btn,
+  .input-box input,
+  .input-box select,
+  .input-box textarea,
+  .report-filter-row input,
+  .report-filter-row select,
+  .stock-search-row input,
+  .stock-search-row select,
+  .lot-report-row input,
+  .lot-report-row select,
+  .top-filter-bar input,
+  .top-filter-bar select {
+    min-height: 46px;
+  }
+
+  .primary-btn,
+  .secondary-btn,
+  .mini-btn,
+  .btn-blue,
+  .add-btn,
+  .action-btn-small,
+  .remove-btn {
+    touch-action: manipulation;
+  }
+
   .table-wrap,
   .report-table-wrap,
   .approval-table-wrap {
     margin-top: 12px;
+    border-radius: 14px;
   }
 
   .table-wrap > table,
@@ -1409,8 +1526,164 @@ table tbody tr:hover {
     min-height: 44px;
   }
 
+  .modal,
+  .modal-content,
+  .popup,
+  .popup-content,
+  .dialog,
+  .dialog-content {
+    width: calc(100vw - 24px);
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .sticker-print-trigger {
     right: 16px;
     bottom: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 14px;
+  }
+
+  .main {
+    padding: 8px;
+  }
+
+  .topbar,
+  .section-box,
+  .panel,
+  .sub-card,
+  .compact-box,
+  .summary-card,
+  .report-summary-card,
+  .history-card,
+  .scanner-left,
+  .scanner-right {
+    border-radius: 14px;
+  }
+
+  .topbar {
+    padding: 12px;
+  }
+
+  .hamburger {
+    width: 46px;
+    height: 46px;
+    border-radius: 13px;
+  }
+
+  .title h1 {
+    font-size: 22px;
+  }
+
+  .title p {
+    font-size: 12px;
+  }
+
+  .section-box,
+  .panel,
+  .sub-card,
+  .compact-box,
+  .summary-card,
+  .report-summary-card,
+  .history-card,
+  .scanner-left,
+  .scanner-right,
+  .alert-box {
+    padding: 12px;
+  }
+
+  .section-box h2 {
+    font-size: 19px;
+  }
+
+  .summary-card p {
+    font-size: 21px;
+  }
+
+  .form-grid,
+  .form-grid-3,
+  .dashboard-grid,
+  .stats-grid,
+  .summary-row,
+  .grid-2,
+  .top-filter-bar,
+  .report-filter-row,
+  .report-summary-row,
+  .stock-search-row,
+  .lot-report-row {
+    gap: 10px;
+  }
+
+  .input-box label {
+    font-size: 12px;
+  }
+
+  .input-box input,
+  .input-box select,
+  .input-box textarea,
+  .report-filter-row input,
+  .report-filter-row select,
+  .stock-search-row input,
+  .stock-search-row select,
+  .lot-report-row input,
+  .lot-report-row select,
+  .top-filter-bar input,
+  .top-filter-bar select {
+    padding: 10px 11px;
+    border-radius: 12px;
+  }
+
+  .primary-btn,
+  .secondary-btn,
+  .mini-btn,
+  .btn-blue,
+  .add-btn {
+    width: 100%;
+    padding: 11px 12px;
+    border-radius: 12px;
+  }
+
+  .table-wrap > table,
+  .report-table-wrap > table,
+  .approval-table-wrap > table {
+    min-width: 600px;
+  }
+
+  table th,
+  table td {
+    padding: 9px;
+    font-size: 12px;
+  }
+
+  .sidebar {
+    max-width: calc(100vw - 28px);
+  }
+
+  .sidebar-inner {
+    width: min(268px, calc(100vw - 28px));
+    padding: 16px 10px 20px;
+  }
+
+  .menu {
+    gap: 6px;
+  }
+
+  .menu a {
+    padding: 11px 12px;
+    border-radius: 12px;
+  }
+
+  .sticker-print-trigger {
+    right: 12px;
+    bottom: 12px;
+    width: 52px;
+    height: 52px;
+    font-size: 21px;
   }
 }
