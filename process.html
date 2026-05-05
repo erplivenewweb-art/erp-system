@@ -136,6 +136,37 @@
       white-space: nowrap;
     }
 
+    .lot-status-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .lot-status-badge.ready {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .lot-status-badge.completed {
+      background: #e0f2fe;
+      color: #075985;
+    }
+
+    .lot-complete-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
     .additive-return-control {
       display: flex;
       gap: 8px;
@@ -332,6 +363,7 @@
                       <th>Final Weight</th>
                       <th>Used Weight</th>
                       <th>Balance</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody id="processTableBody"></tbody>
@@ -355,6 +387,16 @@
                 <span class="process-guide-label">Progress</span>
                 <span id="processGuideProgress" class="process-guide-value">0/6</span>
               </div>
+              <div class="process-guide-item">
+                <span class="process-guide-label">Lot Status</span>
+                <span id="processLotStatus" class="process-guide-value">OPEN</span>
+              </div>
+            </div>
+            <div class="lot-complete-row">
+              <span id="processLotActionHint" class="additive-issue-note">Select a lot to see completion status.</span>
+              <button id="completeLotButton" class="primary-btn" type="button" onclick="completeCurrentProcessLot()" style="display:none;">
+                Complete Lot
+              </button>
             </div>
           </div>
 
@@ -815,6 +857,10 @@
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processGuideData = null;
+    let lotAdditiveStatus = {
+      pendingWeight: 0,
+      loaded: false
+    };
     let additiveIssueData = {
       totalGiven: 0,
       totalReturned: 0,
@@ -961,6 +1007,7 @@
         finalWeight: Number(item?.finalWeight ?? item?.final_weight ?? 0),
         totalKhadiCount: Number(item?.totalKhadiCount ?? 1),
         expectedTotalQty: Number(item?.expectedTotalQty ?? item?.expected_total_qty ?? 0),
+        status: String(item?.status || "OPEN").trim().toUpperCase() || "OPEN",
         company_id: item?.company_id ?? getCurrentCompanyId(),
         savedAt: item?.savedAt ?? item?.saved_at ?? item?.updated_at ?? item?.created_at ?? ""
       };
@@ -1026,6 +1073,37 @@
       };
     }
 
+    function getSelectedProcessLot() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      if (!lotNo) return null;
+      return lotData.find((lot) => String(lot.lotNo || "").trim() === lotNo) || null;
+    }
+
+    function getSelectedLotStatusLabel() {
+      const lot = getSelectedProcessLot();
+      const rawStatus = String(lot?.status || "").trim().toUpperCase();
+
+      if (rawStatus === "COMPLETED") return "COMPLETED";
+      if (isCompleteLotAvailable()) return "READY TO COMPLETE";
+      return "OPEN";
+    }
+
+    function isCompleteLotAvailable() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const lot = getSelectedProcessLot();
+      const rawStatus = String(lot?.status || "").trim().toUpperCase();
+      const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
+
+      return Boolean(
+        lotNo &&
+        rawStatus !== "COMPLETED" &&
+        !currentOpenProcessStep &&
+        processGuideData?.isReadyToComplete &&
+        lotAdditiveStatus.loaded &&
+        pendingKdm <= 0.0009
+      );
+    }
+
     function prefillSuggestedProcessName(nextStep = "") {
       if (currentOpenProcessStep) return;
 
@@ -1040,6 +1118,9 @@
       const completedEl = document.getElementById("processGuideCompleted");
       const nextEl = document.getElementById("processGuideNext");
       const progressEl = document.getElementById("processGuideProgress");
+      const statusEl = document.getElementById("processLotStatus");
+      const completeButton = document.getElementById("completeLotButton");
+      const actionHint = document.getElementById("processLotActionHint");
       if (!completedEl || !nextEl || !progressEl) return;
 
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
@@ -1047,15 +1128,41 @@
       const nextStep = processGuideData?.nextStep || "";
       const progress = processGuideData?.progress || "0/0";
       const isReady = Boolean(processGuideData?.isReadyToComplete);
+      const canCompleteLot = isCompleteLotAvailable();
+      const lotStatus = lotNo ? getSelectedLotStatusLabel() : "OPEN";
+      const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
 
       completedEl.textContent = lotNo
         ? (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed"))
         : "Select a lot";
       nextEl.textContent = lotNo
-        ? (isReady ? "Ready to Complete Lot" : (nextStep || "-"))
+        ? (lotStatus === "COMPLETED" ? "Ready for Sticker" : (isReady ? "Ready to Complete Lot" : (nextStep || "-")))
         : "-";
       nextEl.classList.toggle("process-guide-ready", isReady);
       progressEl.textContent = lotNo ? progress : "0/0";
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="lot-status-badge ${lotStatus === "COMPLETED" ? "completed" : canCompleteLot ? "ready" : ""}">${escapeHtml(lotStatus)}</span>`;
+      }
+      if (completeButton) {
+        completeButton.style.display = canCompleteLot ? "" : "none";
+      }
+      if (actionHint) {
+        if (!lotNo) {
+          actionHint.textContent = "Select a lot to see completion status.";
+        } else if (lotStatus === "COMPLETED") {
+          actionHint.textContent = "Ready for Sticker";
+        } else if (currentOpenProcessStep) {
+          actionHint.textContent = "Complete the open step before completing this lot.";
+        } else if (!isReady) {
+          actionHint.textContent = "Finish the final process step before completing this lot.";
+        } else if (!lotAdditiveStatus.loaded) {
+          actionHint.textContent = "Checking KDM/Solder pending status.";
+        } else if (pendingKdm > 0.0009) {
+          actionHint.textContent = `Return pending KDM/Solder weight ${pendingKdm.toFixed(3)}g before completing.`;
+        } else {
+          actionHint.textContent = "This lot can be completed now.";
+        }
+      }
 
       prefillSuggestedProcessName(nextStep);
       renderAdditiveMaterialFields();
@@ -1388,6 +1495,38 @@
       renderAdditiveIssueList();
     }
 
+    async function loadLotAdditiveStatus(lotNo = "") {
+      const cleanLotNo = String(lotNo || document.getElementById("stepLotNo")?.value || "").trim();
+      if (!cleanLotNo) {
+        lotAdditiveStatus = { pendingWeight: 0, loaded: false };
+        renderProcessGuide();
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        params.set("lotNo", cleanLotNo);
+        const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "KDM status fetch failed");
+        }
+
+        lotAdditiveStatus = {
+          pendingWeight: Number(data?.pendingWeight ?? data?.pending_weight ?? 0),
+          loaded: true
+        };
+      } catch (error) {
+        console.log("Lot additive status load error:", error);
+        lotAdditiveStatus = { pendingWeight: 0, loaded: false };
+      }
+
+      renderProcessGuide();
+    }
+
     async function issueAdditiveMaterial() {
       if (!isAdditiveMaterialStepActive()) return;
 
@@ -1440,6 +1579,7 @@
         if (givenInput) givenInput.value = "";
         if (notesInput) notesInput.value = "";
         await loadAdditiveIssues(lotNo);
+        await loadLotAdditiveStatus(lotNo);
       } catch (error) {
         console.log("Additive issue save error:", error);
         showToast(error.message || "KDM/Solder issue failed", "error", "Issue Failed");
@@ -1485,6 +1625,7 @@
 
         showToast(data?.message || "KDM/Solder returned successfully", "success", "Returned");
         await loadAdditiveIssues();
+        await loadLotAdditiveStatus(issue.lotNo || document.getElementById("stepLotNo")?.value?.trim() || "");
         await loadProcessSteps(document.getElementById("stepLotNo")?.value?.trim() || "");
       } catch (error) {
         console.log("Additive issue return error:", error);
@@ -1797,13 +1938,14 @@
       tbody.innerHTML = "";
 
       if (!lotData.length) {
-        tbody.innerHTML = `<tr><td colspan="8">No process lots found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9">No process lots found</td></tr>`;
         return;
       }
 
       lotData.forEach((lot) => {
         const used = getUsedWeightByLot(lot.lotNo);
         const balance = Number(lot.finalWeight || 0) - used;
+        const status = String(lot.status || "OPEN").trim().toUpperCase() === "COMPLETED" ? "COMPLETED" : "OPEN";
 
         tbody.innerHTML += `
           <tr onclick="selectProcessLotForSteps('${encodeURIComponent(lot.lotNo || "")}')" style="cursor:pointer;">
@@ -1815,6 +1957,7 @@
             <td>${Number(lot.finalWeight || 0).toFixed(3)}</td>
             <td>${used.toFixed(3)}</td>
             <td>${balance.toFixed(3)}</td>
+            <td><span class="lot-status-badge ${status === "COMPLETED" ? "completed" : ""}">${status}</span></td>
           </tr>
         `;
       });
@@ -1938,6 +2081,7 @@
       if (!lotNo) {
         currentOpenProcessStep = null;
         processGuideData = null;
+        lotAdditiveStatus = { pendingWeight: 0, loaded: false };
         selectedRecoveryStockIds.clear();
         resetAdditiveIssueData();
         setBaseProcessInputWeight(0);
@@ -2000,6 +2144,7 @@
         processStepData = [];
         currentOpenProcessStep = null;
         processGuideData = null;
+        lotAdditiveStatus = { pendingWeight: 0, loaded: false };
         resetAdditiveIssueData();
         renderProcessStepTable();
         renderProcessLossSummary();
@@ -2013,6 +2158,7 @@
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
       await loadProcessGuide(lotNo);
+      await loadLotAdditiveStatus(lotNo);
       await loadAdditiveIssues(lotNo);
     }
 
@@ -2028,6 +2174,51 @@
       const input = document.getElementById("stepLotNo");
       if (input) input.value = lotNo;
       await loadProcessStepContext();
+    }
+
+    async function completeCurrentProcessLot() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+
+      if (!lotNo) {
+        showToast("Please select a lot first.", "error", "Missing Lot");
+        return;
+      }
+
+      if (!isCompleteLotAvailable()) {
+        showToast("This lot is not ready to complete yet.", "error", "Lot Not Ready");
+        renderProcessGuide();
+        return;
+      }
+
+      const button = document.getElementById("completeLotButton");
+      if (button) button.disabled = true;
+
+      try {
+        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/complete`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAuthPayload({}))
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Lot completion failed");
+        }
+
+        showToast("Lot completed. Ready for Sticker.", "success", "Ready for Sticker");
+        await loadProcessData();
+        renderProcessTable();
+        loadKarigarLotDropdown();
+        await loadProcessStepContext();
+      } catch (error) {
+        console.log("Complete lot error:", error);
+        showToast(error.message || "Lot completion failed", "error", "Complete Lot Failed");
+      } finally {
+        if (button) button.disabled = false;
+        renderProcessGuide();
+      }
     }
 
     async function saveOrCompleteProcessStep() {

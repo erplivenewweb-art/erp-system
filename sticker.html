@@ -421,6 +421,7 @@
     let processTypes = [];
     let editingPendingBarcode = null;
     let lotOptions = [];
+    let processLotStatusMap = new Map();
 
     function getLoggedInUser() {
       try {
@@ -571,6 +572,22 @@
       }
 
       return true;
+    }
+
+    function buildAuthParams() {
+      const params = new URLSearchParams();
+      const companyId = getCurrentCompanyId();
+      const actingUserId = getCurrentUserId();
+
+      if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+        params.set("actingUserId", String(actingUserId));
+      }
+
+      if (!isSuperAdmin() && companyId !== null && !Number.isNaN(companyId)) {
+        params.set("companyId", String(companyId));
+      }
+
+      return params;
     }
 
     function renderProfileBox() {
@@ -837,6 +854,55 @@
       }
     }
 
+    function getProcessLotStatus(lotValue) {
+      const cleanLot = normalizeText(lotValue);
+      return String(processLotStatusMap.get(cleanLot) || "").trim().toUpperCase();
+    }
+
+    async function loadProcessLotStatuses() {
+      try {
+        const params = buildAuthParams();
+        const res = await fetch(`${API_BASE}/process/data${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Process lot status fetch failed");
+        }
+
+        processLotStatusMap = new Map();
+        const lots = Array.isArray(data?.lots) ? data.lots : [];
+        lots.forEach((lot) => {
+          const lotNo = normalizeText(lot?.lotNo ?? lot?.lot_no ?? "");
+          if (!lotNo) return;
+          processLotStatusMap.set(lotNo, String(lot?.status || "OPEN").trim().toUpperCase() || "OPEN");
+        });
+      } catch (error) {
+        console.log("Process lot status load error:", error);
+        processLotStatusMap = new Map();
+      }
+    }
+
+    async function validateStickerLotCompleted(lotValue) {
+      const cleanLot = normalizeText(lotValue);
+      if (!cleanLot) {
+        showToast("Please enter the lot number.", "error");
+        return false;
+      }
+
+      if (!processLotStatusMap.has(cleanLot)) {
+        await loadProcessLotStatuses();
+      }
+
+      if (getProcessLotStatus(cleanLot) !== "COMPLETED") {
+        showToast(`Lot ${cleanLot} is not completed. Complete the lot before creating stickers.`, "error");
+        return false;
+      }
+
+      return true;
+    }
+
     function collectLotsFromData() {
       const lots = ["1", "5"];
 
@@ -847,6 +913,10 @@
 
       pendingStickerItems.forEach((item) => {
         const lot = getLotValue(item);
+        if (lot) lots.push(lot);
+      });
+
+      processLotStatusMap.forEach((_, lot) => {
         if (lot) lots.push(lot);
       });
 
@@ -956,6 +1026,7 @@
         const data = await res.json();
         stockItems = Array.isArray(data) ? data : [];
 
+        await loadProcessLotStatuses();
         collectLotsFromData();
         renderLotButtons();
         renderHistory();
@@ -1015,7 +1086,7 @@
       renderLotButtons();
     }
 
-    function addStickerItem() {
+    async function addStickerItem() {
       const companyId = getCurrentCompanyId();
 
       if (!isSuperAdmin() && (companyId === null || Number.isNaN(companyId))) {
@@ -1027,6 +1098,10 @@
 
       if (!data.lot) {
       showToast("Please enter the lot number.", "error");
+        return;
+      }
+
+      if (!(await validateStickerLotCompleted(data.lot))) {
         return;
       }
 
@@ -1118,6 +1193,13 @@
       }
 
       try {
+        const lotsToSave = [...new Set(unsavedItems.map((item) => normalizeText(item.lot_number || item.lot || "")).filter(Boolean))];
+        for (const lot of lotsToSave) {
+          if (!(await validateStickerLotCompleted(lot))) {
+            return;
+          }
+        }
+
         for (const item of unsavedItems) {
           const payload = {
             serial: item.serial,
@@ -1192,7 +1274,7 @@
       };
     }
 
-    function saveInlineEdit(oldBarcode) {
+    async function saveInlineEdit(oldBarcode) {
       const row = document.querySelector(`tr[data-editing-barcode="${oldBarcode}"]`);
       if (!row) return;
 
@@ -1210,6 +1292,10 @@
 
       if (isDuplicateBarcodeEverywhere(data.barcode, oldBarcode)) {
       showToast("The barcode is duplicated.", "error");
+        return;
+      }
+
+      if (!(await validateStickerLotCompleted(data.lot))) {
         return;
       }
 
