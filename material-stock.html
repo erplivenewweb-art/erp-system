@@ -219,6 +219,64 @@
         min-width: 820px;
       }
     }
+
+    @media screen and (max-width: 768px) {
+      .section-box,
+      .sub-card,
+      .summary-card,
+      .recovery-detail-card {
+        padding: 14px;
+      }
+
+      .form-grid,
+      .material-layout-grid,
+      .material-summary-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .section-topline,
+      .inline-actions,
+      .btn-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        font-size: 15px;
+      }
+
+      .btn-row button,
+      .inline-actions button,
+      .mini-ghost-btn {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+    }
+
+    @media screen and (max-width: 480px) {
+      .section-box,
+      .sub-card,
+      .summary-card,
+      .recovery-detail-card {
+        padding: 12px;
+      }
+    }
   </style>
 </head>
 <body>

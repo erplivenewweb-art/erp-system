@@ -29,6 +29,75 @@
     .profile-box i {
       color: #b7791f;
     }
+
+    @media screen and (max-width: 900px) {
+      .form-grid,
+      .dashboard-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media screen and (max-width: 768px) {
+      .section-box,
+      .sub-card,
+      .stat-card {
+        padding: 14px;
+      }
+
+      .form-grid,
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .input-box[style*="grid-column"] {
+        grid-column: auto !important;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        font-size: 15px;
+      }
+
+      .btn-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .btn-row button {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-radius: 14px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .table-wrap > table {
+        min-width: 820px;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+    }
+
+    @media screen and (max-width: 480px) {
+      .section-box,
+      .sub-card,
+      .stat-card {
+        padding: 12px;
+      }
+    }
   </style>
 </head>
 <body>

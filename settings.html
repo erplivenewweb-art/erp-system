@@ -407,6 +407,70 @@
     .profile-box i {
       color: #b7791f;
     }
+
+    @media screen and (max-width: 768px) {
+      .settings-card,
+      .section-box,
+      .sub-card,
+      .company-box {
+        padding: 14px;
+      }
+
+      .settings-form-grid,
+      .settings-preview-layout,
+      .form-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .settings-preview-panel {
+        position: static;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        font-size: 15px;
+      }
+
+      .btn-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .btn-row button {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .table-wrap,
+      .preview-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-radius: 14px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+    }
+
+    @media screen and (max-width: 480px) {
+      .settings-card,
+      .section-box,
+      .sub-card,
+      .company-box {
+        padding: 12px;
+      }
+    }
   </style>
 </head>
 <body>

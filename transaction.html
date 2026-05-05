@@ -317,6 +317,98 @@
         grid-template-columns: 1fr;
       }
     }
+
+    @media screen and (max-width: 900px) {
+      .txn-grid,
+      .txn-compact-grid,
+      .txn-live-grid,
+      .txn-summary-grid,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .type-switch {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media screen and (max-width: 768px) {
+      .section-box,
+      .sub-card,
+      .txn-panel,
+      .txn-summary-card {
+        padding: 14px;
+      }
+
+      .txn-grid,
+      .txn-stack {
+        gap: 14px;
+      }
+
+      .txn-panel-header,
+      .mini-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        font-size: 15px;
+      }
+
+      .btn-row,
+      .history-actions {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .btn-row button,
+      .history-actions button,
+      .type-btn,
+      .txn-quick-btn {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .txn-quick-list {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-radius: 14px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .table-wrap > table {
+        min-width: 900px;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+    }
+
+    @media screen and (max-width: 480px) {
+      .section-box,
+      .sub-card,
+      .txn-panel,
+      .txn-summary-card {
+        padding: 12px;
+      }
+
+      .table-wrap > table {
+        min-width: 840px;
+      }
+    }
   </style>
 </head>
 <body>

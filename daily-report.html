@@ -570,6 +570,66 @@
         min-width: 760px;
       }
     }
+
+    @media screen and (max-width: 768px) {
+      .section-box,
+      .sub-card,
+      .report-page-intro,
+      .report-summary-grid .summary-card {
+        padding: 14px;
+      }
+
+      .report-page-intro,
+      .report-toolbar,
+      .report-date-box,
+      .toolbar-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .report-date-box input,
+      .toolbar-actions button,
+      .btn-row button {
+        width: 100%;
+        min-height: 46px;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        font-size: 15px;
+      }
+
+      .table-wrap,
+      .report-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-radius: 14px;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .table-wrap > table,
+      .report-table-wrap > table {
+        min-width: 760px;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+    }
+
+    @media screen and (max-width: 480px) {
+      .section-box,
+      .sub-card,
+      .report-page-intro,
+      .report-summary-grid .summary-card {
+        padding: 12px;
+      }
+    }
   </style>
 </head>
 <body>
