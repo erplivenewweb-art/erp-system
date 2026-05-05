@@ -1208,6 +1208,83 @@ function getTodayDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function generateInvoiceNumberForCompany(connection, companyId, billDate, prefix = "BILL") {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanPrefix =
+    String(prefix || "BILL")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "")
+      .slice(0, 20) || "BILL";
+  const parsedBillDate = hasProvidedValue(billDate) ? new Date(billDate) : new Date();
+  const sequenceYear = Number.isNaN(parsedBillDate.getTime())
+    ? new Date().getFullYear()
+    : parsedBillDate.getFullYear();
+
+  if (!connection || typeof connection.query !== "function") {
+    throw new Error("A transaction connection is required to generate invoice number");
+  }
+
+  if (!cleanCompanyId) {
+    throw new Error("Company id is required to generate invoice number");
+  }
+
+  const selectSequenceSql = `
+    SELECT id, last_number
+    FROM invoice_sequences
+    WHERE company_id = ?
+      AND sequence_year = ?
+      AND prefix = ?
+    LIMIT 1
+    FOR UPDATE
+  `;
+
+  let [sequenceRows] = await connection.query(selectSequenceSql, [
+    cleanCompanyId,
+    sequenceYear,
+    cleanPrefix
+  ]);
+
+  if (!sequenceRows.length) {
+    try {
+      await connection.query(
+        `
+        INSERT INTO invoice_sequences (company_id, prefix, sequence_year, last_number)
+        VALUES (?, ?, ?, 0)
+        `,
+        [cleanCompanyId, cleanPrefix, sequenceYear]
+      );
+    } catch (error) {
+      if (error?.code !== "ER_DUP_ENTRY") {
+        throw error;
+      }
+    }
+
+    [sequenceRows] = await connection.query(selectSequenceSql, [
+      cleanCompanyId,
+      sequenceYear,
+      cleanPrefix
+    ]);
+  }
+
+  if (!sequenceRows.length) {
+    throw new Error("Invoice sequence row could not be locked");
+  }
+
+  const nextNumber = Number(sequenceRows[0].last_number || 0) + 1;
+
+  await connection.query(
+    `
+    UPDATE invoice_sequences
+    SET last_number = ?
+    WHERE id = ?
+    `,
+    [nextNumber, sequenceRows[0].id]
+  );
+
+  return `${cleanPrefix}-${sequenceYear}-${String(nextNumber).padStart(6, "0")}`;
+}
+
 function buildVoucherNo(transactionType) {
   const prefix = String(transactionType || "TXN")
     .replace(/[^A-Z]/g, "")
