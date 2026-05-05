@@ -729,8 +729,13 @@ function normalizeProcessLotRow(row) {
     loss_weight: toNumber(row.loss_weight),
     final_weight: toNumber(row.final_weight),
     total_khadi_count: toNumber(row.total_khadi_count),
-    expected_total_qty: toNumber(row.expected_total_qty)
+    expected_total_qty: toNumber(row.expected_total_qty),
+    is_manual_lot: Number(row.is_manual_lot || 0) ? 1 : 0
   };
+}
+
+function isManualProcessLot(processLot) {
+  return Number(processLot?.is_manual_lot || 0) === 1;
 }
 
 function normalizeKarigarWorkRow(row) {
@@ -2762,6 +2767,7 @@ async function ensureSchema() {
       metal_type VARCHAR(50) DEFAULT '',
       process_type VARCHAR(100) DEFAULT '',
       source VARCHAR(120) DEFAULT '',
+      manual_lot_id INT DEFAULT NULL,
       reference_step_id VARCHAR(50) DEFAULT '',
       used_in_process_step_id INT DEFAULT NULL,
       used_at DATETIME DEFAULT NULL,
@@ -3226,6 +3232,10 @@ async function ensureSchema() {
       template_version_label VARCHAR(120) DEFAULT NULL,
       completed_at DATETIME DEFAULT NULL,
       completed_by INT DEFAULT NULL,
+      is_manual_lot TINYINT(1) DEFAULT 0,
+      manual_reason VARCHAR(255) DEFAULT '',
+      manual_created_by INT DEFAULT NULL,
+      manual_created_at DATETIME DEFAULT NULL,
       saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -3493,6 +3503,7 @@ async function ensureSchema() {
     await addColumnIfMissing("stock", "qty", "INT DEFAULT 1");
     await addColumnIfMissing("stock", "category", "VARCHAR(120) DEFAULT ''");
     await addColumnIfMissing("stock", "source", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("stock", "manual_lot_id", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "reference_step_id", "VARCHAR(50) DEFAULT ''");
     await addColumnIfMissing("stock", "used_in_process_step_id", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "used_at", "DATETIME DEFAULT NULL");
@@ -3651,6 +3662,10 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "template_version_label", "VARCHAR(120) DEFAULT NULL");
     await addColumnIfMissing("process_lots", "completed_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("process_lots", "completed_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "is_manual_lot", "TINYINT(1) DEFAULT 0");
+    await addColumnIfMissing("process_lots", "manual_reason", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_lots", "manual_created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lots", "manual_created_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("process_lots", "saved_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_lots", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -6978,6 +6993,13 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
       });
     }
 
+    if (isManualProcessLot(processLot)) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available in the process workflow yet"
+      });
+    }
+
     const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
     const templateSteps = templateContext.steps;
     const template = templateSteps.map((step) => step.stepName);
@@ -7255,6 +7277,14 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     return {
       ok: false,
       message: "Process lot must be saved before process-wise steps can be tracked"
+    };
+  }
+
+  if (isManualProcessLot(processLot)) {
+    return {
+      ok: false,
+      message: "Manual lots are not available in the process workflow yet",
+      processLot
     };
   }
 
@@ -7539,6 +7569,15 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     }
 
     const step = normalizeProcessStepRow(stepRows[0]);
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, step.lot_no);
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available for KDM/Solder issue yet"
+      });
+    }
+
     const finalKarigarId = karigarId ?? step.karigar_id ?? null;
     const finalKarigarName = karigarName || step.karigar_name || "";
 
@@ -7661,6 +7700,15 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     }
 
     const issue = normalizeAdditiveIssueRow(issueRows[0]);
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, issue.lot_no);
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available for KDM/Solder return yet"
+      });
+    }
+
     if (returnedWeight > issue.givenWeight) {
       await connection.rollback();
       return res.status(400).json({
@@ -8347,6 +8395,15 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     }
 
     const step = normalizeProcessStepRow(stepRows[0]);
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, step.lot_no);
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available in the process workflow yet"
+      });
+    }
+
     if (step.status !== "OPEN") {
       await connection.rollback();
       return res.status(400).json({
@@ -8678,7 +8735,7 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 
     const [existingRows] = await connection.query(
       `
-      SELECT id, raw_weight
+      SELECT id, raw_weight, is_manual_lot
       FROM process_lots
       WHERE company_id = ? AND lot_no = ?
       LIMIT 1
@@ -8689,6 +8746,14 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     let processLotId = null;
 
     if (existingRows.length) {
+      if (Number(existingRows[0].is_manual_lot || 0) === 1) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Manual lots cannot be edited through the process lot workflow"
+        });
+      }
+
       processLotId = Number(existingRows[0].id);
       const existingRawWeight = toNumber(existingRows[0].raw_weight);
       const stepCount = await getProcessStepCount(connection, companyId, lotNo);
@@ -8749,6 +8814,119 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     return res.status(500).json({
       success: false,
       message: "Process lot save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const userId = access.actingUserId;
+    const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no);
+    const reason = String(req.body.reason || req.body.manual_reason || "").trim();
+
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "lotNo is required"
+      });
+    }
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual lot reason is required"
+      });
+    }
+
+    if (reason.length > 255) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual lot reason must be 255 characters or less"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [existingRows] = await connection.query(
+      `
+      SELECT id
+      FROM process_lots
+      WHERE company_id = ? AND lot_no = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [companyId, lotNo]
+    );
+
+    if (existingRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "This lot number already exists for the selected company"
+      });
+    }
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_lots
+      (
+        company_id,
+        lot_no,
+        status,
+        is_manual_lot,
+        manual_reason,
+        manual_created_by,
+        manual_created_at,
+        completed_at,
+        completed_by,
+        saved_at,
+        created_by
+      )
+      VALUES (?, ?, 'COMPLETED', 1, ?, ?, NOW(), NOW(), ?, NOW(), ?)
+      `,
+      [companyId, lotNo, reason, userId, userId, userId]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_lots
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId]
+    );
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Manual lot created successfully",
+      lot: savedRows.length ? normalizeProcessLotRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Create manual process lot error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Manual lot creation failed",
       error: getErrorDetail(error)
     });
   } finally {
@@ -11706,6 +11884,14 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       return res.status(404).json({
         success: false,
         message: "Process lot not found"
+      });
+    }
+
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available in the process workflow yet"
       });
     }
 
