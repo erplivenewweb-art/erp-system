@@ -186,6 +186,230 @@
       -moz-appearance: textfield;
       appearance: textfield;
     }
+
+    .section-box,
+    .sub-card,
+    .optional-box,
+    .payment-extra-box,
+    .qr-wrap {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .table-wrap > table {
+      min-width: 980px;
+    }
+
+    @media (max-width: 900px) {
+      .topbar {
+        align-items: stretch;
+      }
+
+      .topbar > div[style*="margin-left:auto"] {
+        width: 100%;
+        margin-left: 0 !important;
+        justify-content: stretch;
+        flex-wrap: wrap;
+      }
+
+      .topbar > div[style*="margin-left:auto"] > button,
+      .topbar > div[style*="margin-left:auto"] > .profile-box {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .company-grid,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .qr-wrap {
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .qr-wrap > div {
+        width: 100%;
+        min-width: 0 !important;
+      }
+
+      .qr-box {
+        width: 100%;
+        min-width: 0;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .section-box {
+        padding: 14px;
+      }
+
+      .section-box h2 {
+        font-size: 22px;
+        margin-bottom: 8px;
+      }
+
+      .section-box > p {
+        line-height: 1.45;
+      }
+
+      .company-info-box,
+      .sub-card,
+      .optional-box,
+      .payment-extra-box {
+        padding: 14px;
+        border-radius: 14px;
+        margin-top: 14px !important;
+      }
+
+      .sub-card h3,
+      .optional-box h3 {
+        font-size: 19px;
+        margin-bottom: 12px;
+      }
+
+      .payment-extra-box h4 {
+        font-size: 16px;
+      }
+
+      .input-box {
+        gap: 8px;
+      }
+
+      .input-box label {
+        font-size: 13px;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea {
+        min-height: 48px;
+        border-radius: 13px;
+        padding: 11px 12px;
+        font-size: 15px;
+      }
+
+      .btn-row,
+      .sub-card > div[style*="justify-content:space-between"] {
+        align-items: stretch !important;
+        flex-direction: column;
+        gap: 12px !important;
+      }
+
+      .btn-row button,
+      .sub-card > div[style*="justify-content:space-between"] button,
+      #staffSaleToggleBtn {
+        width: 100%;
+        min-height: 48px;
+      }
+
+      .summary-chip-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .summary-chip {
+        width: 100%;
+        border-radius: 12px;
+        padding: 11px 12px;
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      #billGrandTotalText,
+      #billStatusChip,
+      .status-chip {
+        font-size: 14px;
+      }
+
+      .table-wrap {
+        margin-top: 12px !important;
+        border-radius: 14px;
+      }
+
+      .table-wrap > table {
+        min-width: 920px;
+      }
+
+      table th,
+      table td {
+        padding: 10px;
+        font-size: 13px;
+      }
+
+      .qr-box {
+        min-height: 210px;
+      }
+
+      #billQrCode {
+        width: 190px;
+        height: 190px;
+      }
+
+      .payment-extra-box .form-grid {
+        gap: 12px;
+      }
+
+      .payment-extra-box .summary-chip-row {
+        margin-top: 12px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .section-box {
+        padding: 12px;
+      }
+
+      .company-info-box,
+      .sub-card,
+      .optional-box,
+      .payment-extra-box {
+        padding: 12px;
+        border-radius: 13px;
+      }
+
+      .company-grid {
+        font-size: 13px;
+      }
+
+      .input-box input,
+      .input-box select,
+      .input-box textarea,
+      .btn-row button {
+        min-height: 46px;
+      }
+
+      .summary-chip {
+        font-size: 13px;
+      }
+
+      .table-wrap > table {
+        min-width: 880px;
+      }
+
+      table th,
+      table td {
+        padding: 9px;
+        font-size: 12px;
+      }
+
+      .qr-box {
+        min-height: 190px;
+      }
+
+      #billQrCode {
+        width: 170px;
+        height: 170px;
+      }
+    }
   </style>
 </head>
 <body>
