@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/toast.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
   <style>
     body {
       font-family: "Segoe UI", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
@@ -20,14 +21,14 @@
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 22px;
     }
 
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
-      margin-bottom: 16px;
+      margin-bottom: 22px;
     }
 
     .panel {
@@ -36,6 +37,13 @@
       border-radius: 16px;
       padding: 18px;
       box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .panel:hover {
+      transform: translateY(-1px);
+      border-color: rgba(201, 157, 81, 0.28);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
     }
 
     .panel h3 {
@@ -63,6 +71,7 @@
       display: flex;
       align-items: center;
       gap: 14px;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
     }
 
     .summary-icon {
@@ -85,6 +94,13 @@
       position: relative;
       overflow: hidden;
       font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+    }
+
+    .summary-card:hover,
+    .dashboard-upgrade-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(201, 157, 81, 0.42);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
     }
 
     .summary-icon::before {
@@ -160,6 +176,22 @@
 
     .dashboard-table tbody tr:last-child td {
       border-bottom: none;
+    }
+
+    .dashboard-table tbody tr:nth-child(even) td {
+      background: #fffdf8;
+    }
+
+    .dashboard-table tbody tr:hover td {
+      background: #fff7df;
+    }
+
+    .dashboard-table td:nth-child(2),
+    .dashboard-table td:nth-child(3),
+    .dashboard-table td:nth-child(4),
+    .dashboard-table td:nth-child(5) {
+      font-weight: 650;
+      color: #111827;
     }
 
     .badge {
@@ -276,6 +308,299 @@
       margin-bottom: 16px;
     }
 
+    .dashboard-upgrade-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .dashboard-upgrade-card {
+      background:
+        linear-gradient(180deg, rgba(255, 251, 235, 0.88), #ffffff 56%),
+        #fff;
+      border: 1px solid rgba(201, 157, 81, 0.24);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+      min-height: 96px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .dashboard-upgrade-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #7c5a1d;
+      background: #fff7df;
+      border: 1px solid rgba(201, 157, 81, 0.28);
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+
+    .dashboard-upgrade-card h4 {
+      margin: 0 0 5px;
+      font-size: 12px;
+      color: #6b5a36;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .dashboard-upgrade-card p {
+      margin: 0;
+      color: #111827;
+      font-size: 21px;
+      font-weight: 850;
+      line-height: 1.1;
+    }
+
+    .dashboard-upgrade-card .summary-subtext {
+      margin-top: 5px;
+      font-size: 12px;
+    }
+
+    .lot-status-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .billing-summary-panel {
+      margin-bottom: 16px;
+      border-color: rgba(201, 157, 81, 0.22);
+    }
+
+    .billing-summary-panel h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+
+    .billing-summary-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .billing-summary-metric {
+      border: 1px solid #eee1c8;
+      border-radius: 10px;
+      padding: 12px;
+      background: #fffaf0;
+    }
+
+    .billing-summary-metric span {
+      display: block;
+      color: #7c6a45;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 5px;
+    }
+
+    .billing-summary-metric strong {
+      display: block;
+      color: #111827;
+      font-size: 18px;
+      line-height: 1.15;
+    }
+
+    .smart-highlight-alerts {
+      display: none;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .smart-highlight-alerts.active {
+      display: grid;
+    }
+
+    .smart-highlight-alert {
+      border-radius: 12px;
+      padding: 12px;
+      border: 1px solid transparent;
+      background: #fff;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 58px;
+    }
+
+    .smart-highlight-alert span {
+      color: #111827;
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .smart-highlight-alert strong {
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .smart-highlight-alert.red {
+      background: #fef2f2;
+      border-color: #fecaca;
+    }
+
+    .smart-highlight-alert.red strong {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .smart-highlight-alert.orange {
+      background: #fff7ed;
+      border-color: #fed7aa;
+    }
+
+    .smart-highlight-alert.orange strong {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .smart-highlight-alert.blue {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+    }
+
+    .smart-highlight-alert.blue strong {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .smart-highlight-alert.green {
+      background: #f0fdf4;
+      border-color: #bbf7d0;
+    }
+
+    .smart-highlight-alert.green strong {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .smart-highlight-title {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0 8px;
+      color: #7c5a1d;
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+    }
+
+    .smart-highlight-title.active {
+      display: flex;
+    }
+
+    .dashboard-detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .dashboard-chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .dashboard-chart-panel {
+      border-color: rgba(201, 157, 81, 0.22);
+      padding: 15px;
+    }
+
+    .dashboard-chart-panel h3 {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .dashboard-chart-panel .subtext {
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .chart-canvas-wrap {
+      height: 240px;
+      position: relative;
+      border: 1px solid #eee1c8;
+      border-radius: 12px;
+      padding: 10px;
+      background: linear-gradient(180deg, #fffdf8, #fff);
+    }
+
+    .chart-fallback {
+      display: none;
+      margin-top: 8px;
+      color: #7c6a45;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dashboard-detail-panel {
+      border-color: rgba(201, 157, 81, 0.2);
+      padding: 14px;
+    }
+
+    .dashboard-detail-panel h3 {
+      font-size: 18px;
+      margin-bottom: 4px;
+    }
+
+    .dashboard-detail-panel .subtext {
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .compact-detail-table {
+      border-color: #eee1c8;
+      border-radius: 12px;
+      overflow-x: hidden;
+    }
+
+    .compact-detail-table table {
+      table-layout: fixed;
+    }
+
+    .compact-detail-table th,
+    .compact-detail-table td {
+      padding: 9px 10px;
+      font-size: 13px;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    .compact-detail-table th {
+      background: #fffaf0;
+      color: #7c6a45;
+    }
+
+    .detail-status-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 4px 8px;
+      background: #dcfce7;
+      color: #166534;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
     .smart-alert-panel {
       margin-bottom: 16px;
       padding: 14px;
@@ -318,6 +643,11 @@
 
     @media (max-width: 1200px) {
       .summary-row.summary-row-6,
+      .dashboard-upgrade-grid,
+      .billing-summary-metrics,
+      .smart-highlight-alerts,
+      .dashboard-detail-grid,
+      .dashboard-chart-grid,
       .grid-2 {
         grid-template-columns: 1fr 1fr;
       }
@@ -325,12 +655,22 @@
 
     @media (max-width: 900px) {
       .summary-row.summary-row-6,
+      .dashboard-upgrade-grid,
+      .lot-status-grid,
+      .billing-summary-metrics,
+      .smart-highlight-alerts,
+      .dashboard-detail-grid,
+      .dashboard-chart-grid,
       .grid-2 {
         grid-template-columns: 1fr;
       }
 
       .summary-card {
         min-height: 110px;
+      }
+
+      .chart-canvas-wrap {
+        height: 210px;
       }
 
       .summary-icon {
@@ -422,6 +762,167 @@
         </div>
 
         <div class="smart-status loading" id="smartDashboardStatus">Loading dashboard metrics...</div>
+
+        <div class="dashboard-upgrade-grid">
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-chart-line"></i></div>
+            <div>
+              <h4>Estimated Profit</h4>
+              <p id="upgradeEstimatedProfit">&#8377; 0.00</p>
+              <div class="summary-subtext">Billing margin</div>
+            </div>
+          </div>
+
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-recycle"></i></div>
+            <div>
+              <h4>Total Recovery</h4>
+              <p id="upgradeTotalRecovery">0.000 g</p>
+              <div class="summary-subtext">In-stock recovery</div>
+            </div>
+          </div>
+
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-scale-balanced"></i></div>
+            <div>
+              <h4>Pending KDM</h4>
+              <p id="upgradePendingKdm">0.000 g</p>
+              <div class="summary-subtext">Return pending</div>
+            </div>
+          </div>
+
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-barcode"></i></div>
+            <div>
+              <h4>Ready for Sticker</h4>
+              <p id="upgradeReadyForSticker">0</p>
+              <div class="summary-subtext">Completed lots</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-upgrade-grid lot-status-grid">
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-folder-open"></i></div>
+            <div>
+              <h4>Open Lots</h4>
+              <p id="upgradeLotOpen">0</p>
+              <div class="summary-subtext">Active lots</div>
+            </div>
+          </div>
+
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-circle-check"></i></div>
+            <div>
+              <h4>Completed Lots</h4>
+              <p id="upgradeLotCompleted">0</p>
+              <div class="summary-subtext">Finished process</div>
+            </div>
+          </div>
+
+          <div class="dashboard-upgrade-card">
+            <div class="dashboard-upgrade-icon"><i class="fas fa-triangle-exclamation"></i></div>
+            <div>
+              <h4>KDM Blocked</h4>
+              <p id="upgradeLotKdmBlocked">0</p>
+              <div class="summary-subtext">Lots with pending KDM</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel billing-summary-panel">
+          <h3>Billing Summary</h3>
+          <div class="billing-summary-metrics">
+            <div class="billing-summary-metric">
+              <span>Invoices</span>
+              <strong id="upgradeBillingInvoices">0</strong>
+            </div>
+            <div class="billing-summary-metric">
+              <span>Sales</span>
+              <strong id="upgradeBillingSales">&#8377; 0.00</strong>
+            </div>
+            <div class="billing-summary-metric">
+              <span>Paid</span>
+              <strong id="upgradeBillingPaid">&#8377; 0.00</strong>
+            </div>
+            <div class="billing-summary-metric">
+              <span>Due</span>
+              <strong id="upgradeBillingDue">&#8377; 0.00</strong>
+            </div>
+          </div>
+        </div>
+
+        <div id="smartHighlightTitle" class="smart-highlight-title">
+          <i class="fas fa-bolt"></i>
+          Smart Highlights
+        </div>
+        <div id="smartHighlightAlerts" class="smart-highlight-alerts" aria-live="polite"></div>
+
+        <div class="dashboard-chart-grid">
+          <div class="panel dashboard-chart-panel">
+            <h3>Production vs Sales</h3>
+            <p class="subtext">Selected date production weight and billing value</p>
+            <div class="chart-canvas-wrap">
+              <canvas id="productionSalesChart"></canvas>
+            </div>
+            <div id="productionSalesChartFallback" class="chart-fallback">Chart unavailable</div>
+          </div>
+
+          <div class="panel dashboard-chart-panel">
+            <h3>Process Loss Trend</h3>
+            <p class="subtext">Selected date process loss weight</p>
+            <div class="chart-canvas-wrap">
+              <canvas id="processLossTrendChart"></canvas>
+            </div>
+            <div id="processLossChartFallback" class="chart-fallback">Chart unavailable</div>
+          </div>
+        </div>
+
+        <div class="dashboard-detail-grid">
+          <div class="panel dashboard-detail-panel">
+            <h3>Ready for Sticker</h3>
+            <p class="subtext">Completed lots ready for sticker work</p>
+            <div class="table-wrap compact-detail-table">
+              <table class="dashboard-table">
+                <thead>
+                  <tr>
+                    <th>Lot No</th>
+                    <th>Final Weight</th>
+                    <th>Completed Date</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="readyForStickerLotsBody">
+                  <tr>
+                    <td colspan="4" class="empty-text">No detailed lot data found</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel dashboard-detail-panel">
+            <h3>Karigar Performance</h3>
+            <p class="subtext">Top karigars by process loss</p>
+            <div class="table-wrap compact-detail-table">
+              <table class="dashboard-table">
+                <thead>
+                  <tr>
+                    <th>Karigar Name</th>
+                    <th>Total Steps</th>
+                    <th>Loss Weight</th>
+                    <th>Loss %</th>
+                  </tr>
+                </thead>
+                <tbody id="karigarLossSummaryBody">
+                  <tr>
+                    <td colspan="4" class="empty-text">No karigar loss data found</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <div class="summary-row summary-row-6 smart-dashboard-grid">
             <div class="summary-card">
@@ -762,6 +1263,8 @@
     let dashboardSalesData = null;
     let dashboardReturnData = [];
     let smartDashboardLoadPromise = null;
+    let productionSalesChart = null;
+    let processLossTrendChart = null;
 
     function getLoggedInUser() {
       try {
@@ -981,11 +1484,29 @@
       setSmartText("smartWorstKarigar", "-");
       setSmartText("smartWorstKarigarSub", "Highest loss percent");
       setSmartText("smartHighLossAlertCount", "0");
+      setSmartText("upgradeEstimatedProfit", formatCurrency(0));
+      setSmartText("upgradeTotalRecovery", formatWeight(0));
+      setSmartText("upgradePendingKdm", formatWeight(0));
+      setSmartText("upgradeReadyForSticker", "0");
+      setSmartText("upgradeLotOpen", "0");
+      setSmartText("upgradeLotCompleted", "0");
+      setSmartText("upgradeLotKdmBlocked", "0");
+      setSmartText("upgradeBillingInvoices", "0");
+      setSmartText("upgradeBillingSales", formatCurrency(0));
+      setSmartText("upgradeBillingPaid", formatCurrency(0));
+      setSmartText("upgradeBillingDue", formatCurrency(0));
 
       const tbody = document.getElementById("smartHighLossAlertsBody");
       if (tbody) {
         tbody.innerHTML = `<tr><td colspan="8" class="empty-text">No high loss alert found</td></tr>`;
       }
+
+      renderSmartHighlightAlerts();
+      renderReadyForStickerLots([]);
+      renderKarigarLossSummary([]);
+      destroyDashboardCharts();
+      setChartFallback("productionSalesChartFallback", false);
+      setChartFallback("processLossChartFallback", false);
     }
 
     function getSmartDashboardDate() {
@@ -1050,6 +1571,240 @@
       `).join("");
     }
 
+    function renderSmartHighlightAlerts(data = {}) {
+      const wrap = document.getElementById("smartHighlightAlerts");
+      const title = document.getElementById("smartHighlightTitle");
+      if (!wrap) return;
+
+      const processLossWeight = Number(data.todayProcessLossWeight || 0);
+      const pendingKdmWeight = Number(data.pendingKdmWeight || 0);
+      const lotStatusCounts = data.lotStatusCounts || {};
+      const openLots = Number(lotStatusCounts.open ?? data.openLots ?? 0);
+      const readyForStickerLots = Number(data.readyForStickerLots || 0);
+      const alerts = [];
+
+      if (processLossWeight > 5) {
+        alerts.push({
+          type: "red",
+          label: "High process loss today",
+          badge: formatWeight(processLossWeight)
+        });
+      }
+
+      if (pendingKdmWeight > 0) {
+        alerts.push({
+          type: "orange",
+          label: "KDM return pending",
+          badge: formatWeight(pendingKdmWeight)
+        });
+      }
+
+      if (openLots > 0) {
+        alerts.push({
+          type: "blue",
+          label: "Open process lots pending",
+          badge: `${openLots} lot${openLots === 1 ? "" : "s"}`
+        });
+      }
+
+      if (readyForStickerLots > 0) {
+        alerts.push({
+          type: "green",
+          label: "Lots ready for sticker",
+          badge: `${readyForStickerLots} lot${readyForStickerLots === 1 ? "" : "s"}`
+        });
+      }
+
+      wrap.classList.toggle("active", alerts.length > 0);
+      if (title) title.classList.toggle("active", alerts.length > 0);
+      wrap.innerHTML = alerts.map((item) => `
+        <div class="smart-highlight-alert ${item.type}">
+          <span>${safeText(item.label)}</span>
+          <strong>${safeText(item.badge)}</strong>
+        </div>
+      `).join("");
+    }
+
+    function getReadyForStickerRows(data = {}) {
+      if (Array.isArray(data.readyForStickerLotRows)) return data.readyForStickerLotRows;
+      if (Array.isArray(data.readyForStickerLotsData)) return data.readyForStickerLotsData;
+      if (Array.isArray(data.readyForStickerLotsList)) return data.readyForStickerLotsList;
+      if (Array.isArray(data.readyForStickerLots)) return data.readyForStickerLots;
+      return [];
+    }
+
+    function formatDashboardDate(value) {
+      const clean = safeText(value);
+      if (!clean) return "-";
+      return clean.includes("T") ? clean.slice(0, 10) : clean;
+    }
+
+    function renderReadyForStickerLots(rows = []) {
+      const tbody = document.getElementById("readyForStickerLotsBody");
+      if (!tbody) return;
+
+      if (!Array.isArray(rows) || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-text">No detailed lot data found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.slice(0, 5).map((item) => {
+        const lotNo = item.lotNo ?? item.lot_no ?? item.lot ?? "-";
+        const finalWeight = item.finalWeight ?? item.final_weight ?? item.weight ?? 0;
+        const completedDate = item.completedDate ?? item.completedAt ?? item.completed_at ?? item.updated_at ?? "";
+
+        return `
+          <tr>
+            <td>${safeText(lotNo) || "-"}</td>
+            <td>${formatWeight(finalWeight)}</td>
+            <td>${formatDashboardDate(completedDate)}</td>
+            <td><span class="detail-status-badge">READY</span></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderKarigarLossSummary(rows = []) {
+      const tbody = document.getElementById("karigarLossSummaryBody");
+      if (!tbody) return;
+
+      if (!Array.isArray(rows) || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-text">No karigar loss data found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.slice(0, 5).map((item) => {
+        const name = item.name ?? item.karigarName ?? item.karigar_name ?? "-";
+        const steps = item.steps ?? item.stepCount ?? item.step_count ?? 0;
+        const lossWeight = item.lossWeight ?? item.totalLossWeight ?? item.total_loss_weight ?? 0;
+        const lossPercent = item.lossPercent ?? item.loss_percent ?? 0;
+
+        return `
+          <tr>
+            <td>${safeText(name) || "-"}</td>
+            <td>${Number(steps || 0)}</td>
+            <td>${formatWeight(lossWeight)}</td>
+            <td><span class="badge orange">${formatPercent(lossPercent)}</span></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function setChartFallback(id, show = false, message = "Chart unavailable") {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.display = show ? "block" : "none";
+      el.textContent = message;
+    }
+
+    function destroyDashboardCharts() {
+      if (productionSalesChart) {
+        productionSalesChart.destroy();
+        productionSalesChart = null;
+      }
+
+      if (processLossTrendChart) {
+        processLossTrendChart.destroy();
+        processLossTrendChart = null;
+      }
+    }
+
+    function renderDashboardCharts(data = {}) {
+      if (typeof Chart === "undefined") {
+        destroyDashboardCharts();
+        setChartFallback("productionSalesChartFallback", true, "Chart library unavailable");
+        setChartFallback("processLossChartFallback", true, "Chart library unavailable");
+        return;
+      }
+
+      const dateLabel = safeText(data.date || getSmartDashboardDate() || "Selected date");
+      const productionWeight = Number(data.todayProductionWeight || 0);
+      const salesAmount = Number(data.todaySalesAmount || 0);
+      const lossWeight = Number(data.todayProcessLossWeight || 0);
+      const productionCanvas = document.getElementById("productionSalesChart");
+      const lossCanvas = document.getElementById("processLossTrendChart");
+
+      setChartFallback("productionSalesChartFallback", false);
+      setChartFallback("processLossChartFallback", false);
+
+      if (productionCanvas) {
+        if (productionSalesChart) productionSalesChart.destroy();
+        productionSalesChart = new Chart(productionCanvas, {
+          type: "bar",
+          data: {
+            labels: [dateLabel],
+            datasets: [
+              {
+                label: "Production Weight (g)",
+                data: [productionWeight],
+                backgroundColor: "rgba(201, 157, 81, 0.78)",
+                borderColor: "#a97820",
+                borderWidth: 1,
+                borderRadius: 8,
+                yAxisID: "weight"
+              },
+              {
+                label: "Sales (₹)",
+                data: [salesAmount],
+                backgroundColor: "rgba(22, 101, 52, 0.68)",
+                borderColor: "#166534",
+                borderWidth: 1,
+                borderRadius: 8,
+                yAxisID: "money"
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { boxWidth: 10, color: "#475569" } }
+            },
+            scales: {
+              weight: { beginAtZero: true, position: "left", grid: { color: "rgba(226, 232, 240, 0.7)" } },
+              money: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+      }
+
+      if (lossCanvas) {
+        if (processLossTrendChart) processLossTrendChart.destroy();
+        processLossTrendChart = new Chart(lossCanvas, {
+          type: "line",
+          data: {
+            labels: [dateLabel],
+            datasets: [
+              {
+                label: "Process Loss (g)",
+                data: [lossWeight],
+                borderColor: "#b45309",
+                backgroundColor: "rgba(245, 158, 11, 0.16)",
+                pointBackgroundColor: "#92400e",
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                borderWidth: 2,
+                tension: 0.35,
+                fill: true
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { boxWidth: 10, color: "#475569" } }
+            },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(226, 232, 240, 0.7)" } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+      }
+    }
+
     function renderSmartDashboard(data = {}) {
       setSmartText("smartProductionWeight", formatWeight(data.todayProductionWeight));
       setSmartText("smartProductionQty", formatQty(data.todayProductionQty));
@@ -1060,11 +1815,28 @@
       setSmartText("smartOpenLots", String(Number(data.openLots || 0)));
       setSmartText("smartCompletedLots", String(Number(data.completedLots || 0)));
       setSmartText("smartPendingProcessLots", String(Number(data.pendingProcessLots || 0)));
+      const billingSummary = data.billingSummary || {};
+      const lotStatusCounts = data.lotStatusCounts || {};
+      setSmartText("upgradeEstimatedProfit", formatCurrency(billingSummary.totalMargin || 0));
+      setSmartText("upgradeTotalRecovery", formatWeight(data.totalRecoveryWeight || 0));
+      setSmartText("upgradePendingKdm", formatWeight(data.pendingKdmWeight || 0));
+      setSmartText("upgradeReadyForSticker", String(Number(data.readyForStickerLots || 0)));
+      setSmartText("upgradeLotOpen", String(Number(lotStatusCounts.open ?? data.openLots ?? 0)));
+      setSmartText("upgradeLotCompleted", String(Number(lotStatusCounts.completed ?? data.completedLots ?? 0)));
+      setSmartText("upgradeLotKdmBlocked", String(Number(lotStatusCounts.pendingKdmBlocked || 0)));
+      setSmartText("upgradeBillingInvoices", String(Number(billingSummary.invoiceCount || 0)));
+      setSmartText("upgradeBillingSales", formatCurrency(billingSummary.totalSales || 0));
+      setSmartText("upgradeBillingPaid", formatCurrency(billingSummary.totalPaid || 0));
+      setSmartText("upgradeBillingDue", formatCurrency(billingSummary.totalDue || 0));
       renderSmartKarigar("smartBest", data.bestKarigar);
       renderSmartKarigar("smartWorst", data.worstKarigar);
 
       const alerts = Array.isArray(data.highLossAlerts) ? data.highLossAlerts : [];
       setSmartText("smartHighLossAlertCount", String(alerts.length));
+      renderSmartHighlightAlerts(data);
+      renderReadyForStickerLots(getReadyForStickerRows(data));
+      renderKarigarLossSummary(Array.isArray(data.karigarLossSummary) ? data.karigarLossSummary : []);
+      renderDashboardCharts(data);
       renderHighLossAlerts(alerts);
     }
 

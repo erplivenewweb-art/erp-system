@@ -5361,6 +5361,61 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
       [reportDate, nextDate, ...companyParams]
     );
 
+    const [recoveryRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(weight), 0) AS total_recovery_weight
+      FROM stock
+      WHERE UPPER(COALESCE(category, '')) = 'RECOVERY'
+        AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        ${companyFilter}
+      `,
+      companyParams
+    );
+
+    const [pendingKdmRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS pending_kdm_issue_count,
+        COALESCE(SUM(pending_weight), 0) AS pending_kdm_weight,
+        COUNT(DISTINCT lot_no) AS pending_kdm_blocked_lots
+      FROM (
+        SELECT
+          lot_no,
+          GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0) AS pending_weight
+        FROM process_step_additive_issues
+        WHERE 1 = 1
+          ${companyFilter}
+      ) pending_kdm
+      WHERE pending_weight > 0
+      `,
+      companyParams
+    );
+
+    const [billingSummaryRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS invoice_count,
+        COALESCE(SUM(total_amount), 0) AS total_sales,
+        COALESCE(SUM(paid_amount), 0) AS total_paid,
+        COALESCE(SUM(due_amount), 0) AS total_due,
+        COALESCE(SUM(
+          CASE
+            WHEN COALESCE(employee_margin_amount, 0) <> 0 THEN employee_margin_amount
+            WHEN COALESCE(company_total_amount, 0) <> 0 THEN total_amount - company_total_amount
+            ELSE 0
+          END
+        ), 0) AS total_margin
+      FROM sales_history
+      WHERE created_at >= ?
+        AND created_at < ?
+        AND COALESCE(is_deleted, 0) = 0
+        ${companyFilter}
+      `,
+      [reportDate, nextDate, ...companyParams]
+    );
+
     const bestKarigarRow = karigarRows[0] || null;
     const worstKarigarRow = karigarRows.length ? karigarRows[karigarRows.length - 1] : null;
     const formatKarigar = (row) => row
@@ -5373,6 +5428,9 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
           lossPercent: Number(row.loss_percent || 0)
         }
       : null;
+    const topLossKarigars = [...karigarRows]
+      .sort((a, b) => Number(b.total_loss_weight || 0) - Number(a.total_loss_weight || 0))
+      .slice(0, 5);
 
     return res.json({
       success: true,
@@ -5389,6 +5447,28 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
       openLots: Number(lotRows[0]?.open_lots || 0),
       completedLots: Number(lotRows[0]?.completed_lots || 0),
       pendingProcessLots: Number(pendingRows[0]?.pending_process_lots || 0),
+      totalRecoveryWeight: Number(recoveryRows[0]?.total_recovery_weight || 0),
+      pendingKdmWeight: Number(pendingKdmRows[0]?.pending_kdm_weight || 0),
+      pendingKdmIssueCount: Number(pendingKdmRows[0]?.pending_kdm_issue_count || 0),
+      readyForStickerLots: Number(lotRows[0]?.completed_lots || 0),
+      lotStatusCounts: {
+        open: Number(lotRows[0]?.open_lots || 0),
+        completed: Number(lotRows[0]?.completed_lots || 0),
+        pendingKdmBlocked: Number(pendingKdmRows[0]?.pending_kdm_blocked_lots || 0)
+      },
+      billingSummary: {
+        invoiceCount: Number(billingSummaryRows[0]?.invoice_count || 0),
+        totalSales: Number(billingSummaryRows[0]?.total_sales || 0),
+        totalPaid: Number(billingSummaryRows[0]?.total_paid || 0),
+        totalDue: Number(billingSummaryRows[0]?.total_due || 0),
+        totalMargin: Number(billingSummaryRows[0]?.total_margin || 0)
+      },
+      karigarLossSummary: topLossKarigars.map((row) => ({
+        name: String(row.karigar_name || "Unassigned"),
+        steps: Number(row.step_count || 0),
+        lossWeight: Number(row.total_loss_weight || 0),
+        lossPercent: Number(row.loss_percent || 0)
+      })),
       bestKarigar: formatKarigar(bestKarigarRow),
       worstKarigar: formatKarigar(worstKarigarRow),
       highLossAlerts: highLossRows.map((row) => ({
