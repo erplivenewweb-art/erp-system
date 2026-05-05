@@ -199,6 +199,55 @@ function isCompanySelectionRequiredForPage(pageKey = getCurrentPageKey()) {
   return !ERP_ADMIN_ALL_COMPANY_PAGES.has(pageKey);
 }
 
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+function renderCompanyOptions(companies = []) {
+  return `<option value="">Please select a company</option>${companies
+    .map((company) => {
+      const id = Number(company.id ?? company.company_id ?? company.companyId ?? 0);
+      const name = String(company.company_name || company.companyName || company.name || `Company ${id}`).trim();
+      return id ? `<option value="${id}">${escapeHtml(name)}</option>` : "";
+    })
+    .join("")}`;
+}
+
+function applySelectedCompanyToSelect(select) {
+  if (!select) return;
+  const selectedId = getSelectedCompanyId();
+  if (selectedId && select.querySelector(`option[value="${selectedId}"]`)) {
+    select.value = String(selectedId);
+  } else {
+    select.value = "";
+    if (selectedId) setSelectedCompanyId("");
+  }
+}
+
+function handleSuperAdminCompanyChange(value) {
+  setSelectedCompanyId(value);
+  if (getSelectedCompanyId()) {
+    clearCompanySelectionBlock();
+    window.location.reload();
+  } else {
+    showCompanySelectionBlock();
+  }
+}
+
+async function populateSuperAdminCompanySelect(select) {
+  if (!select) return [];
+  const companies = await loadSuperAdminCompanies();
+  select.innerHTML = renderCompanyOptions(companies);
+  applySelectedCompanyToSelect(select);
+  return companies;
+}
+
 function showCompanySelectionBlock() {
   if (!isCompanySelectionRequiredForPage() || hasSelectedCompanyForSuperAdmin()) return;
   document.body.classList.add("superadmin-company-missing");
@@ -209,9 +258,22 @@ function showCompanySelectionBlock() {
     block.innerHTML = `
       <div class="superadmin-company-block-card">
         <strong>Please select a company</strong>
+        <select id="superAdminCompanyOverlaySelect" aria-label="Select company">
+          <option value="">Loading companies...</option>
+        </select>
+        <p id="superAdminCompanyLoadMessage"></p>
       </div>
     `;
     document.body.appendChild(block);
+    const overlaySelect = block.querySelector("#superAdminCompanyOverlaySelect");
+    overlaySelect?.addEventListener("change", () => {
+      handleSuperAdminCompanyChange(overlaySelect.value);
+    });
+    populateSuperAdminCompanySelect(overlaySelect).catch(() => {
+      overlaySelect.innerHTML = `<option value="">Please select a company</option>`;
+      const message = document.getElementById("superAdminCompanyLoadMessage");
+      if (message) message.textContent = "Company list could not be loaded. Please refresh.";
+    });
   }
 
   showAccessMessage("Please select a company");
@@ -253,32 +315,14 @@ async function initSuperAdminCompanySelector() {
 
   const select = wrapper.querySelector("select");
   try {
-    const companies = await loadSuperAdminCompanies();
-    select.innerHTML = `<option value="">Please select a company</option>${companies
-      .map((company) => {
-        const id = Number(company.id ?? company.company_id ?? company.companyId ?? 0);
-        const name = String(company.company_name || company.companyName || company.name || `Company ${id}`).trim();
-        return id ? `<option value="${id}">${name}</option>` : "";
-      })
-      .join("")}`;
-    const selectedId = getSelectedCompanyId();
-    if (selectedId && select.querySelector(`option[value="${selectedId}"]`)) {
-      select.value = String(selectedId);
-    } else if (selectedId) {
-      setSelectedCompanyId("");
-    }
+    await populateSuperAdminCompanySelect(select);
   } catch (_) {
     select.innerHTML = `<option value="">Please select a company</option>`;
+    showAccessMessage("Company list could not be loaded. Please refresh.");
   }
 
   select.addEventListener("change", () => {
-    setSelectedCompanyId(select.value);
-    if (getSelectedCompanyId()) {
-      clearCompanySelectionBlock();
-      window.location.reload();
-    } else {
-      showCompanySelectionBlock();
-    }
+    handleSuperAdminCompanyChange(select.value);
   });
 
   showCompanySelectionBlock();
@@ -289,7 +333,8 @@ function injectSuperAdminCompanyStyles() {
   const style = document.createElement("style");
   style.id = "superAdminCompanyStyles";
   style.textContent = `
-    .superadmin-company-select-wrap select {
+    .superadmin-company-select-wrap select,
+    #superAdminCompanyOverlaySelect {
       min-height: 44px;
       border-radius: 13px;
       border: 1px solid var(--erp-border, #e3d7c3);
@@ -313,7 +358,7 @@ function injectSuperAdminCompanyStyles() {
       place-items: center;
       background: rgba(255, 250, 242, 0.74);
       backdrop-filter: blur(4px);
-      pointer-events: none;
+      pointer-events: auto;
     }
     .superadmin-company-block-card {
       border: 1px solid rgba(197, 139, 43, 0.35);
@@ -324,6 +369,21 @@ function injectSuperAdminCompanyStyles() {
       padding: 22px 28px;
       font-size: 18px;
       text-align: center;
+      display: grid;
+      gap: 14px;
+      min-width: min(420px, calc(100vw - 36px));
+    }
+    #superAdminCompanyOverlaySelect {
+      width: 100%;
+      max-width: none;
+      cursor: pointer;
+    }
+    #superAdminCompanyLoadMessage {
+      min-height: 18px;
+      margin: 0;
+      color: #9a3412;
+      font-size: 13px;
+      font-weight: 700;
     }
   `;
   document.head.appendChild(style);
