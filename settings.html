@@ -110,6 +110,35 @@
       line-height: 1.6;
     }
 
+    .support-mode-banner {
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+      background: #fff8eb;
+      border: 1px solid #e2bf78;
+      color: #6f4e12;
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.5;
+      box-shadow: 0 10px 24px rgba(125, 90, 29, 0.08);
+    }
+
+    .support-mode-banner.show {
+      display: flex;
+    }
+
+    .support-mode-banner i {
+      margin-top: 2px;
+      color: #b7791f;
+    }
+
+    .settings-action-hidden {
+      display: none !important;
+    }
+
     .locked-chip {
       display: inline-block;
       padding: 6px 10px;
@@ -524,6 +553,11 @@
       </div>
 
       <section class="settings-page">
+        <div class="support-mode-banner" id="superAdminReadOnlyBanner">
+          <i class="fas fa-shield-halved"></i>
+          <span>SuperAdmin support mode: settings are view-only. Company owner/admin must unlock to edit.</span>
+        </div>
+
         <div class="settings-card">
           <div id="settingsLockStatus" class="locked-chip">Locked</div>
 
@@ -548,9 +582,9 @@
           </div>
 
           <div class="btn-row">
-            <button class="secondary-btn" type="button" onclick="requestSettingsUnlockCode()">Send Code</button>
-            <button class="primary-btn" type="button" onclick="unlockSettings()">Unlock Settings</button>
-            <button class="secondary-btn" type="button" onclick="lockSettings()">Lock</button>
+            <button class="secondary-btn" id="sendSettingsCodeBtn" type="button" onclick="requestSettingsUnlockCode()">Send Code</button>
+            <button class="primary-btn" id="unlockSettingsBtn" type="button" onclick="unlockSettings()">Unlock Settings</button>
+            <button class="secondary-btn" id="lockSettingsBtn" type="button" onclick="lockSettings()">Lock</button>
           </div>
 
           <div class="info-box">
@@ -640,9 +674,9 @@
               </div>
 
               <div class="btn-row">
-                <button class="primary-btn" type="button" onclick="saveSettings()">Save Settings</button>
+                <button class="primary-btn" id="saveSettingsBtn" type="button" onclick="saveSettings()">Save Settings</button>
                 <button class="secondary-btn" type="button" onclick="loadSettingsToForm()">Reload</button>
-                <button class="danger-btn" type="button" onclick="resetSettings()">Reset Default</button>
+                <button class="danger-btn" id="resetSettingsBtn" type="button" onclick="resetSettings()">Reset Default</button>
               </div>
             </div>
 
@@ -880,6 +914,14 @@
       return role === "superadmin" || email === "grudrapratap0@gmail.com";
     }
 
+    function isSuperAdminReadOnlyMode() {
+      return isSuperAdmin();
+    }
+
+    function showReadOnlyToast() {
+      showToast("SuperAdmin support mode is view-only. Company owner/admin must unlock to edit.", "info");
+    }
+
     function buildAccessParams(forceCompany = false) {
       const params = new URLSearchParams();
       const actingUserId = getCurrentUserId();
@@ -949,8 +991,9 @@
       if (!label || !sub) return;
 
       if (isSuperAdmin()) {
-        label.textContent = "Super Admin Mode";
-        sub.textContent = "You are viewing global / Super Admin scoped settings.";
+        const selectedName = typeof getSelectedCompanyName === "function" ? getSelectedCompanyName() : "";
+        label.textContent = selectedName || "Super Admin Mode";
+        sub.textContent = "Support review only. Company owner/admin must unlock settings to edit.";
         return;
       }
 
@@ -959,13 +1002,24 @@
     }
 
     function updateLockUI() {
+      const readOnlyMode = isSuperAdminReadOnlyMode();
+      if (readOnlyMode) {
+        sessionStorage.removeItem(ERP_UNLOCK_KEY);
+        sessionStorage.removeItem(ERP_UNLOCK_TOKEN_KEY);
+        sessionStorage.removeItem(ERP_UNLOCK_EMAIL_KEY);
+      }
+
       const unlocked =
+        !readOnlyMode &&
         sessionStorage.getItem(ERP_UNLOCK_KEY) === "true" &&
         !!sessionStorage.getItem(ERP_UNLOCK_TOKEN_KEY);
       const status = document.getElementById("settingsLockStatus");
 
       if (status) {
-        if (unlocked) {
+        if (readOnlyMode) {
+          status.textContent = "View Only";
+          status.className = "locked-chip";
+        } else if (unlocked) {
           status.textContent = "Unlocked";
           status.className = "unlocked-chip";
         } else {
@@ -1005,7 +1059,9 @@
         const el = document.getElementById(id);
         if (!el) return;
 
-        if (id === "ownerEmail") {
+        if (readOnlyMode) {
+          el.disabled = true;
+        } else if (id === "ownerEmail") {
           el.disabled = false;
         } else {
           el.disabled = !unlocked;
@@ -1014,14 +1070,40 @@
 
       const logoUploadEl = document.getElementById("logo_upload");
       if (logoUploadEl) {
-        logoUploadEl.disabled = !unlocked;
+        logoUploadEl.disabled = readOnlyMode || !unlocked;
       }
 
       const step = document.getElementById("settingsOtpCode");
-      if (step) step.disabled = false;
+      if (step) step.disabled = readOnlyMode;
+
+      const banner = document.getElementById("superAdminReadOnlyBanner");
+      if (banner) banner.classList.toggle("show", readOnlyMode);
+
+      [
+        "sendSettingsCodeBtn",
+        "unlockSettingsBtn",
+        "saveSettingsBtn",
+        "resetSettingsBtn"
+      ].forEach((id) => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.disabled = readOnlyMode;
+        button.classList.toggle("settings-action-hidden", readOnlyMode);
+      });
+
+      const lockButton = document.getElementById("lockSettingsBtn");
+      if (lockButton) {
+        lockButton.disabled = readOnlyMode;
+        lockButton.classList.toggle("settings-action-hidden", readOnlyMode);
+      }
     }
 
     async function requestSettingsUnlockCode() {
+      if (isSuperAdminReadOnlyMode()) {
+        showReadOnlyToast();
+        return;
+      }
+
       const enteredEmail = document.getElementById("ownerEmail").value.trim().toLowerCase();
 
       if (!enteredEmail) {
@@ -1060,6 +1142,11 @@
     }
 
     async function unlockSettings() {
+      if (isSuperAdminReadOnlyMode()) {
+        showReadOnlyToast();
+        return;
+      }
+
       const enteredEmail = document.getElementById("ownerEmail").value.trim().toLowerCase();
       const enteredCode = document.getElementById("settingsOtpCode").value.trim();
 
@@ -1146,6 +1233,7 @@
       document.getElementById("subscription_end_date").value = settings.subscription_end_date || "";
 
       renderPreview();
+      updateLockUI();
 
       if (showToastMessage) {
     showToast("Settings have been reloaded.", "success");
@@ -1182,6 +1270,11 @@
     }
 
     async function saveSettings() {
+      if (isSuperAdminReadOnlyMode()) {
+        showReadOnlyToast();
+        return;
+      }
+
       const unlocked =
         sessionStorage.getItem(ERP_UNLOCK_KEY) === "true" &&
         !!sessionStorage.getItem(ERP_UNLOCK_TOKEN_KEY);
@@ -1224,6 +1317,11 @@
     }
 
     async function resetSettings() {
+      if (isSuperAdminReadOnlyMode()) {
+        showReadOnlyToast();
+        return;
+      }
+
       const unlocked =
         sessionStorage.getItem(ERP_UNLOCK_KEY) === "true" &&
         !!sessionStorage.getItem(ERP_UNLOCK_TOKEN_KEY);
