@@ -1943,6 +1943,30 @@ async function getAllowedSettingsUnlockEmails(connection, access) {
     if (normalized) emailSet.add(normalized);
   };
 
+  if (access?.isSuperAdmin) {
+    return emailSet;
+  }
+
+  const actorCompanyId =
+    access?.actingCompanyId === null || access?.actingCompanyId === undefined
+      ? null
+      : Number(access.actingCompanyId);
+  const scopedCompanyId =
+    access?.companyScope === null || access?.companyScope === undefined
+      ? null
+      : Number(access.companyScope);
+  const isSameCompanyOwnerAdmin =
+    access?.isApprovedAdmin &&
+    actorCompanyId !== null &&
+    scopedCompanyId !== null &&
+    !Number.isNaN(actorCompanyId) &&
+    !Number.isNaN(scopedCompanyId) &&
+    actorCompanyId === scopedCompanyId;
+
+  if (!isSameCompanyOwnerAdmin) {
+    return emailSet;
+  }
+
   pushEmail(access?.actingUser?.email);
   pushEmail(access?.actingUser?.company_owner_email);
 
@@ -1952,6 +1976,47 @@ async function getAllowedSettingsUnlockEmails(connection, access) {
   }
 
   return emailSet;
+}
+
+async function auditDeniedSettingsAccess(connection, req, access, actionType, details = {}) {
+  await writeAuditLogSafe(connection, req, {
+    companyId: access?.companyScope ?? getRequestedCompanyId(req) ?? null,
+    userId: access?.actingUserId ?? getRequestedUserId(req) ?? null,
+    actionType,
+    entityType: "SETTINGS",
+    entityId: String(access?.companyScope ?? getRequestedCompanyId(req) ?? ""),
+    beforeData: null,
+    afterData: {
+      denied: true,
+      reason: details.reason || "SETTINGS_PERMISSION_DENIED",
+      actorRole: access?.actingUser?.role ?? null,
+      actorCompanyId: access?.actingCompanyId ?? null,
+      requestedCompanyId: access?.requestedCompanyId ?? getRequestedCompanyId(req) ?? null,
+      purpose: details.purpose || OTP_PURPOSES.SETTINGS_UNLOCK,
+      email: details.email || null
+    }
+  });
+}
+
+function isSameCompanySettingsOwnerAdmin(access) {
+  const actorCompanyId =
+    access?.actingCompanyId === null || access?.actingCompanyId === undefined
+      ? null
+      : Number(access.actingCompanyId);
+  const scopedCompanyId =
+    access?.companyScope === null || access?.companyScope === undefined
+      ? null
+      : Number(access.companyScope);
+
+  return (
+    !access?.isSuperAdmin &&
+    access?.isApprovedAdmin &&
+    actorCompanyId !== null &&
+    scopedCompanyId !== null &&
+    !Number.isNaN(actorCompanyId) &&
+    !Number.isNaN(scopedCompanyId) &&
+    actorCompanyId === scopedCompanyId
+  );
 }
 
 async function verifyOtpSessionToken(connection, { email, purpose, sessionToken, userId = null, companyId = null }) {
@@ -5626,6 +5691,25 @@ app.post("/otp/request", async (req, res) => {
         return sendAccessError(res, access);
       }
 
+      if (access.isSuperAdmin) {
+        await auditDeniedSettingsAccess(connection, req, access, "SETTINGS_UNLOCK_DENIED", {
+          reason: "SUPERADMIN_SETTINGS_UNLOCK_DENIED",
+          email,
+          purpose
+        });
+        return res.status(403).json({
+          success: false,
+          message: "Only the company owner/admin can unlock company settings"
+        });
+      }
+
+      if (!isSameCompanySettingsOwnerAdmin(access)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only the company owner/admin can unlock company settings"
+        });
+      }
+
       const allowedEmails = await getAllowedSettingsUnlockEmails(connection, access);
       if (!allowedEmails.has(email)) {
         return res.status(403).json({
@@ -5751,6 +5835,25 @@ app.post("/otp/verify", async (req, res) => {
 
       if (!access.ok) {
         return sendAccessError(res, access);
+      }
+
+      if (access.isSuperAdmin) {
+        await auditDeniedSettingsAccess(connection, req, access, "SETTINGS_UNLOCK_DENIED", {
+          reason: "SUPERADMIN_SETTINGS_VERIFY_DENIED",
+          email,
+          purpose
+        });
+        return res.status(403).json({
+          success: false,
+          message: "Only the company owner/admin can unlock company settings"
+        });
+      }
+
+      if (!isSameCompanySettingsOwnerAdmin(access)) {
+        return res.status(403).json({
+          success: false,
+          message: "Only the company owner/admin can unlock company settings"
+        });
       }
 
       const allowedEmails = await getAllowedSettingsUnlockEmails(connection, access);
@@ -5994,6 +6097,26 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
         message: "Company scope missing for settings save"
       });
     }
+
+    if (access.isSuperAdmin) {
+      await auditDeniedSettingsAccess(connection, req, access, "SETTINGS_SAVE_DENIED", {
+        reason: "SUPERADMIN_SETTINGS_SAVE_DENIED",
+        email: normalizeEmail(req.body.verificationEmail || req.body.unlockEmail || req.body.ownerEmail),
+        purpose: OTP_PURPOSES.SETTINGS_UNLOCK
+      });
+      return res.status(403).json({
+        success: false,
+        message: "Only the company owner/admin can save company settings"
+      });
+    }
+
+    if (!isSameCompanySettingsOwnerAdmin(access)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the company owner/admin can save company settings"
+      });
+    }
+
     const ownerEmail = normalizeEmail(req.body.verificationEmail || req.body.unlockEmail || req.body.ownerEmail);
     const settingsUnlockToken = String(req.body.settingsUnlockToken || "").trim();
 
