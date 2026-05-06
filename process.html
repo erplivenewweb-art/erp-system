@@ -564,6 +564,7 @@
         <div class="section-box">
           <h2>Process</h2>
           <p>Manage lots, raw weight, loss, karigar work, and process summaries here.</p>
+          <p class="additive-issue-note">Manual lots are created from Sticker page. Manual lots do not use process workflow.</p>
 
           <div class="process-page-grid">
             <div class="process-main-column">
@@ -1269,6 +1270,7 @@
         totalKhadiCount: Number(item?.totalKhadiCount ?? 1),
         expectedTotalQty: Number(item?.expectedTotalQty ?? item?.expected_total_qty ?? 0),
         status: String(item?.status || "OPEN").trim().toUpperCase() || "OPEN",
+        isManualLot: Number(item?.isManualLot ?? item?.is_manual_lot ?? 0) === 1,
         company_id: item?.company_id ?? getCurrentCompanyId(),
         savedAt: item?.savedAt ?? item?.saved_at ?? item?.updated_at ?? item?.created_at ?? ""
       };
@@ -1340,6 +1342,15 @@
       return lotData.find((lot) => String(lot.lotNo || "").trim() === lotNo) || null;
     }
 
+    function getLatestCompletedProcessStep() {
+      const completedSteps = processStepData.filter((step) => String(step.status || "").trim().toUpperCase() === "COMPLETED");
+      return completedSteps.length ? completedSteps[completedSteps.length - 1] : null;
+    }
+
+    function hasTemplateGuideSteps() {
+      return Array.isArray(processGuideData?.template) && processGuideData.template.length > 0;
+    }
+
     function getSelectedLotStatusLabel() {
       const lot = getSelectedProcessLot();
       const rawStatus = String(lot?.status || "").trim().toUpperCase();
@@ -1354,15 +1365,18 @@
       const lot = getSelectedProcessLot();
       const rawStatus = String(lot?.status || "").trim().toUpperCase();
       const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
+      const latestCompletedStep = getLatestCompletedProcessStep();
+      const templateGuideExists = hasTemplateGuideSteps();
 
-      return Boolean(
-        lotNo &&
-        rawStatus !== "COMPLETED" &&
-        !currentOpenProcessStep &&
-        processGuideData?.isReadyToComplete &&
-        lotAdditiveStatus.loaded &&
-        pendingKdm <= 0.0009
-      );
+      if (!lotNo || !lot || lot.isManualLot || rawStatus === "COMPLETED" || currentOpenProcessStep || !lotAdditiveStatus.loaded || pendingKdm > 0.0009) {
+        return false;
+      }
+
+      if (templateGuideExists) {
+        return Boolean(processGuideData?.isReadyToComplete);
+      }
+
+      return Boolean(latestCompletedStep && Number(latestCompletedStep.outputWeight || 0) > 0);
     }
 
     function prefillSuggestedProcessName(nextStep = "") {
@@ -1392,14 +1406,17 @@
       const canCompleteLot = isCompleteLotAvailable();
       const lotStatus = lotNo ? getSelectedLotStatusLabel() : "OPEN";
       const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
+      const isManualLot = Boolean(getSelectedProcessLot()?.isManualLot);
+      const templateGuideExists = hasTemplateGuideSteps();
+      const latestCompletedStep = getLatestCompletedProcessStep();
 
       completedEl.textContent = lotNo
-        ? (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed"))
+        ? (isManualLot ? "Manual lot" : (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed")))
         : "Select a lot";
       nextEl.textContent = lotNo
-        ? (lotStatus === "COMPLETED" ? "Ready for Sticker" : (isReady ? "Ready to Complete Lot" : (nextStep || "-")))
+        ? (isManualLot ? "Use Sticker page" : (lotStatus === "COMPLETED" ? "Ready for Sticker" : (canCompleteLot ? "Ready to Complete Lot" : (nextStep || "-"))))
         : "-";
-      nextEl.classList.toggle("process-guide-ready", isReady);
+      nextEl.classList.toggle("process-guide-ready", canCompleteLot || lotStatus === "COMPLETED");
       progressEl.textContent = lotNo ? progress : "0/0";
       if (statusEl) {
         statusEl.innerHTML = `<span class="lot-status-badge ${lotStatus === "COMPLETED" ? "completed" : canCompleteLot ? "ready" : ""}">${escapeHtml(lotStatus)}</span>`;
@@ -1410,12 +1427,16 @@
       if (actionHint) {
         if (!lotNo) {
           actionHint.textContent = "Select a lot to see completion status.";
+        } else if (isManualLot) {
+          actionHint.textContent = "Manual lot: no process workflow. Use Sticker page.";
         } else if (lotStatus === "COMPLETED") {
           actionHint.textContent = "Ready for Sticker";
         } else if (currentOpenProcessStep) {
           actionHint.textContent = "Complete the open step before completing this lot.";
-        } else if (!isReady) {
+        } else if (templateGuideExists && !isReady) {
           actionHint.textContent = "Finish the final process step before completing this lot.";
+        } else if (!templateGuideExists && (!latestCompletedStep || Number(latestCompletedStep.outputWeight || 0) <= 0)) {
+          actionHint.textContent = "Complete at least one process step with output weight before completing this lot.";
         } else if (!lotAdditiveStatus.loaded) {
           actionHint.textContent = "Checking KDM/Solder pending status.";
         } else if (pendingKdm > 0.0009) {
@@ -2207,10 +2228,11 @@
         const used = getUsedWeightByLot(lot.lotNo);
         const balance = Number(lot.finalWeight || 0) - used;
         const status = String(lot.status || "OPEN").trim().toUpperCase() === "COMPLETED" ? "COMPLETED" : "OPEN";
+        const lotLabel = lot.isManualLot ? `${lot.lotNo || ""} (Manual)` : (lot.lotNo || "");
 
         tbody.innerHTML += `
           <tr onclick="selectProcessLotForSteps('${encodeURIComponent(lot.lotNo || "")}')" style="cursor:pointer;">
-            <td>${lot.lotNo || ""}</td>
+            <td>${escapeHtml(lotLabel)}</td>
             <td>${Number(lot.rawWeight || 0).toFixed(3)}</td>
             <td>${Number(lot.totalKhadiCount || 1)}</td>
             <td>${formatProcessQty(lot.expectedTotalQty || 0)}</td>

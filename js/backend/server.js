@@ -325,40 +325,134 @@ function safeJsonStringify(value) {
   }
 }
 
-async function writeAuditLogSafe(connection, req, audit) {
+function sanitizeAuditPayload(value) {
+  if (value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditPayload(item));
+  }
+
+  if (typeof value === "object") {
+    const clean = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (/password|token|secret|otp|authorization|cookie/i.test(key)) {
+        clean[key] = "[REDACTED]";
+      } else {
+        clean[key] = sanitizeAuditPayload(item);
+      }
+    }
+    return clean;
+  }
+
+  return value;
+}
+
+function getAuditRequestId(req) {
+  const headerValue = String(req.headers["x-request-id"] || req.headers["x-correlation-id"] || "").trim();
+  if (headerValue) return headerValue.slice(0, 80);
+
+  if (!req.auditRequestId) {
+    req.auditRequestId = crypto.randomUUID();
+  }
+
+  return req.auditRequestId;
+}
+
+function getAccessActorRole(access, fallback = "") {
+  return String(
+    access?.actingUser?.role ||
+      access?.user?.role ||
+      fallback ||
+      ""
+  ).trim();
+}
+
+async function logActivitySafe(connectionOrPool, req, access, details = {}) {
   try {
+    const connection = connectionOrPool || pool;
+    const companyId =
+      details.company_id ??
+      details.companyId ??
+      access?.companyScope ??
+      getRequestedCompanyId(req) ??
+      null;
+    const userId =
+      details.user_id ??
+      details.userId ??
+      access?.actingUserId ??
+      getRequestedUserId(req) ??
+      null;
+
     await connection.query(
       `
       INSERT INTO audit_log
       (
         company_id,
         user_id,
+        actor_role,
         action_type,
         entity_type,
         entity_id,
+        module_name,
+        route,
+        method,
+        status,
+        message,
         before_data,
         after_data,
+        metadata,
+        request_id,
         ip_address,
         user_agent,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
-        audit.companyId ?? null,
-        audit.userId ?? null,
-        String(audit.actionType || "").trim(),
-        String(audit.entityType || "").trim(),
-        String(audit.entityId || "").trim(),
-        safeJsonStringify(audit.beforeData),
-        safeJsonStringify(audit.afterData),
+        companyId,
+        userId,
+        getAccessActorRole(access, details.actor_role ?? details.actorRole),
+        String(details.action_type ?? details.actionType ?? "").trim(),
+        String(details.entity_type ?? details.entityType ?? "").trim(),
+        String(details.entity_id ?? details.entityId ?? "").trim(),
+        String(details.module_name ?? details.moduleName ?? "").trim(),
+        String(details.route ?? req.originalUrl ?? req.path ?? "").trim().slice(0, 255),
+        String(details.method ?? req.method ?? "").trim().toUpperCase().slice(0, 16),
+        String(details.status ?? "").trim().toLowerCase().slice(0, 30),
+        String(details.message ?? "").trim().slice(0, 500),
+        safeJsonStringify(sanitizeAuditPayload(details.before_data ?? details.beforeData)),
+        safeJsonStringify(sanitizeAuditPayload(details.after_data ?? details.afterData)),
+        safeJsonStringify(sanitizeAuditPayload(details.metadata)),
+        String(details.request_id ?? details.requestId ?? getAuditRequestId(req)).trim().slice(0, 80),
         getRequestIpAddress(req),
         String(req.headers["user-agent"] || "").trim()
       ]
     );
   } catch (error) {
-    console.error("Audit log write failed:", error);
+    console.error("Activity log write failed:", error);
   }
+}
+
+async function logOtpActivitySafe(connectionOrPool, req, access, phase, status, message, metadata = {}) {
+  await logActivitySafe(connectionOrPool, req, access, {
+    companyId: metadata.companyId ?? access?.companyScope ?? null,
+    userId: metadata.userId ?? access?.actingUserId ?? null,
+    actorRole: metadata.actorRole ?? access?.actingUser?.role ?? "",
+    actionType: phase,
+    entityType: "OTP",
+    entityId: String(metadata.purpose || "").trim(),
+    moduleName: "security",
+    status,
+    message,
+    metadata: {
+      ...metadata,
+      email: maskDebugIdentifier(metadata.email)
+    }
+  });
+}
+
+async function writeAuditLogSafe(connection, req, audit) {
+  await logActivitySafe(connection, req, null, audit);
 }
 
 async function hashPassword(password) {
@@ -3481,11 +3575,19 @@ async function ensureSchema() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
       user_id INT DEFAULT NULL,
+      actor_role VARCHAR(80) DEFAULT '',
       action_type VARCHAR(80) DEFAULT '',
       entity_type VARCHAR(80) DEFAULT '',
       entity_id VARCHAR(255) DEFAULT '',
+      module_name VARCHAR(80) DEFAULT '',
+      route VARCHAR(255) DEFAULT '',
+      method VARCHAR(16) DEFAULT '',
+      status VARCHAR(30) DEFAULT '',
+      message VARCHAR(500) DEFAULT '',
       before_data JSON DEFAULT NULL,
       after_data JSON DEFAULT NULL,
+      metadata JSON DEFAULT NULL,
+      request_id VARCHAR(80) DEFAULT '',
       ip_address VARCHAR(120) DEFAULT '',
       user_agent TEXT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -3494,6 +3596,18 @@ async function ensureSchema() {
       INDEX idx_audit_action (action_type)
     )
   `);
+
+  await addColumnIfMissing("audit_log", "actor_role", "VARCHAR(80) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "module_name", "VARCHAR(80) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "route", "VARCHAR(255) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "method", "VARCHAR(16) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "status", "VARCHAR(30) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "message", "VARCHAR(500) DEFAULT ''");
+  await addColumnIfMissing("audit_log", "metadata", "JSON DEFAULT NULL");
+  await addColumnIfMissing("audit_log", "request_id", "VARCHAR(80) DEFAULT ''");
+  await addIndexIfMissing("audit_log", "idx_audit_company_created", "(company_id, created_at)");
+  await addIndexIfMissing("audit_log", "idx_audit_company_entity", "(company_id, entity_type, entity_id)");
+  await addIndexIfMissing("audit_log", "idx_audit_user_created", "(user_id, created_at)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS otp_verifications (
@@ -5654,12 +5768,22 @@ app.get("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]),
 
 app.post("/otp/request", async (req, res) => {
   let connection;
+  let auditEmail = "";
+  let auditPurpose = "";
+  let access = null;
 
   try {
     const email = normalizeEmail(req.body.email);
     const purpose = normalizeOtpPurpose(req.body.purpose);
+    auditEmail = email;
+    auditPurpose = purpose || String(req.body.purpose || "").trim();
 
     if (!email) {
+      await logOtpActivitySafe(pool, req, null, "OTP_REQUEST", "failed", "OTP request validation failed", {
+        email,
+        purpose: auditPurpose,
+        reason: "EMAIL_REQUIRED"
+      });
       return res.status(400).json({
         success: false,
         message: "Email is required"
@@ -5667,6 +5791,11 @@ app.post("/otp/request", async (req, res) => {
     }
 
     if (!purpose) {
+      await logOtpActivitySafe(pool, req, null, "OTP_REQUEST", "failed", "OTP request validation failed", {
+        email,
+        purpose: auditPurpose,
+        reason: "PURPOSE_REQUIRED"
+      });
       return res.status(400).json({
         success: false,
         message: "OTP purpose is required"
@@ -5681,13 +5810,18 @@ app.post("/otp/request", async (req, res) => {
     let actingUserId = null;
 
     if (purpose === OTP_PURPOSES.SETTINGS_UNLOCK) {
-      const access = await resolveAccessContext(req, {
+      access = await resolveAccessContext(req, {
         requireActingUser: true,
         requireCompanyScope: false,
         allowSuperAdminAll: true
       });
 
       if (!access.ok) {
+        await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "denied", "OTP request access denied", {
+          email,
+          purpose,
+          reason: access.message || "ACCESS_DENIED"
+        });
         return sendAccessError(res, access);
       }
 
@@ -5697,6 +5831,11 @@ app.post("/otp/request", async (req, res) => {
           email,
           purpose
         });
+        await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "denied", "SuperAdmin settings unlock denied", {
+          email,
+          purpose,
+          reason: "SUPERADMIN_SETTINGS_UNLOCK_DENIED"
+        });
         return res.status(403).json({
           success: false,
           message: "Only the company owner/admin can unlock company settings"
@@ -5704,6 +5843,11 @@ app.post("/otp/request", async (req, res) => {
       }
 
       if (!isSameCompanySettingsOwnerAdmin(access)) {
+        await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "denied", "Settings unlock denied", {
+          email,
+          purpose,
+          reason: "NOT_COMPANY_OWNER_ADMIN"
+        });
         return res.status(403).json({
           success: false,
           message: "Only the company owner/admin can unlock company settings"
@@ -5712,6 +5856,11 @@ app.post("/otp/request", async (req, res) => {
 
       const allowedEmails = await getAllowedSettingsUnlockEmails(connection, access);
       if (!allowedEmails.has(email)) {
+        await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "denied", "Settings unlock email denied", {
+          email,
+          purpose,
+          reason: "EMAIL_NOT_ALLOWED"
+        });
         return res.status(403).json({
           success: false,
           message: "Entered email is not allowed for settings verification"
@@ -5724,6 +5873,11 @@ app.post("/otp/request", async (req, res) => {
     } else {
       targetUser = await findUserByEmail(email);
       if (!targetUser) {
+        await logOtpActivitySafe(connection, req, null, "OTP_REQUEST", "denied", "OTP request email not registered", {
+          email,
+          purpose,
+          reason: "USER_NOT_FOUND"
+        });
         return res.json({
           success: true,
           message: "If the email is registered, a verification code has been sent."
@@ -5736,6 +5890,13 @@ app.post("/otp/request", async (req, res) => {
 
     const recentCount = await countRecentOtpRequests(connection, email, purpose);
     if (recentCount >= OTP_REQUEST_LIMIT_COUNT) {
+      await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "failed", "OTP request rate limit reached", {
+        email,
+        purpose,
+        companyId: targetCompanyId,
+        userId: actingUserId,
+        reason: "REQUEST_LIMIT"
+      });
       return res.status(429).json({
         success: false,
         message: "Too many OTP requests. Please try again later."
@@ -5748,6 +5909,13 @@ app.post("/otp/request", async (req, res) => {
       latestOtp.last_sent_at &&
       Date.now() - new Date(latestOtp.last_sent_at).getTime() < OTP_RESEND_COOLDOWN_SECONDS * 1000
     ) {
+      await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "failed", "OTP request cooldown active", {
+        email,
+        purpose,
+        companyId: targetCompanyId,
+        userId: actingUserId,
+        reason: "RESEND_COOLDOWN"
+      });
       return res.status(429).json({
         success: false,
         message: `Please wait ${OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting another code.`
@@ -5785,6 +5953,13 @@ app.post("/otp/request", async (req, res) => {
       purpose
     });
 
+    await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "success", "OTP request accepted", {
+      email,
+      purpose,
+      companyId: targetCompanyId,
+      userId: actingUserId
+    });
+
     return res.json({
       success: true,
       message:
@@ -5793,6 +5968,12 @@ app.post("/otp/request", async (req, res) => {
           : "If the email is registered, a verification code has been sent."
     });
   } catch (error) {
+    await logOtpActivitySafe(connection || pool, req, access, "OTP_REQUEST", "failed", "OTP request failed", {
+      email: auditEmail,
+      purpose: auditPurpose,
+      reason: "SERVER_ERROR",
+      error: error?.message || "Unknown error"
+    });
     console.error("OTP request error:", error);
     return res.status(500).json({
       success: false,
@@ -5806,13 +5987,23 @@ app.post("/otp/request", async (req, res) => {
 
 app.post("/otp/verify", async (req, res) => {
   let connection;
+  let auditEmail = "";
+  let auditPurpose = "";
+  let access = null;
 
   try {
     const email = normalizeEmail(req.body.email);
     const purpose = normalizeOtpPurpose(req.body.purpose);
     const otp = String(req.body.otp || "").trim();
+    auditEmail = email;
+    auditPurpose = purpose || String(req.body.purpose || "").trim();
 
     if (!email || !purpose || !otp) {
+      await logOtpActivitySafe(pool, req, null, "OTP_VERIFY", "failed", "OTP verify validation failed", {
+        email,
+        purpose: auditPurpose,
+        reason: "MISSING_REQUIRED_FIELDS"
+      });
       return res.status(400).json({
         success: false,
         message: "Email, purpose, and OTP are required"
@@ -5834,6 +6025,11 @@ app.post("/otp/verify", async (req, res) => {
       });
 
       if (!access.ok) {
+        await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "denied", "OTP verify access denied", {
+          email,
+          purpose,
+          reason: access.message || "ACCESS_DENIED"
+        });
         return sendAccessError(res, access);
       }
 
@@ -5843,6 +6039,11 @@ app.post("/otp/verify", async (req, res) => {
           email,
           purpose
         });
+        await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "denied", "SuperAdmin settings verify denied", {
+          email,
+          purpose,
+          reason: "SUPERADMIN_SETTINGS_VERIFY_DENIED"
+        });
         return res.status(403).json({
           success: false,
           message: "Only the company owner/admin can unlock company settings"
@@ -5850,6 +6051,11 @@ app.post("/otp/verify", async (req, res) => {
       }
 
       if (!isSameCompanySettingsOwnerAdmin(access)) {
+        await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "denied", "Settings verify denied", {
+          email,
+          purpose,
+          reason: "NOT_COMPANY_OWNER_ADMIN"
+        });
         return res.status(403).json({
           success: false,
           message: "Only the company owner/admin can unlock company settings"
@@ -5858,6 +6064,11 @@ app.post("/otp/verify", async (req, res) => {
 
       const allowedEmails = await getAllowedSettingsUnlockEmails(connection, access);
       if (!allowedEmails.has(email)) {
+        await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "denied", "Settings verify email denied", {
+          email,
+          purpose,
+          reason: "EMAIL_NOT_ALLOWED"
+        });
         return res.status(403).json({
           success: false,
           message: "Entered email is not allowed for settings verification"
@@ -5869,6 +6080,11 @@ app.post("/otp/verify", async (req, res) => {
     } else {
       const passwordResetUser = await findUserByEmail(email);
       if (!passwordResetUser) {
+        await logOtpActivitySafe(connection, req, null, "OTP_VERIFY", "denied", "OTP verify email not registered", {
+          email,
+          purpose,
+          reason: "USER_NOT_FOUND"
+        });
         return res.status(400).json({
           success: false,
           message: "Invalid or expired verification code"
@@ -5882,6 +6098,13 @@ app.post("/otp/verify", async (req, res) => {
     const otpRow = await getLatestOtpRecord(connection, email, purpose);
 
     if (!otpRow || otpRow.consumed_at) {
+      await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "failed", "OTP verify record invalid", {
+        email,
+        purpose,
+        companyId: expectedCompanyId,
+        userId: expectedUserId,
+        reason: "INVALID_OR_CONSUMED"
+      });
       return res.status(400).json({
         success: false,
         message: "Invalid or expired verification code"
@@ -5889,6 +6112,13 @@ app.post("/otp/verify", async (req, res) => {
     }
 
     if (otpRow.blocked_until && new Date(otpRow.blocked_until).getTime() > Date.now()) {
+      await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "failed", "OTP verify blocked", {
+        email,
+        purpose,
+        companyId: expectedCompanyId,
+        userId: expectedUserId,
+        reason: "BLOCKED"
+      });
       return res.status(429).json({
         success: false,
         message: "Too many failed attempts. Please request a new code later."
@@ -5905,6 +6135,14 @@ app.post("/otp/verify", async (req, res) => {
         [otpRow.id]
       );
 
+      await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "failed", "OTP verify expired", {
+        email,
+        purpose,
+        companyId: expectedCompanyId,
+        userId: expectedUserId,
+        reason: "EXPIRED"
+      });
+
       return res.status(400).json({
         success: false,
         message: "Verification code has expired"
@@ -5915,6 +6153,13 @@ app.post("/otp/verify", async (req, res) => {
       (expectedUserId !== null && Number(otpRow.user_id || 0) !== Number(expectedUserId)) ||
       (expectedCompanyId !== null && Number(otpRow.company_id || 0) !== Number(expectedCompanyId))
     ) {
+      await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "denied", "OTP verify context mismatch", {
+        email,
+        purpose,
+        companyId: expectedCompanyId,
+        userId: expectedUserId,
+        reason: "CONTEXT_MISMATCH"
+      });
       return res.status(403).json({
         success: false,
         message: "Verification request does not match the current user"
@@ -5936,6 +6181,15 @@ app.post("/otp/verify", async (req, res) => {
         `,
         [nextAttempts, reachedLimit ? 1 : 0, otpRow.id]
       );
+
+      await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "failed", "OTP verify code mismatch", {
+        email,
+        purpose,
+        companyId: expectedCompanyId,
+        userId: expectedUserId,
+        reason: reachedLimit ? "ATTEMPT_LIMIT_REACHED" : "CODE_MISMATCH",
+        attemptCount: nextAttempts
+      });
 
       return res.status(400).json({
         success: false,
@@ -5959,6 +6213,13 @@ app.post("/otp/verify", async (req, res) => {
       [hashSecret(sessionToken), getFutureDate(OTP_SESSION_EXPIRY_MINUTES), otpRow.id]
     );
 
+    await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "success", "OTP verified", {
+      email,
+      purpose,
+      companyId: expectedCompanyId,
+      userId: expectedUserId
+    });
+
     return res.json({
       success: true,
       message:
@@ -5969,6 +6230,12 @@ app.post("/otp/verify", async (req, res) => {
       sessionToken
     });
   } catch (error) {
+    await logOtpActivitySafe(connection || pool, req, access, "OTP_VERIFY", "failed", "OTP verification failed", {
+      email: auditEmail,
+      purpose: auditPurpose,
+      reason: "SERVER_ERROR",
+      error: error?.message || "Unknown error"
+    });
     console.error("OTP verify error:", error);
     return res.status(500).json({
       success: false,
@@ -8948,18 +9215,48 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
   }
 });
 
-app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
+app.post("/process/manual-lots", authMiddleware, async (req, res) => {
   let connection;
+  let access = null;
 
   try {
-    const access = await resolveAccessContext(req, {
+    access = await resolveAccessContext(req, {
       requireActingUser: true,
       requireCompanyScope: true,
       allowSuperAdminAll: false
     });
 
     if (!access.ok) {
+      await logActivitySafe(pool, req, access, {
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        moduleName: "process",
+        status: "denied",
+        message: "Manual lot access denied",
+        metadata: {
+          reason: access.message || "ACCESS_DENIED",
+          lotNo: normalizeProcessLotNo(req.body.lotNo || req.body.lot_no)
+        }
+      });
       return sendAccessError(res, access);
+    }
+
+    if (!access.isSuperAdmin && !access.isApprovedAdmin) {
+      await logActivitySafe(pool, req, access, {
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        moduleName: "process",
+        status: "denied",
+        message: "Manual lot role denied",
+        metadata: {
+          reason: "ROLE_DENIED",
+          lotNo: normalizeProcessLotNo(req.body.lotNo || req.body.lot_no)
+        }
+      });
+      return res.status(403).json({
+        success: false,
+        message: "Access denied"
+      });
     }
 
     const companyId = access.companyScope;
@@ -8968,6 +9265,18 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
     const reason = String(req.body.reason || req.body.manual_reason || "").trim();
 
     if (!lotNo) {
+      await logActivitySafe(pool, req, access, {
+        companyId,
+        userId,
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        moduleName: "process",
+        status: "failed",
+        message: "Manual lot validation failed",
+        metadata: {
+          reason: "LOT_NO_REQUIRED"
+        }
+      });
       return res.status(400).json({
         success: false,
         message: "lotNo is required"
@@ -8975,6 +9284,20 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
     }
 
     if (!reason) {
+      await logActivitySafe(pool, req, access, {
+        companyId,
+        userId,
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        entityId: lotNo,
+        moduleName: "process",
+        status: "failed",
+        message: "Manual lot validation failed",
+        metadata: {
+          reason: "MANUAL_REASON_REQUIRED",
+          lotNo
+        }
+      });
       return res.status(400).json({
         success: false,
         message: "Manual lot reason is required"
@@ -8982,6 +9305,20 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
     }
 
     if (reason.length > 255) {
+      await logActivitySafe(pool, req, access, {
+        companyId,
+        userId,
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        entityId: lotNo,
+        moduleName: "process",
+        status: "failed",
+        message: "Manual lot validation failed",
+        metadata: {
+          reason: "MANUAL_REASON_TOO_LONG",
+          lotNo
+        }
+      });
       return res.status(400).json({
         success: false,
         message: "Manual lot reason must be 255 characters or less"
@@ -9004,6 +9341,20 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
 
     if (existingRows.length) {
       await connection.rollback();
+      await logActivitySafe(connection, req, access, {
+        companyId,
+        userId,
+        actionType: "CREATE",
+        entityType: "PROCESS_MANUAL_LOT",
+        entityId: lotNo,
+        moduleName: "process",
+        status: "denied",
+        message: "Manual lot duplicate denied",
+        metadata: {
+          reason: "DUPLICATE_LOT_NO",
+          lotNo
+        }
+      });
       return res.status(409).json({
         success: false,
         message: "This lot number already exists for the selected company"
@@ -9041,6 +9392,27 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
       [insertResult.insertId]
     );
 
+    await logActivitySafe(connection, req, access, {
+      companyId,
+      userId,
+      actionType: "CREATE",
+      entityType: "PROCESS_MANUAL_LOT",
+      entityId: lotNo,
+      moduleName: "process",
+      status: "success",
+      message: "Manual lot created",
+      afterData: {
+        id: insertResult.insertId,
+        lotNo,
+        status: "COMPLETED",
+        isManualLot: true,
+        manualCreatedBy: userId
+      },
+      metadata: {
+        lotNo
+      }
+    });
+
     await connection.commit();
 
     return res.status(201).json({
@@ -9050,6 +9422,18 @@ app.post("/process/manual-lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER
     });
   } catch (error) {
     if (connection) await connection.rollback();
+    await logActivitySafe(connection || pool, req, access, {
+      actionType: "CREATE",
+      entityType: "PROCESS_MANUAL_LOT",
+      moduleName: "process",
+      status: "failed",
+      message: "Manual lot creation failed",
+      metadata: {
+        lotNo: normalizeProcessLotNo(req.body?.lotNo || req.body?.lot_no),
+        reason: "SERVER_ERROR",
+        error: error?.message || "Unknown error"
+      }
+    });
     console.error("Create manual process lot error:", error);
     return res.status(500).json({
       success: false,
@@ -13547,6 +13931,17 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     const password = String(req.body.password || "").trim();
 
     if (!email || !password) {
+      await logActivitySafe(pool, req, null, {
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        moduleName: "auth",
+        status: "failed",
+        message: "Login validation failed",
+        metadata: {
+          email: maskDebugIdentifier(email),
+          reason: "MISSING_EMAIL_OR_PASSWORD"
+        }
+      });
       return res.status(200).json({
         success: false,
         message: "Email and password are required"
@@ -13556,11 +13951,37 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     const user = await findUserByEmail(email);
 
     if (!user) {
+      await logActivitySafe(pool, req, null, {
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        moduleName: "auth",
+        status: "denied",
+        message: "Invalid login",
+        metadata: {
+          email: maskDebugIdentifier(email),
+          reason: "USER_NOT_FOUND"
+        }
+      });
       return res.status(200).json({ success: false, message: "Invalid login" });
     }
 
     const passwordMatches = await verifyPasswordForUser(user, password);
     if (!passwordMatches) {
+      await logActivitySafe(pool, req, null, {
+        companyId: user.company_id ?? null,
+        userId: user.id ?? null,
+        actorRole: user.role || "",
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        entityId: String(user.id || ""),
+        moduleName: "auth",
+        status: "denied",
+        message: "Invalid login",
+        metadata: {
+          email: maskDebugIdentifier(email),
+          reason: "PASSWORD_MISMATCH"
+        }
+      });
       return res.status(200).json({ success: false, message: "Invalid login" });
     }
 
@@ -13573,16 +13994,59 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     }
 
     if (String(user.status || "").toLowerCase() !== "approved") {
+      await logActivitySafe(pool, req, null, {
+        companyId: user.company_id ?? null,
+        userId: user.id ?? null,
+        actorRole: user.role || "",
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        entityId: String(user.id || ""),
+        moduleName: "auth",
+        status: "denied",
+        message: "Pending approval",
+        metadata: {
+          email: maskDebugIdentifier(email),
+          userStatus: user.status || ""
+        }
+      });
       return res.status(200).json({ success: false, message: "Pending approval" });
     }
 
     if (!String(user.role || "").trim()) {
+      await logActivitySafe(pool, req, null, {
+        companyId: user.company_id ?? null,
+        userId: user.id ?? null,
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        entityId: String(user.id || ""),
+        moduleName: "auth",
+        status: "denied",
+        message: "Role not assigned",
+        metadata: {
+          email: maskDebugIdentifier(email)
+        }
+      });
       return res.status(200).json({ success: false, message: "Role not assigned yet" });
     }
 
     const token = signAuthToken(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+
+    await logActivitySafe(pool, req, null, {
+      companyId: user.company_id ?? null,
+      userId: user.id ?? null,
+      actorRole: user.role || "",
+      actionType: "LOGIN",
+      entityType: "AUTH",
+      entityId: String(user.id || ""),
+      moduleName: "auth",
+      status: "success",
+      message: "Login successful",
+      metadata: {
+        email: maskDebugIdentifier(email)
+      }
+    });
 
     return res.status(200).json({
       success: true,
@@ -13602,6 +14066,17 @@ app.post("/login", loginRateLimiter, async (req, res) => {
       }
     });
   } catch (error) {
+    await logActivitySafe(pool, req, null, {
+      actionType: "LOGIN",
+      entityType: "AUTH",
+      moduleName: "auth",
+      status: "failed",
+      message: "Login failed",
+      metadata: {
+        email: maskDebugIdentifier(req.body?.email),
+        error: error?.message || "Unknown error"
+      }
+    });
     console.error("Login error:", error);
     return res.status(500).json({
       success: false,
@@ -13611,7 +14086,18 @@ app.post("/login", loginRateLimiter, async (req, res) => {
   }
 });
 
-app.post("/auth/logout", (_req, res) => {
+app.post("/auth/logout", async (req, res) => {
+  await logActivitySafe(pool, req, null, {
+    userId: getRequestedUserId(req),
+    actorRole: req.user?.role || "",
+    actionType: "LOGOUT",
+    entityType: "AUTH",
+    entityId: String(getRequestedUserId(req) || ""),
+    moduleName: "auth",
+    status: "success",
+    message: "Logout successful"
+  });
+
   res.clearCookie(AUTH_COOKIE_NAME, getClearAuthCookieOptions());
 
   return res.json({
