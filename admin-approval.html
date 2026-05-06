@@ -424,7 +424,7 @@
 
           <div class="approval-card" id="staffRequestsCard">
             <div class="approval-head">
-              <h3>Pending Staff Requests</h3>
+              <h3 id="staffRequestsTitle">Pending Staff Requests</h3>
 
               <div class="search-box">
                 <i class="fas fa-search"></i>
@@ -461,7 +461,7 @@
         </div>
 
         <div class="summary-card">
-          <h3>Approval Summary</h3>
+          <h3 id="approvalSummaryTitle">Approval Summary</h3>
 
           <div class="summary-grid">
             <div class="summary-box" id="pendingCompaniesSummary">
@@ -475,12 +475,12 @@
             </div>
 
             <div class="summary-box">
-              <p>Total Pending Staff</p>
+              <p id="pendingStaffSummaryLabel">Total Pending Staff</p>
               <h2 id="pendingCount">0</h2>
             </div>
 
             <div class="summary-box">
-              <p>Total Approved Staff</p>
+              <p id="approvedStaffSummaryLabel">Total Approved Staff</p>
               <h2 id="approvedCount">0</h2>
             </div>
           </div>
@@ -610,6 +610,46 @@
       return String(document.getElementById("companySearch")?.value || "").trim().toLowerCase();
     }
 
+    function getApprovalRole(user = loggedInUser) {
+      if (typeof getNormalizedRole === "function") {
+        return getNormalizedRole(user);
+      }
+
+      const rawRole = String(user?.role || "").trim().toLowerCase();
+      if (rawRole === "admin") return "owner";
+      if (["billing", "invoice", "sticker", "stock", "process"].includes(rawRole)) return "staff";
+      if (["transaction", "expense"].includes(rawRole)) return "accounts";
+      return rawRole;
+    }
+
+    function isCompanyApprovalAdmin(user = loggedInUser) {
+      return getApprovalRole(user) === "owner";
+    }
+
+    function clearCompanyApprovalDom() {
+      pendingCompaniesData = [];
+      approvedCompaniesData = [];
+
+      const pendingCompaniesBody = document.getElementById("pendingCompaniesBody");
+      const approvedCompaniesList = document.getElementById("approvedCompaniesList");
+      const companySearch = document.getElementById("companySearch");
+
+      if (pendingCompaniesBody) pendingCompaniesBody.innerHTML = "";
+      if (approvedCompaniesList) approvedCompaniesList.innerHTML = "";
+      if (companySearch) companySearch.value = "";
+    }
+
+    function clearStaffApprovalDom() {
+      pendingUsersData = [];
+      approvedUsersData = [];
+
+      const pendingUsersBody = document.getElementById("pendingUsersBody");
+      const recentApprovedList = document.getElementById("recentApprovedList");
+
+      if (pendingUsersBody) pendingUsersBody.innerHTML = "";
+      if (recentApprovedList) recentApprovedList.innerHTML = "";
+    }
+
     function applyRoleBasedUI() {
       const companyRequestsCard = document.getElementById("companyRequestsCard");
       const staffRequestsCard = document.getElementById("staffRequestsCard");
@@ -617,21 +657,37 @@
       const approvedCompaniesSummary = document.getElementById("approvedCompaniesSummary");
       const approvedCompaniesList = document.getElementById("approvedCompaniesList");
       const pageTitle = document.getElementById("approvalPageTitle");
+      const approvalSummaryTitle = document.getElementById("approvalSummaryTitle");
+      const staffRequestsTitle = document.getElementById("staffRequestsTitle");
+      const pendingStaffSummaryLabel = document.getElementById("pendingStaffSummaryLabel");
+      const approvedStaffSummaryLabel = document.getElementById("approvedStaffSummaryLabel");
+      const approvalSearch = document.getElementById("approvalSearch");
 
       if (isSuperAdminUser) {
-        if (pageTitle) pageTitle.textContent = "Super Admin Company Approval";
+        if (pageTitle) pageTitle.textContent = "Super Admin Approval";
+        if (approvalSummaryTitle) approvalSummaryTitle.textContent = "All-Company Approval Summary";
+        if (staffRequestsTitle) staffRequestsTitle.textContent = "All Pending Staff Requests";
+        if (pendingStaffSummaryLabel) pendingStaffSummaryLabel.textContent = "All Pending Staff";
+        if (approvedStaffSummaryLabel) approvedStaffSummaryLabel.textContent = "All Approved Staff";
+        if (approvalSearch) approvalSearch.placeholder = "Search by name / email / mobile / company";
         if (companyRequestsCard) companyRequestsCard.classList.remove("hidden");
-        if (staffRequestsCard) staffRequestsCard.classList.add("hidden");
+        if (staffRequestsCard) staffRequestsCard.classList.remove("hidden");
         if (pendingCompaniesSummary) pendingCompaniesSummary.classList.remove("hidden");
         if (approvedCompaniesSummary) approvedCompaniesSummary.classList.remove("hidden");
         if (approvedCompaniesList) approvedCompaniesList.classList.remove("hidden");
       } else {
         if (pageTitle) pageTitle.textContent = "Company Staff Approval";
+        if (approvalSummaryTitle) approvalSummaryTitle.textContent = "Company Staff Approval";
+        if (staffRequestsTitle) staffRequestsTitle.textContent = "Pending Staff";
+        if (pendingStaffSummaryLabel) pendingStaffSummaryLabel.textContent = "Pending Staff";
+        if (approvedStaffSummaryLabel) approvedStaffSummaryLabel.textContent = "Approved Staff";
+        if (approvalSearch) approvalSearch.placeholder = "Search staff by name / email / mobile";
         if (companyRequestsCard) companyRequestsCard.classList.add("hidden");
         if (staffRequestsCard) staffRequestsCard.classList.remove("hidden");
         if (pendingCompaniesSummary) pendingCompaniesSummary.classList.add("hidden");
         if (approvedCompaniesSummary) approvedCompaniesSummary.classList.add("hidden");
         if (approvedCompaniesList) approvedCompaniesList.classList.add("hidden");
+        clearCompanyApprovalDom();
       }
     }
 
@@ -726,6 +782,7 @@
 
       if (!tbody) return;
       tbody.innerHTML = "";
+      if (!isSuperAdminUser) return;
 
       const filtered = pendingCompaniesData.filter((company) => {
         const hay =
@@ -995,7 +1052,11 @@
 
     function renderApprovedCompanies() {
       const box = document.getElementById("approvedCompaniesList");
-      if (!box || !isSuperAdminUser) return;
+      if (!box) return;
+      if (!isSuperAdminUser) {
+        box.innerHTML = "";
+        return;
+      }
 
       box.innerHTML = `<h3 style="margin-top:18px;">Approved Companies</h3>`;
 
@@ -1026,7 +1087,7 @@
       const box = document.getElementById("recentApprovedList");
       if (!box) return;
 
-      box.innerHTML = `<h3 style="margin-top:18px;">Recently Approved Staff</h3>`;
+      box.innerHTML = `<h3 style="margin-top:18px;">${isSuperAdminUser ? "Recently Approved Staff" : "Approved Staff"}</h3>`;
 
       if (!approvedUsersData.length) {
         box.innerHTML += `
@@ -1038,13 +1099,17 @@
       }
 
       approvedUsersData.slice(0, 5).forEach((user) => {
+        const companyLine = isSuperAdminUser
+          ? `Company: ${safeText(user.company_name || user.company_id || "-")}<br>`
+          : "";
+
         box.innerHTML += `
           <div class="recent-item">
             <strong>${safeText(user.name || "-")}</strong>
             <p>
               Email: ${safeText(user.email || "-")}<br>
               Role: ${safeText(user.role || "-")}<br>
-              Company ID: ${user.company_id ?? "-"}<br>
+              ${companyLine}
               Status: ${safeText(user.status || "-")}
             </p>
           </div>
@@ -1054,13 +1119,19 @@
 
     async function loadApprovalData() {
       try {
-        await Promise.all([
-          fetchPendingCompanies(),
-          fetchApprovedCompanies(),
-          fetchPendingUsers(),
-          fetchApprovedUsers()
-        ]);
+        applyRoleBasedUI();
+        clearStaffApprovalDom();
 
+        const fetchJobs = [fetchPendingUsers(), fetchApprovedUsers()];
+        if (isSuperAdminUser) {
+          fetchJobs.push(fetchPendingCompanies(), fetchApprovedCompanies());
+        } else {
+          clearCompanyApprovalDom();
+        }
+
+        await Promise.all(fetchJobs);
+
+        applyRoleBasedUI();
         renderPendingCompanies();
         renderPendingUsers();
         updateSummary();
@@ -1082,13 +1153,13 @@
       }
 
       isSuperAdminUser =
-        String(loggedInUser.role || "").toLowerCase() === "superadmin" ||
+        getApprovalRole(loggedInUser) === "superadmin" ||
         String(loggedInUser.email || "").toLowerCase() === "grudrapratap0@gmail.com";
 
       currentCompanyId = loggedInUser.company_id ?? loggedInUser.companyId ?? null;
 
-      if (!isSuperAdminUser && String(loggedInUser.role || "").toLowerCase() !== "admin") {
-      showToast("Only a Super Admin or Company Admin can view this page.", "error");
+      if (!isSuperAdminUser && !isCompanyApprovalAdmin(loggedInUser)) {
+        showToast("Only a Super Admin or Company Admin can view this page.", "error");
         window.location.href = "dashboard.html";
         return;
       }

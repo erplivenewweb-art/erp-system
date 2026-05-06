@@ -13204,7 +13204,7 @@ app.post("/requestStaffJoin", async (req, res) => {
   }
 });
 
-app.get("/pendingUsers", authMiddleware, async (req, res) => {
+app.get("/pendingUsers", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -13253,7 +13253,7 @@ app.get("/pendingUsers", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/pendingStaffRequests", authMiddleware, async (req, res) => {
+app.get("/pendingStaffRequests", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
@@ -13302,7 +13302,7 @@ app.get("/pendingStaffRequests", authMiddleware, async (req, res) => {
   }
 });
 
-app.get("/approvedUsers", authMiddleware, async (req, res) => {
+app.get("/approvedUsers", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
