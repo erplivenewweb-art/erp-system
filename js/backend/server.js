@@ -819,6 +819,8 @@ function normalizeProcessLotRow(row) {
   return {
     ...row,
     status: normalizeProcessLotStatus(row.status),
+    work_category: normalizeWorkCategory(row.work_category),
+    workCategory: normalizeWorkCategory(row.workCategory ?? row.work_category),
     raw_weight: toNumber(row.raw_weight),
     loss_weight: toNumber(row.loss_weight),
     final_weight: toNumber(row.final_weight),
@@ -830,6 +832,21 @@ function normalizeProcessLotRow(row) {
 
 function isManualProcessLot(processLot) {
   return Number(processLot?.is_manual_lot || 0) === 1;
+}
+
+function normalizeWorkCategory(value = "") {
+  const clean = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  if (!clean) return "REGULAR_SANKHA";
+  if (clean === "REGULAR" || clean === "SANKHA") return "REGULAR_SANKHA";
+  if (clean === "JALI") return "JALI_SANKHA";
+  return clean.slice(0, 40) || "REGULAR_SANKHA";
+}
+
+function normalizeMaterialType(value = "") {
+  const clean = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  if (!clean) return "KDM";
+  if (clean === "SOLDERING" || clean === "SOLDER") return "SOLDER";
+  return clean.slice(0, 60) || "KDM";
 }
 
 function normalizeKarigarWorkRow(row) {
@@ -888,6 +905,29 @@ function normalizeAdditiveIssueRow(row) {
     materialLabel: String(row.material_label || ""),
     karigarName: String(row.karigar_name || ""),
     lotNo: String(row.lot_no || "")
+  };
+}
+
+function normalizeProcessMaterialIssueRow(row) {
+  return {
+    ...row,
+    company_id: row.company_id === null || row.company_id === undefined ? null : Number(row.company_id),
+    process_step_id: row.process_step_id === null || row.process_step_id === undefined ? null : Number(row.process_step_id),
+    karigar_id: row.karigar_id === null || row.karigar_id === undefined ? null : Number(row.karigar_id),
+    work_category: normalizeWorkCategory(row.work_category),
+    workCategory: normalizeWorkCategory(row.workCategory ?? row.work_category),
+    material_type: normalizeMaterialType(row.material_type),
+    materialType: normalizeMaterialType(row.materialType ?? row.material_type),
+    given_weight: toNumber(row.given_weight),
+    returned_weight: toNumber(row.returned_weight),
+    used_weight: toNumber(row.used_weight),
+    givenWeight: toNumber(row.given_weight),
+    returnedWeight: toNumber(row.returned_weight),
+    usedWeight: toNumber(row.used_weight),
+    pendingWeight: Math.max(toNumber(row.given_weight) - toNumber(row.returned_weight), 0),
+    karigarName: String(row.karigar_name || ""),
+    lotNo: String(row.lot_no || ""),
+    status: String(row.status || "ISSUED").trim().toUpperCase()
   };
 }
 
@@ -3349,6 +3389,7 @@ async function ensureSchema() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
       name VARCHAR(255) NOT NULL,
+      work_category VARCHAR(40) DEFAULT 'REGULAR_SANKHA',
       is_default TINYINT(1) DEFAULT 0,
       status VARCHAR(30) DEFAULT 'ACTIVE',
       created_by INT DEFAULT NULL,
@@ -3385,6 +3426,7 @@ async function ensureSchema() {
       final_weight DECIMAL(14,3) DEFAULT 0.000,
       total_khadi_count INT DEFAULT 1,
       expected_total_qty DECIMAL(14,3) DEFAULT 0.000,
+      work_category VARCHAR(40) DEFAULT 'REGULAR_SANKHA',
       status ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN',
       template_id INT DEFAULT NULL,
       template_snapshot_json JSON DEFAULT NULL,
@@ -3446,6 +3488,30 @@ async function ensureSchema() {
       given_weight DECIMAL(14,3) DEFAULT 0.000,
       returned_weight DECIMAL(14,3) DEFAULT 0.000,
       used_weight DECIMAL(14,3) DEFAULT 0.000,
+      status VARCHAR(30) DEFAULT 'ISSUED',
+      issued_by INT DEFAULT NULL,
+      issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      returned_by INT DEFAULT NULL,
+      returned_at DATETIME DEFAULT NULL,
+      notes TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_material_issues (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      lot_no VARCHAR(120) DEFAULT '',
+      work_category VARCHAR(40) DEFAULT 'REGULAR_SANKHA',
+      process_step_id INT DEFAULT NULL,
+      material_type VARCHAR(60) DEFAULT 'KDM',
+      given_weight DECIMAL(14,3) DEFAULT 0.000,
+      returned_weight DECIMAL(14,3) DEFAULT 0.000,
+      used_weight DECIMAL(14,3) DEFAULT 0.000,
+      karigar_id INT DEFAULT NULL,
+      karigar_name VARCHAR(255) DEFAULT '',
       status VARCHAR(30) DEFAULT 'ISSUED',
       issued_by INT DEFAULT NULL,
       issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -3806,11 +3872,17 @@ async function ensureSchema() {
   if (await tableExists("process_templates")) {
     await addColumnIfMissing("process_templates", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_templates", "name", "VARCHAR(255) NOT NULL");
+    await addColumnIfMissing("process_templates", "work_category", "VARCHAR(40) DEFAULT 'REGULAR_SANKHA'");
     await addColumnIfMissing("process_templates", "is_default", "TINYINT(1) DEFAULT 0");
     await addColumnIfMissing("process_templates", "status", "VARCHAR(30) DEFAULT 'ACTIVE'");
     await addColumnIfMissing("process_templates", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_templates", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_templates", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await pool.query(`
+      UPDATE process_templates
+      SET work_category = 'REGULAR_SANKHA'
+      WHERE work_category IS NULL OR TRIM(work_category) = ''
+    `);
   }
 
   if (await tableExists("process_template_steps")) {
@@ -3835,6 +3907,7 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "final_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_lots", "total_khadi_count", "INT DEFAULT 1");
     await addColumnIfMissing("process_lots", "expected_total_qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lots", "work_category", "VARCHAR(40) DEFAULT 'REGULAR_SANKHA'");
     await addColumnIfMissing("process_lots", "status", "ENUM('OPEN', 'COMPLETED') DEFAULT 'OPEN'");
     await addColumnIfMissing("process_lots", "template_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "template_snapshot_json", "JSON DEFAULT NULL");
@@ -3849,6 +3922,11 @@ async function ensureSchema() {
     await addColumnIfMissing("process_lots", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_lots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_lots", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await pool.query(`
+      UPDATE process_lots
+      SET work_category = 'REGULAR_SANKHA'
+      WHERE work_category IS NULL OR TRIM(work_category) = ''
+    `);
   }
 
   if (await tableExists("process_steps")) {
@@ -3897,6 +3975,27 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_additive_issues", "notes", "TEXT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("process_step_additive_issues", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("process_material_issues")) {
+    await addColumnIfMissing("process_material_issues", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "lot_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_material_issues", "work_category", "VARCHAR(40) DEFAULT 'REGULAR_SANKHA'");
+    await addColumnIfMissing("process_material_issues", "process_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "material_type", "VARCHAR(60) DEFAULT 'KDM'");
+    await addColumnIfMissing("process_material_issues", "given_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_material_issues", "returned_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_material_issues", "used_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_material_issues", "karigar_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "karigar_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_material_issues", "status", "VARCHAR(30) DEFAULT 'ISSUED'");
+    await addColumnIfMissing("process_material_issues", "issued_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "issued_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_material_issues", "returned_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "returned_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "notes", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_material_issues", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_material_issues", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
   if (await tableExists("process_step_recovery_inputs")) {
@@ -4056,6 +4155,10 @@ async function ensureSchema() {
     await addIndexIfMissing("return_history", "idx_returns_company_invoice", "(company_id, invoice_number)");
   }
 
+  if (await tableExists("process_lots")) {
+    await addIndexIfMissing("process_lots", "idx_process_lots_category_lot", "(company_id, work_category, lot_no)");
+  }
+
   if (await tableExists("process_steps")) {
     await addIndexIfMissing("process_steps", "idx_process_steps_lot_step", "(company_id, lot_no, step_no)");
     await addIndexIfMissing("process_steps", "idx_process_steps_lot_status", "(company_id, lot_no, status)");
@@ -4071,8 +4174,15 @@ async function ensureSchema() {
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_karigar", "(company_id, karigar_id)");
   }
 
+  if (await tableExists("process_material_issues")) {
+    await addIndexIfMissing("process_material_issues", "idx_material_issues_category_lot", "(company_id, work_category, lot_no)");
+    await addIndexIfMissing("process_material_issues", "idx_material_issues_type_status", "(company_id, material_type, status)");
+    await addIndexIfMissing("process_material_issues", "idx_material_issues_lot_type", "(company_id, lot_no, material_type)");
+  }
+
   if (await tableExists("process_templates")) {
     await addIndexIfMissing("process_templates", "idx_process_templates_company_default", "(company_id, is_default, status)");
+    await addIndexIfMissing("process_templates", "idx_process_templates_category_default", "(company_id, work_category, is_default, status)");
   }
 
   if (await tableExists("process_template_steps")) {
@@ -8188,6 +8298,334 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     return res.status(500).json({
       success: false,
       message: "Process additive issue return failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/material-issues", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const requestedWorkCategory = req.body.workCategory ?? req.body.work_category;
+    const rawMaterialType = String(req.body.materialType || req.body.material_type || req.body.materialLabel || req.body.material_label || "").trim();
+    const materialType = rawMaterialType ? normalizeMaterialType(rawMaterialType) : "";
+    const givenRaw = req.body.givenWeight ?? req.body.given_weight;
+    const parsedGiven = parseRequiredNumber(givenRaw, "Material given weight");
+    const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
+    const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
+    const karigarName = normalizeKarigarName(req.body.karigarName || req.body.karigar_name || req.body.karigar || "");
+    const notes = String(req.body.notes || req.body.note || "").trim();
+
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "Lot No is required"
+      });
+    }
+
+    if (!materialType) {
+      return res.status(400).json({
+        success: false,
+        message: "Material type is required"
+      });
+    }
+
+    if (!parsedGiven.ok || parsedGiven.value <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: parsedGiven.ok ? "Material given weight must be greater than zero" : parsedGiven.message
+      });
+    }
+
+    if (karigarIdRaw !== null && karigarIdRaw !== undefined && karigarIdRaw !== "" && (!Number.isInteger(karigarId) || karigarId <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "Karigar id must be valid"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    if (!processLot) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process lot not found for this company"
+      });
+    }
+
+    const workCategory = normalizeWorkCategory(requestedWorkCategory || processLot.work_category || processLot.workCategory);
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_material_issues
+      (
+        company_id, lot_no, work_category, process_step_id, material_type,
+        given_weight, returned_weight, used_weight, karigar_id, karigar_name,
+        status, issued_by, issued_at, notes
+      )
+      VALUES (?, ?, ?, NULL, ?, ?, 0.000, 0.000, ?, ?, 'ISSUED', ?, NOW(), ?)
+      `,
+      [
+        access.companyScope,
+        lotNo,
+        workCategory,
+        materialType,
+        parsedGiven.value,
+        karigarId,
+        karigarName,
+        access.actingUserId,
+        notes
+      ]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_material_issues
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId]
+    );
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Material issue saved",
+      issue: savedRows.length ? normalizeProcessMaterialIssueRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Save process material issue error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process material issue save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/process/material-issues", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const materialTypeRaw = req.query.materialType || req.query.material_type || "";
+    const materialType = String(materialTypeRaw || "").trim() ? normalizeMaterialType(materialTypeRaw) : "";
+    const workCategoryRaw = req.query.workCategory || req.query.work_category || "";
+    const workCategory = String(workCategoryRaw || "").trim() ? normalizeWorkCategory(workCategoryRaw) : "";
+    const params = [access.companyScope];
+    const whereParts = ["company_id = ?"];
+
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+
+    if (materialType) {
+      whereParts.push("material_type = ?");
+      params.push(materialType);
+    }
+
+    if (workCategory) {
+      whereParts.push("work_category = ?");
+      params.push(workCategory);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM process_material_issues
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY issued_at DESC, id DESC
+      `,
+      params
+    );
+
+    const issues = rows.map(normalizeProcessMaterialIssueRow);
+    const totalGiven = issues.reduce((sum, issue) => sum + issue.givenWeight, 0);
+    const totalReturned = issues.reduce((sum, issue) => sum + issue.returnedWeight, 0);
+    const totalUsed = issues.reduce((sum, issue) => sum + issue.usedWeight, 0);
+
+    return res.json({
+      success: true,
+      lotNo: lotNo || null,
+      materialType: materialType || null,
+      workCategory: workCategory || null,
+      totalGiven,
+      totalReturned,
+      totalUsed,
+      pendingWeight: Math.max(totalGiven - totalReturned, 0),
+      issues
+    });
+  } catch (error) {
+    console.error("Get process material issues error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process material issues fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.put("/process/material-issues/:id/return", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const issueId = Number(req.params.id || 0);
+    const returnedRaw = req.body.returnedWeight ?? req.body.returned_weight;
+    const parsedReturned = parseRequiredNumber(returnedRaw, "Material returned weight");
+    const notesProvided = req.body.notes !== undefined || req.body.note !== undefined;
+    const notes = String(req.body.notes ?? req.body.note ?? "").trim();
+
+    if (!issueId) {
+      return res.status(400).json({
+        success: false,
+        message: "Material issue id is required"
+      });
+    }
+
+    if (!parsedReturned.ok) {
+      return res.status(400).json({
+        success: false,
+        message: parsedReturned.message
+      });
+    }
+
+    const returnedWeight = parsedReturned.value;
+    if (returnedWeight < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Material returned weight cannot be negative"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [issueRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_material_issues
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [issueId, access.companyScope]
+    );
+
+    if (!issueRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Material issue not found"
+      });
+    }
+
+    const issue = normalizeProcessMaterialIssueRow(issueRows[0]);
+    if (returnedWeight > issue.givenWeight) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Material returned weight cannot be greater than given weight"
+      });
+    }
+
+    const usedWeight = Math.max(issue.givenWeight - returnedWeight, 0);
+    const nextStatus =
+      returnedWeight <= 0
+        ? "ISSUED"
+        : returnedWeight >= issue.givenWeight
+          ? "RETURNED"
+          : "PARTIAL_RETURN";
+
+    await connection.query(
+      `
+      UPDATE process_material_issues
+      SET returned_weight = ?,
+          used_weight = ?,
+          status = ?,
+          returned_by = ?,
+          returned_at = ?,
+          notes = CASE WHEN ? THEN ? ELSE notes END
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [
+        returnedWeight,
+        usedWeight,
+        nextStatus,
+        returnedWeight > 0 ? access.actingUserId : null,
+        returnedWeight > 0 ? new Date() : null,
+        notesProvided ? 1 : 0,
+        notes,
+        issueId,
+        access.companyScope
+      ]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_material_issues
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [issueId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Material return saved",
+      issue: savedRows.length ? normalizeProcessMaterialIssueRow(savedRows[0]) : null
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Return process material issue error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process material issue return failed",
       error: getErrorDetail(error)
     });
   } finally {

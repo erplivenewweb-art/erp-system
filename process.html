@@ -136,6 +136,107 @@
       white-space: nowrap;
     }
 
+    .work-category-select {
+      background: linear-gradient(135deg, #fff8e8, #fffdf7);
+      border: 1px solid #e6d6b2;
+      box-shadow: 0 8px 24px rgba(161, 130, 66, 0.08);
+    }
+
+    .work-category-note {
+      margin: 10px 0 0;
+      color: #7a6f5c;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .ledger-card {
+      background: linear-gradient(145deg, #fff9ee 0%, #fffcf5 100%);
+      border: 1px solid #eadfca;
+      border-radius: 16px;
+      box-shadow: 0 12px 26px rgba(184, 144, 31, 0.08);
+      overflow: hidden;
+    }
+
+    .ledger-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 16px 8px;
+    }
+
+    .ledger-header h3 {
+      margin: 0;
+      color: #8a6714;
+      font-size: 18px;
+      letter-spacing: 0.01em;
+    }
+
+    .ledger-header p {
+      margin: 6px 0 0;
+      color: #6f6555;
+      font-size: 13px;
+    }
+
+    .ledger-collapse-btn {
+      display: none;
+      border: 1px solid rgba(154, 116, 24, 0.3);
+      background: #fff7e6;
+      color: #9a7418;
+      border-radius: 10px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .ledger-content {
+      padding: 8px 16px 16px;
+    }
+
+    .ledger-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+
+    .ledger-metric {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(234, 223, 202, 0.9);
+      border-radius: 11px;
+      padding: 11px;
+    }
+
+    .ledger-metric span {
+      display: block;
+      color: #7a6f5c;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .ledger-metric strong {
+      color: #2e2a24;
+      font-size: 14px;
+    }
+
+    .ledger-coming-soon {
+      color: #8a6f34;
+      background: #fff5da;
+      border: 1px dashed #d9bd75;
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 12px;
+      margin: 10px 0 0;
+    }
+
+    .ledger-readonly-row {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     .lot-status-badge {
       display: inline-flex;
       align-items: center;
@@ -232,6 +333,10 @@
       }
 
       .additive-issue-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .ledger-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
@@ -431,6 +536,26 @@
         min-width: 560px;
       }
 
+      .ledger-collapse-btn {
+        display: inline-flex;
+      }
+
+      .ledger-card.mobile-collapsed .ledger-content {
+        display: none;
+      }
+
+      .ledger-header {
+        padding: 14px;
+      }
+
+      .ledger-content {
+        padding: 0 14px 14px;
+      }
+
+      .ledger-metrics {
+        grid-template-columns: 1fr;
+      }
+
       table th,
       table td {
         padding: 10px;
@@ -594,6 +719,18 @@
                   <input id="processExpectedQty" type="number" step="1" placeholder="Optional" />
                 </div>
 
+                <div class="input-box work-category-select">
+                  <label for="processWorkCategory">Work Category</label>
+                  <select id="processWorkCategory">
+                    <option value="REGULAR_SANKHA" selected>REGULAR_SANKHA</option>
+                    <option value="KDM">KDM</option>
+                    <option value="PIN">PIN</option>
+                    <option value="JALI_SANKHA">JALI_SANKHA</option>
+                    <option value="MANGALSUTRA">MANGALSUTRA</option>
+                  </select>
+                  <p class="work-category-note">REGULAR_SANKHA remains the current production workflow. Other categories are UI-scaffold only in this phase.</p>
+                </div>
+
                 <div class="input-box">
                   <label for="processFinalWeight">Final Weight</label>
                   <input id="processFinalWeight" type="number" step="0.001" placeholder="Enter Final Weight" />
@@ -662,6 +799,42 @@
             </div>
           </div>
 
+          <div id="lotMaterialLedgerCard" class="ledger-card workflow-card">
+            <div class="ledger-header">
+              <div>
+                <h3>Lot-Level Material Ledger (independent workflow)</h3>
+                <p>This is read-only scaffolding. Lot-level issue/return will go live after accounting integration.</p>
+              </div>
+              <button id="lotLedgerToggleBtn" class="ledger-collapse-btn" type="button" onclick="toggleLotLedgerCard()" aria-expanded="true">Collapse</button>
+            </div>
+            <div id="lotMaterialLedgerContent" class="ledger-content">
+              <p class="additive-issue-note">This panel does not yet affect process completion, process loss, or accounting.</p>
+              <div class="ledger-metrics">
+                <div class="ledger-metric">
+                  <span>Total Given</span>
+                  <strong id="lotLedgerTotalGiven">0.000g</strong>
+                </div>
+                <div class="ledger-metric">
+                  <span>Total Returned</span>
+                  <strong id="lotLedgerTotalReturned">0.000g</strong>
+                </div>
+                <div class="ledger-metric">
+                  <span>Total Used</span>
+                  <strong id="lotLedgerTotalUsed">0.000g</strong>
+                </div>
+                <div class="ledger-metric">
+                  <span>Pending Weight</span>
+                  <strong id="lotLedgerPendingWeight">0.000g</strong>
+                </div>
+              </div>
+              <div class="ledger-readonly-row">
+                <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Issue (Coming Soon)</button>
+                <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Return (Coming Soon)</button>
+              </div>
+              <p class="ledger-coming-soon">Coming soon after accounting integration.</p>
+            </div>
+          </div>
+
           <div class="sub-card workflow-card">
             <h3>Step Entry</h3>
             <p>Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
@@ -717,8 +890,9 @@
             </div>
 
             <div id="additiveMaterialFields" class="step-section" style="display:none;">
-              <h4 class="step-section-title">KDM / Solder</h4>
+              <h4 class="step-section-title">Step KDM/Solder (OPEN step only)</h4>
               <div class="summary">
+                <p class="additive-issue-note">This step panel affects process-step completion and lot completion checks.</p>
                 <h3 id="additiveMaterialTitle">Solder/KDM Material</h3>
                 <div id="additiveQuickFields" class="form-grid" style="display:none;">
                   <div class="input-box">
@@ -1135,6 +1309,12 @@
       processSummary: []
     };
     let processLotLoadTimer = null;
+    let lotLedgerUiState = {
+      totalGiven: 0,
+      totalReturned: 0,
+      totalUsed: 0,
+      pendingWeight: 0
+    };
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -1673,6 +1853,72 @@
         issues: []
       };
       renderAdditiveIssueList();
+    }
+
+    function renderLotMaterialLedgerSummary() {
+      const totalGivenEl = document.getElementById("lotLedgerTotalGiven");
+      const totalReturnedEl = document.getElementById("lotLedgerTotalReturned");
+      const totalUsedEl = document.getElementById("lotLedgerTotalUsed");
+      const pendingEl = document.getElementById("lotLedgerPendingWeight");
+      if (totalGivenEl) totalGivenEl.textContent = `${formatProcessWeight(lotLedgerUiState.totalGiven)}g`;
+      if (totalReturnedEl) totalReturnedEl.textContent = `${formatProcessWeight(lotLedgerUiState.totalReturned)}g`;
+      if (totalUsedEl) totalUsedEl.textContent = `${formatProcessWeight(lotLedgerUiState.totalUsed)}g`;
+      if (pendingEl) pendingEl.textContent = `${formatProcessWeight(lotLedgerUiState.pendingWeight)}g`;
+    }
+
+    async function loadLotMaterialLedgerSummary(lotNo = "") {
+      const cleanLotNo = String(lotNo || document.getElementById("stepLotNo")?.value || "").trim();
+      if (!cleanLotNo) {
+        lotLedgerUiState = { totalGiven: 0, totalReturned: 0, totalUsed: 0, pendingWeight: 0 };
+        renderLotMaterialLedgerSummary();
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        params.set("lotNo", cleanLotNo);
+        const res = await fetch(`${API_BASE}/process/material-issues?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Lot material ledger fetch failed");
+        }
+
+        lotLedgerUiState = {
+          totalGiven: Number(data.totalGiven ?? data.total_given ?? 0),
+          totalReturned: Number(data.totalReturned ?? data.total_returned ?? 0),
+          totalUsed: Number(data.totalUsed ?? data.total_used ?? 0),
+          pendingWeight: Number(data.pendingWeight ?? data.pending_weight ?? 0)
+        };
+      } catch (_) {
+        lotLedgerUiState = { totalGiven: 0, totalReturned: 0, totalUsed: 0, pendingWeight: 0 };
+      }
+
+      renderLotMaterialLedgerSummary();
+    }
+
+    function toggleLotLedgerCard(forceExpanded = null) {
+      const card = document.getElementById("lotMaterialLedgerCard");
+      const button = document.getElementById("lotLedgerToggleBtn");
+      if (!card || !button) return;
+      const currentCollapsed = card.classList.contains("mobile-collapsed");
+      const nextCollapsed = typeof forceExpanded === "boolean" ? !forceExpanded : !currentCollapsed;
+      card.classList.toggle("mobile-collapsed", nextCollapsed);
+      button.textContent = nextCollapsed ? "Expand" : "Collapse";
+      button.setAttribute("aria-expanded", nextCollapsed ? "false" : "true");
+    }
+
+    function syncLotLedgerResponsiveState() {
+      const isMobile = window.innerWidth <= 768;
+      const button = document.getElementById("lotLedgerToggleBtn");
+      if (!button) return;
+      if (!isMobile) {
+        toggleLotLedgerCard(true);
+      } else if (button.getAttribute("aria-expanded") === null) {
+        toggleLotLedgerCard(false);
+      }
     }
 
     function normalizeAdditiveIssue(item = {}) {
@@ -2443,6 +2689,7 @@
       await loadProcessGuide(lotNo);
       await loadLotAdditiveStatus(lotNo);
       await loadAdditiveIssues(lotNo);
+      await loadLotMaterialLedgerSummary(lotNo);
     }
 
     function scheduleProcessStepContextLoad() {
@@ -2951,6 +3198,7 @@
 
     window.addEventListener("load", async function () {
       renderProfileBox();
+      syncLotLedgerResponsiveState();
       await loadStockFromServer();
       await loadProcessData();
       renderProcessTable();
@@ -2961,7 +3209,9 @@
       await loadProcessLossSummary();
       updateProcessCalculations();
       await loadRecoveryStockOptions();
+      await loadLotMaterialLedgerSummary();
     });
+    window.addEventListener("resize", syncLotLedgerResponsiveState);
   </script>
 
   <script src="js/auth.js"></script>
