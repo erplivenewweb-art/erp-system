@@ -237,6 +237,93 @@
       flex-wrap: wrap;
     }
 
+    .kdm-workflow-card {
+      display: none;
+      margin-top: 16px;
+      border-radius: 16px;
+      border: 1px solid #e6d6b2;
+      background: linear-gradient(140deg, #fff8eb 0%, #fffdf8 100%);
+      box-shadow: 0 12px 28px rgba(146, 112, 34, 0.1);
+      overflow: hidden;
+    }
+
+    .kdm-workflow-card.show {
+      display: block;
+    }
+
+    .kdm-workflow-header {
+      padding: 16px 16px 8px;
+      border-bottom: 1px solid rgba(230, 214, 178, 0.7);
+      background: linear-gradient(90deg, rgba(255, 245, 222, 0.95), rgba(255, 252, 242, 0.92));
+    }
+
+    .kdm-workflow-header h3 {
+      margin: 0;
+      font-size: 20px;
+      color: #8a6714;
+    }
+
+    .kdm-workflow-header p {
+      margin: 8px 0 0;
+      color: #6e644f;
+      font-size: 13px;
+    }
+
+    .kdm-workflow-body {
+      padding: 14px 16px 16px;
+    }
+
+    .kdm-helper-note {
+      margin: 0 0 10px;
+      color: #7a6f5c;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .kdm-step-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .kdm-step-tile {
+      border: 1px solid rgba(225, 205, 163, 0.95);
+      background: rgba(255, 255, 255, 0.78);
+      border-radius: 12px;
+      padding: 10px;
+      min-height: 82px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 7px;
+    }
+
+    .kdm-step-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid #d7bc80;
+      background: #fff6de;
+      color: #996f0f;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .kdm-step-title {
+      color: #3b2e16;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .category-hidden {
+      display: none !important;
+    }
+
     .lot-status-badge {
       display: inline-flex;
       align-items: center;
@@ -338,6 +425,10 @@
 
       .ledger-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .kdm-step-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
     }
 
@@ -553,6 +644,16 @@
       }
 
       .ledger-metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .kdm-workflow-header,
+      .kdm-workflow-body {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .kdm-step-grid {
         grid-template-columns: 1fr;
       }
 
@@ -835,7 +936,39 @@
             </div>
           </div>
 
-          <div class="sub-card workflow-card">
+          <div id="kdmWorkflowCard" class="kdm-workflow-card workflow-card" aria-live="polite">
+            <div class="kdm-workflow-header">
+              <h3>KDM Workflow</h3>
+              <p>KDM uses independent workflow. Regular Sankha process rules do not apply.</p>
+            </div>
+            <div class="kdm-workflow-body">
+              <p class="kdm-helper-note">UI-only phase: these steps are indicators and do not submit workflow state yet.</p>
+              <div class="kdm-step-grid">
+                <div class="kdm-step-tile">
+                  <span class="kdm-step-badge">1</span>
+                  <span class="kdm-step-title">Material Given</span>
+                </div>
+                <div class="kdm-step-tile">
+                  <span class="kdm-step-badge">2</span>
+                  <span class="kdm-step-title">Karigar Return</span>
+                </div>
+                <div class="kdm-step-tile">
+                  <span class="kdm-step-badge">3</span>
+                  <span class="kdm-step-title">Cutting Done</span>
+                </div>
+                <div class="kdm-step-tile">
+                  <span class="kdm-step-badge">4</span>
+                  <span class="kdm-step-title">Output Ready</span>
+                </div>
+                <div class="kdm-step-tile">
+                  <span class="kdm-step-badge">5</span>
+                  <span class="kdm-step-title">Complete</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="processStepEntryCard" class="sub-card workflow-card">
             <h3>Step Entry</h3>
             <p>Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
 
@@ -1019,7 +1152,7 @@
             </div>
           </div>
 
-          <div class="sub-card workflow-card">
+          <div id="processStepHistoryCard" class="sub-card workflow-card">
             <h3>Step History</h3>
             <div class="table-wrap">
               <table>
@@ -1044,7 +1177,7 @@
             </div>
           </div>
 
-          <div class="sub-card workflow-card">
+          <div id="processNameLossCard" class="sub-card workflow-card">
             <h3>Process-wise Loss Summary</h3>
             <div class="table-wrap process-summary-table-wrap">
               <table>
@@ -1061,7 +1194,7 @@
             </div>
           </div>
 
-          <div class="sub-card workflow-card">
+          <div id="processKarigarLossCard" class="sub-card workflow-card">
             <h3>Karigar-wise Process Loss</h3>
             <div class="table-wrap process-summary-table-wrap">
               <table>
@@ -1078,7 +1211,7 @@
             </div>
           </div>
 
-          <div class="sub-card" style="margin-top:16px;">
+          <div id="processLotLossCard" class="sub-card" style="margin-top:16px;">
             <h3>Lot-wise Process Loss</h3>
             <div class="table-wrap">
               <table>
@@ -1099,7 +1232,7 @@
             </div>
           </div>
 
-          <div class="process-two-col">
+          <div id="karigarWorkSection" class="process-two-col">
             <div class="sub-card">
               <h3>Karigar Work Entry</h3>
 
@@ -1203,7 +1336,7 @@
                 </div>
               </div>
 
-              <div class="sub-card" style="margin-top:16px;">
+              <div id="processStepHintCard" class="sub-card" style="margin-top:16px;">
                 <div id="processStepHint" class="summary">
                   <h3>Next Input</h3>
                   <p>Select a saved lot to auto-load the next process input weight.</p>
@@ -1493,6 +1626,34 @@
       const num = Number(value || 0);
       if (!Number.isFinite(num)) return "0";
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
+    }
+
+    function getSelectedWorkCategory() {
+      return String(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
+    }
+
+    function applyWorkCategoryMode() {
+      const isKdm = getSelectedWorkCategory() === "KDM";
+      const kdmCard = document.getElementById("kdmWorkflowCard");
+      if (kdmCard) {
+        kdmCard.classList.toggle("show", isKdm);
+      }
+
+      [
+        "processGuideCard",
+        "processStepEntryCard",
+        "processStepHistoryCard",
+        "processNameLossCard",
+        "processKarigarLossCard",
+        "processLotLossCard",
+        "karigarWorkSection",
+        "processLiveSummaryPanel",
+        "processStepHintCard"
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle("category-hidden", isKdm);
+      });
     }
 
     function normalizeProcessGuideData(data = {}) {
@@ -2353,6 +2514,7 @@
       } else if (!lotNo && categorySelect) {
         categorySelect.value = "REGULAR_SANKHA";
       }
+      applyWorkCategoryMode();
 
       const summary = document.getElementById("processSummary");
       if (summary) {
@@ -2461,6 +2623,7 @@
       document.getElementById("processExpectedQty").value = "";
       document.getElementById("processWorkCategory").value = "REGULAR_SANKHA";
       document.getElementById("processFinalWeight").value = "";
+      applyWorkCategoryMode();
 
       const summary = document.getElementById("processSummary");
       if (summary) {
@@ -3191,6 +3354,7 @@
     document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("processWorkCategory")?.addEventListener("change", applyWorkCategoryMode);
     document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
     document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
@@ -3222,6 +3386,7 @@
       renderProcessStepTable();
       await loadProcessLossSummary();
       updateProcessCalculations();
+      applyWorkCategoryMode();
       await loadRecoveryStockOptions();
       await loadLotMaterialLedgerSummary();
     });
