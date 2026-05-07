@@ -1449,6 +1449,7 @@
         finalWeight: Number(item?.finalWeight ?? item?.final_weight ?? 0),
         totalKhadiCount: Number(item?.totalKhadiCount ?? 1),
         expectedTotalQty: Number(item?.expectedTotalQty ?? item?.expected_total_qty ?? 0),
+        workCategory: String(item?.workCategory ?? item?.work_category ?? "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA",
         status: String(item?.status || "OPEN").trim().toUpperCase() || "OPEN",
         isManualLot: Number(item?.isManualLot ?? item?.is_manual_lot ?? 0) === 1,
         company_id: item?.company_id ?? getCurrentCompanyId(),
@@ -2343,6 +2344,15 @@
       const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const loss = raw - finalWeight;
       const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
+      const categorySelect = document.getElementById("processWorkCategory");
+      const savedLot = lotData.find((item) => String(item.lotNo || "").trim() === lotNo);
+
+      if (savedLot && categorySelect) {
+        const nextCategory = String(savedLot.workCategory || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
+        categorySelect.value = nextCategory;
+      } else if (!lotNo && categorySelect) {
+        categorySelect.value = "REGULAR_SANKHA";
+      }
 
       const summary = document.getElementById("processSummary");
       if (summary) {
@@ -2357,6 +2367,7 @@
 
     async function saveProcessLot() {
       const lotNo = document.getElementById("processLotNo")?.value?.trim() || "";
+      const workCategory = String(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
       const raw = Number(document.getElementById("processRawWeight")?.value || 0);
       const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const loss = raw - finalWeight;
@@ -2400,7 +2411,8 @@
             lossWeight: loss,
             finalWeight,
             totalKhadiCount: khadiCount,
-            expectedTotalQty: expectedQty
+            expectedTotalQty: expectedQty,
+            workCategory
           }))
         });
         const data = await res.json();
@@ -2415,7 +2427,8 @@
           lossWeight: loss,
           finalWeight,
           totalKhadiCount: khadiCount,
-          expectedTotalQty: expectedQty
+          expectedTotalQty: expectedQty,
+          workCategory
         });
         const existingIndex = lotData.findIndex(
           (item) => String(item.lotNo || "").trim() === lotObj.lotNo
@@ -2446,6 +2459,7 @@
       document.getElementById("processRawWeight").value = "";
       document.getElementById("khadiCount").value = "";
       document.getElementById("processExpectedQty").value = "";
+      document.getElementById("processWorkCategory").value = "REGULAR_SANKHA";
       document.getElementById("processFinalWeight").value = "";
 
       const summary = document.getElementById("processSummary");

@@ -7626,9 +7626,44 @@ function normalizeTemplateStepName(value) {
 
 async function getProcessTemplateStepsForLot(connection, companyId, processLot) {
   let templateId = Number(processLot?.template_id || 0) || null;
+  const lotWorkCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory || "REGULAR_SANKHA");
 
   if (!templateId) {
     const [defaultRows] = await connection.query(
+      `
+      SELECT id
+      FROM process_templates
+      WHERE company_id = ?
+        AND work_category = ?
+        AND is_default = 1
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId, lotWorkCategory]
+    );
+    templateId = Number(defaultRows[0]?.id || 0) || null;
+  }
+
+  if (!templateId && lotWorkCategory !== "REGULAR_SANKHA") {
+    const [regularRows] = await connection.query(
+      `
+      SELECT id
+      FROM process_templates
+      WHERE company_id = ?
+        AND work_category = 'REGULAR_SANKHA'
+        AND is_default = 1
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    templateId = Number(regularRows[0]?.id || 0) || null;
+  }
+
+  if (!templateId) {
+    const [legacyRows] = await connection.query(
       `
       SELECT id
       FROM process_templates
@@ -7640,7 +7675,7 @@ async function getProcessTemplateStepsForLot(connection, companyId, processLot) 
       `,
       [companyId]
     );
-    templateId = Number(defaultRows[0]?.id || 0) || null;
+    templateId = Number(legacyRows[0]?.id || 0) || null;
   }
 
   if (!templateId) {
@@ -9542,6 +9577,7 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     const companyId = access.companyScope;
     const userId = access.actingUserId;
     const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.body.workCategory ?? req.body.work_category ?? "REGULAR_SANKHA");
     const rawWeight = toNumber(req.body.rawWeight ?? req.body.raw_weight);
     const lossWeight = toNumber(req.body.lossWeight ?? req.body.loss_weight);
     const finalWeight = toNumber(req.body.finalWeight ?? req.body.final_weight, rawWeight - lossWeight);
@@ -9605,20 +9641,21 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
             final_weight = ?,
             total_khadi_count = ?,
             expected_total_qty = ?,
+            work_category = ?,
             saved_at = NOW(),
             created_by = ?
         WHERE id = ?
         `,
-        [rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, userId, processLotId]
+        [rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, workCategory, userId, processLotId]
       );
     } else {
       const [insertResult] = await connection.query(
         `
         INSERT INTO process_lots
-        (company_id, lot_no, raw_weight, loss_weight, final_weight, total_khadi_count, expected_total_qty, saved_at, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+        (company_id, lot_no, raw_weight, loss_weight, final_weight, total_khadi_count, expected_total_qty, work_category, saved_at, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
         `,
-        [companyId, lotNo, rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, userId]
+        [companyId, lotNo, rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, workCategory, userId]
       );
       processLotId = Number(insertResult.insertId);
     }
