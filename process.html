@@ -22,7 +22,7 @@
 
     .process-page-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 360px;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, 390px);
       gap: 16px;
       align-items: start;
       margin-top: 16px;
@@ -37,6 +37,58 @@
       position: sticky;
       top: 12px;
       z-index: 2;
+    }
+
+    .process-side-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .process-main-column > .workflow-card,
+    .process-main-column > .sub-card,
+    .process-main-column > .process-two-col {
+      margin-top: 14px;
+    }
+
+    .process-main-column > .workflow-card:first-child,
+    .process-main-column > .sub-card:first-child,
+    .process-main-column > .process-two-col:first-child {
+      margin-top: 0;
+    }
+
+    .side-summary-section {
+      border-top: 1px solid rgba(234, 223, 202, 0.82);
+      margin-top: 14px;
+      padding-top: 14px;
+    }
+
+    .side-summary-section:first-of-type {
+      border-top: 0;
+      margin-top: 0;
+      padding-top: 0;
+    }
+
+    .side-summary-title {
+      margin: 0 0 10px;
+      color: #8a6714;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .process-side-column #processGuideCard {
+      margin: 14px 0 0;
+      padding: 14px 0 0;
+      border: 0;
+      border-top: 1px solid rgba(234, 223, 202, 0.82);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .process-side-column .ledger-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .process-guide-card {
@@ -60,7 +112,7 @@
 
     .process-guide-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
 
@@ -772,70 +824,6 @@
             </div>
           </div>
 
-          <div id="processGuideCard" class="process-guide-card workflow-card">
-            <h4>Process Guide</h4>
-            <div class="process-guide-grid">
-              <div class="process-guide-item">
-                <span class="process-guide-label">Completed Steps</span>
-                <span id="processGuideCompleted" class="process-guide-value">Select a lot</span>
-              </div>
-              <div class="process-guide-item">
-                <span class="process-guide-label">Next Suggested Step</span>
-                <span id="processGuideNext" class="process-guide-value">-</span>
-              </div>
-              <div class="process-guide-item">
-                <span class="process-guide-label">Progress</span>
-                <span id="processGuideProgress" class="process-guide-value">0/6</span>
-              </div>
-              <div class="process-guide-item">
-                <span class="process-guide-label">Lot Status</span>
-                <span id="processLotStatus" class="process-guide-value">OPEN</span>
-              </div>
-            </div>
-            <div class="lot-complete-row">
-              <span id="processLotActionHint" class="additive-issue-note">Select a lot to see completion status.</span>
-              <button id="completeLotButton" class="primary-btn" type="button" onclick="completeCurrentProcessLot()" style="display:none;">
-                Complete Lot
-              </button>
-            </div>
-          </div>
-
-          <div id="lotMaterialLedgerCard" class="ledger-card workflow-card">
-            <div class="ledger-header">
-              <div>
-                <h3>Lot-Level Material Ledger</h3>
-                <p>This is read-only scaffolding. Lot-level issue/return will go live after accounting integration.</p>
-              </div>
-              <button id="lotLedgerToggleBtn" class="ledger-collapse-btn" type="button" onclick="toggleLotLedgerCard()" aria-expanded="true">Collapse</button>
-            </div>
-            <div id="lotMaterialLedgerContent" class="ledger-content">
-              <p class="additive-issue-note">This panel does not yet affect process completion, process loss, or accounting.</p>
-              <div class="ledger-metrics">
-                <div class="ledger-metric">
-                  <span>Total Given</span>
-                  <strong id="lotLedgerTotalGiven">0.000g</strong>
-                </div>
-                <div class="ledger-metric">
-                  <span>Total Returned</span>
-                  <strong id="lotLedgerTotalReturned">0.000g</strong>
-                </div>
-                <div class="ledger-metric">
-                  <span>Total Used</span>
-                  <strong id="lotLedgerTotalUsed">0.000g</strong>
-                </div>
-                <div class="ledger-metric">
-                  <span>Pending Weight</span>
-                  <strong id="lotLedgerPendingWeight">0.000g</strong>
-                </div>
-              </div>
-              <div class="ledger-readonly-row">
-                <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Issue (Coming Soon)</button>
-                <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Return (Coming Soon)</button>
-              </div>
-              <p class="ledger-coming-soon">Coming soon after accounting integration.</p>
-            </div>
-          </div>
-
           <div id="processStepEntryCard" class="sub-card workflow-card">
             <h3>Step Entry</h3>
             <p>Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
@@ -871,21 +859,6 @@
                 <div class="input-box">
                   <label for="stepInputQty">Input Qty</label>
                   <input id="stepInputQty" type="number" step="1" placeholder="Pair/count" />
-                </div>
-              </div>
-            </div>
-
-            <div class="step-section">
-              <h4 class="step-section-title">Recovery Input</h4>
-              <div class="summary">
-                <p>
-                  Base Input Weight: <span id="recoveryBaseInputWeight">0.000</span>g |
-                  Recovery Added: <span id="recoveryAddedWeight">0.000</span>g |
-                  Total Input Weight: <span id="recoveryTotalInputWeight">0.000</span>g
-                </p>
-                <div id="recoveryStockList" style="margin-top:8px;"></div>
-                <div class="btn-row" style="margin-top:10px;">
-                  <button class="secondary-btn" type="button" onclick="loadRecoveryStockOptions()">Refresh Recovery</button>
                 </div>
               </div>
             </div>
@@ -1045,61 +1018,6 @@
             </div>
           </div>
 
-          <div id="processNameLossCard" class="sub-card workflow-card">
-            <h3>Process-wise Loss Summary</h3>
-            <div class="table-wrap process-summary-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Process</th>
-                    <th>Steps</th>
-                    <th>Total Loss</th>
-                    <th>Qty Loss</th>
-                  </tr>
-                </thead>
-                <tbody id="processNameSummaryBody"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div id="processKarigarLossCard" class="sub-card workflow-card">
-            <h3>Karigar-wise Process Loss</h3>
-            <div class="table-wrap process-summary-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Karigar</th>
-                    <th>Steps</th>
-                    <th>Total Loss</th>
-                    <th>Qty Loss</th>
-                  </tr>
-                </thead>
-                <tbody id="processKarigarSummaryBody"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div id="processLotLossCard" class="sub-card" style="margin-top:16px;">
-            <h3>Lot-wise Process Loss</h3>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Lot No</th>
-                    <th>Steps</th>
-                    <th>Total Input</th>
-                    <th>Total Output</th>
-                    <th>Total Loss</th>
-                    <th>Input Qty</th>
-                    <th>Output Qty</th>
-                    <th>Qty Loss</th>
-                  </tr>
-                </thead>
-                <tbody id="processLotSummaryBody"></tbody>
-              </table>
-            </div>
-          </div>
-
           <div id="karigarWorkSection" class="process-two-col">
             <div class="sub-card">
               <h3>Karigar Work Entry</h3>
@@ -1153,7 +1071,7 @@
           </div>
             </div>
 
-            <aside class="process-side-column">
+            <aside class="process-side-column process-side-stack">
               <div class="sub-card" id="processLiveSummaryPanel">
                 <h3>Live Process Summary</h3>
                 <div class="form-grid">
@@ -1202,12 +1120,146 @@
                     <input id="liveTotalQtyLoss" type="text" readonly />
                   </div>
                 </div>
+
+                <div id="processGuideCard" class="process-guide-card side-summary-section">
+                  <h4>Process Guide</h4>
+                  <div class="process-guide-grid">
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Completed Steps</span>
+                      <span id="processGuideCompleted" class="process-guide-value">Select a lot</span>
+                    </div>
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Next Suggested Step</span>
+                      <span id="processGuideNext" class="process-guide-value">-</span>
+                    </div>
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Progress</span>
+                      <span id="processGuideProgress" class="process-guide-value">0/6</span>
+                    </div>
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Lot Status</span>
+                      <span id="processLotStatus" class="process-guide-value">OPEN</span>
+                    </div>
+                  </div>
+                  <div class="lot-complete-row">
+                    <span id="processLotActionHint" class="additive-issue-note">Select a lot to see completion status.</span>
+                    <button id="completeLotButton" class="primary-btn" type="button" onclick="completeCurrentProcessLot()" style="display:none;">
+                      Complete Lot
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div id="processStepHintCard" class="sub-card" style="margin-top:16px;">
+              <div id="processStepHintCard" class="sub-card">
                 <div id="processStepHint" class="summary">
                   <h3>Next Input</h3>
                   <p>Select a saved lot to auto-load the next process input weight.</p>
+                </div>
+              </div>
+
+              <div id="recoverySideCard" class="sub-card">
+                <h3>Recovery Input</h3>
+                <div class="summary">
+                  <p>
+                    Base Input Weight: <span id="recoveryBaseInputWeight">0.000</span>g |
+                    Recovery Added: <span id="recoveryAddedWeight">0.000</span>g |
+                    Total Input Weight: <span id="recoveryTotalInputWeight">0.000</span>g
+                  </p>
+                  <div id="recoveryStockList" style="margin-top:8px;"></div>
+                  <div class="btn-row" style="margin-top:10px;">
+                    <button class="secondary-btn" type="button" onclick="loadRecoveryStockOptions()">Refresh Recovery</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="lotMaterialLedgerCard" class="ledger-card workflow-card">
+                <div class="ledger-header">
+                  <div>
+                    <h3>Lot-Level Material Ledger</h3>
+                    <p>This is read-only scaffolding. Lot-level issue/return will go live after accounting integration.</p>
+                  </div>
+                  <button id="lotLedgerToggleBtn" class="ledger-collapse-btn" type="button" onclick="toggleLotLedgerCard()" aria-expanded="true">Collapse</button>
+                </div>
+                <div id="lotMaterialLedgerContent" class="ledger-content">
+                  <p class="additive-issue-note">This panel does not yet affect process completion, process loss, or accounting.</p>
+                  <div class="ledger-metrics">
+                    <div class="ledger-metric">
+                      <span>Total Given</span>
+                      <strong id="lotLedgerTotalGiven">0.000g</strong>
+                    </div>
+                    <div class="ledger-metric">
+                      <span>Total Returned</span>
+                      <strong id="lotLedgerTotalReturned">0.000g</strong>
+                    </div>
+                    <div class="ledger-metric">
+                      <span>Total Used</span>
+                      <strong id="lotLedgerTotalUsed">0.000g</strong>
+                    </div>
+                    <div class="ledger-metric">
+                      <span>Pending Weight</span>
+                      <strong id="lotLedgerPendingWeight">0.000g</strong>
+                    </div>
+                  </div>
+                  <div class="ledger-readonly-row">
+                    <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Issue (Coming Soon)</button>
+                    <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Return (Coming Soon)</button>
+                  </div>
+                  <p class="ledger-coming-soon">Coming soon after accounting integration.</p>
+                </div>
+              </div>
+
+              <div id="processNameLossCard" class="sub-card workflow-card">
+                <h3>Process-wise Loss Summary</h3>
+                <div class="table-wrap process-summary-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Process</th>
+                        <th>Steps</th>
+                        <th>Total Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processNameSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="processKarigarLossCard" class="sub-card workflow-card">
+                <h3>Karigar-wise Process Loss</h3>
+                <div class="table-wrap process-summary-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Karigar</th>
+                        <th>Steps</th>
+                        <th>Total Loss</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processKarigarSummaryBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="processLotLossCard" class="sub-card">
+                <h3>Lot-wise Process Loss</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Lot No</th>
+                        <th>Steps</th>
+                        <th>Total Input</th>
+                        <th>Total Output</th>
+                        <th>Total Loss</th>
+                        <th>Input Qty</th>
+                        <th>Output Qty</th>
+                        <th>Qty Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processLotSummaryBody"></tbody>
+                  </table>
                 </div>
               </div>
             </aside>
