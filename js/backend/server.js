@@ -2720,14 +2720,44 @@ function getClearAuthCookieOptions() {
   return options;
 }
 
-const DEFAULT_PROCESS_TEMPLATE_STEPS = [
-  "Patta",
-  "Hydraulic Press",
-  "Soldering",
-  "Acid Poda",
-  "Cutting",
-  "Fitting"
-];
+const CATEGORY_PROCESS_TEMPLATES = {
+  REGULAR_SANKHA: {
+    name: "Default Jewellery Process",
+    steps: [
+      "Patta",
+      "Hydraulic Press",
+      "Soldering",
+      "Acid Poda",
+      "Cutting",
+      "Fitting"
+    ]
+  },
+  KDM: {
+    name: "Default KDM Process",
+    steps: [
+      "Patta",
+      "Cutting"
+    ]
+  }
+};
+
+function buildProcessTemplateStepRow(companyId, templateId, stepName, index) {
+  const normalizedStepName = String(stepName || "").trim().toLowerCase();
+  const usesAdditiveMaterial = ["soldering", "solding", "solder", "kdm"].includes(normalizedStepName) ? 1 : 0;
+
+  return [
+    usesAdditiveMaterial,
+    usesAdditiveMaterial ? "Solder/KDM" : "",
+    1,
+    companyId,
+    templateId,
+    index + 1,
+    stepName,
+    1,
+    0,
+    "ACTIVE"
+  ];
+}
 
 async function seedDefaultProcessTemplatesForCompanies() {
   if (
@@ -2749,65 +2779,60 @@ async function seedDefaultProcessTemplatesForCompanies() {
     const companyId = Number(company.id || 0);
     if (!companyId) continue;
 
-    const [existingTemplates] = await pool.query(
-      `
-      SELECT id
-      FROM process_templates
-      WHERE company_id = ?
-        AND is_default = 1
-        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
-      LIMIT 1
-      `,
-      [companyId]
-    );
-
-    if (existingTemplates.length) continue;
-
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [insertResult] = await connection.query(
+    for (const [category, templateConfig] of Object.entries(CATEGORY_PROCESS_TEMPLATES)) {
+      const workCategory = normalizeWorkCategory(category);
+      const [existingTemplates] = await pool.query(
         `
-        INSERT INTO process_templates
-        (company_id, name, is_default, status, created_by, created_at, updated_at)
-        VALUES (?, 'Default Jewellery Process', 1, 'ACTIVE', NULL, NOW(), NOW())
+        SELECT id
+        FROM process_templates
+        WHERE company_id = ?
+          AND work_category = ?
+          AND is_default = 1
+          AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+        LIMIT 1
         `,
-        [companyId]
+        [companyId, workCategory]
       );
 
-      const templateId = insertResult.insertId;
-      const stepRows = DEFAULT_PROCESS_TEMPLATE_STEPS.map((stepName, index) => [
-        String(stepName || "").trim().toLowerCase() === "soldering" ? 1 : 0,
-        String(stepName || "").trim().toLowerCase() === "soldering" ? "Solder/KDM" : "",
-        1,
-        companyId,
-        templateId,
-        index + 1,
-        stepName,
-        1,
-        0,
-        "ACTIVE"
-      ]);
+      if (existingTemplates.length) continue;
 
-      await connection.query(
-        `
-        INSERT INTO process_template_steps
-        (
-          uses_additive_material, additive_material_label, additive_affects_output_weight,
-          company_id, template_id, step_order, step_name, is_required, allow_repeat, status
-        )
-        VALUES ?
-        `,
-        [stepRows]
-      );
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
 
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
+        const [insertResult] = await connection.query(
+          `
+          INSERT INTO process_templates
+          (company_id, name, work_category, is_default, status, created_by, created_at, updated_at)
+          VALUES (?, ?, ?, 1, 'ACTIVE', NULL, NOW(), NOW())
+          `,
+          [companyId, templateConfig.name, workCategory]
+        );
+
+        const templateId = insertResult.insertId;
+        const stepRows = templateConfig.steps.map((stepName, index) => {
+          return buildProcessTemplateStepRow(companyId, templateId, stepName, index);
+        });
+
+        await connection.query(
+          `
+          INSERT INTO process_template_steps
+          (
+            uses_additive_material, additive_material_label, additive_affects_output_weight,
+            company_id, template_id, step_order, step_name, is_required, allow_repeat, status
+          )
+          VALUES ?
+          `,
+          [stepRows]
+        );
+
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
     }
   }
 }
@@ -7624,9 +7649,166 @@ function normalizeTemplateStepName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+async function getProcessTemplateById(connection, companyId, templateId) {
+  const cleanTemplateId = Number(templateId || 0);
+  if (!cleanTemplateId) return null;
+
+  const [templateRows] = await connection.query(
+    `
+    SELECT id, name, work_category
+    FROM process_templates
+    WHERE company_id = ?
+      AND id = ?
+      AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+    LIMIT 1
+    `,
+    [companyId, cleanTemplateId]
+  );
+
+  if (!templateRows.length) return null;
+
+  const [stepRows] = await connection.query(
+    `
+    SELECT
+      step_order,
+      step_name,
+      is_required,
+      allow_repeat,
+      uses_additive_material,
+      additive_material_label,
+      additive_affects_output_weight
+    FROM process_template_steps
+    WHERE company_id = ?
+      AND template_id = ?
+      AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+    ORDER BY step_order ASC, id ASC
+    `,
+    [companyId, cleanTemplateId]
+  );
+
+  return {
+    id: Number(templateRows[0].id || 0),
+    name: String(templateRows[0].name || ""),
+    workCategory: normalizeWorkCategory(templateRows[0].work_category),
+    steps: stepRows
+      .map((row) => {
+        const stepName = String(row.step_name || "").trim();
+        if (!stepName) return null;
+
+        return {
+          stepOrder: Number(row.step_order || 0),
+          stepName,
+          isRequired: Boolean(Number(row.is_required ?? 1)),
+          allowRepeat: Boolean(Number(row.allow_repeat || 0)),
+          usesAdditiveMaterial: Boolean(Number(row.uses_additive_material || 0)),
+          additiveMaterialLabel: String(row.additive_material_label || ""),
+          additiveAffectsOutputWeight: Boolean(Number(row.additive_affects_output_weight ?? 1))
+        };
+      })
+      .filter(Boolean)
+  };
+}
+
+async function getDefaultProcessTemplateForCategory(connection, companyId, workCategory) {
+  const lotWorkCategory = normalizeWorkCategory(workCategory || "REGULAR_SANKHA");
+  const categoryCandidates = lotWorkCategory === "REGULAR_SANKHA"
+    ? ["REGULAR_SANKHA"]
+    : [lotWorkCategory, "REGULAR_SANKHA"];
+
+  for (const candidate of categoryCandidates) {
+    const [rows] = await connection.query(
+      `
+      SELECT id
+      FROM process_templates
+      WHERE company_id = ?
+        AND work_category = ?
+        AND is_default = 1
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId, candidate]
+    );
+
+    const template = await getProcessTemplateById(connection, companyId, rows[0]?.id);
+    if (template?.steps?.length) return template;
+  }
+
+  const [legacyRows] = await connection.query(
+    `
+    SELECT id
+    FROM process_templates
+    WHERE company_id = ?
+      AND is_default = 1
+      AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [companyId]
+  );
+
+  return getProcessTemplateById(connection, companyId, legacyRows[0]?.id);
+}
+
+function buildProcessTemplateSnapshot(template) {
+  if (!template?.id || !Array.isArray(template.steps) || !template.steps.length) return null;
+
+  return {
+    templateId: Number(template.id),
+    templateName: String(template.name || ""),
+    workCategory: normalizeWorkCategory(template.workCategory),
+    steps: template.steps.map((step, index) => ({
+      stepOrder: Number(step.stepOrder || index + 1),
+      stepName: String(step.stepName || ""),
+      isRequired: Boolean(step.isRequired ?? true),
+      allowRepeat: Boolean(step.allowRepeat || false),
+      usesAdditiveMaterial: Boolean(step.usesAdditiveMaterial || false),
+      additiveMaterialLabel: String(step.additiveMaterialLabel || ""),
+      additiveAffectsOutputWeight: Boolean(step.additiveAffectsOutputWeight ?? true)
+    }))
+  };
+}
+
+function getProcessTemplateStepsFromSnapshot(snapshotValue) {
+  if (!snapshotValue) return [];
+
+  let snapshot = snapshotValue;
+  if (typeof snapshotValue === "string") {
+    try {
+      snapshot = JSON.parse(snapshotValue);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(snapshot?.steps)) return [];
+
+  return snapshot.steps
+    .map((step) => {
+      const stepName = String(step?.stepName || step?.step_name || "").trim();
+      if (!stepName) return null;
+
+      return {
+        stepName,
+        usesAdditiveMaterial: Boolean(step?.usesAdditiveMaterial ?? step?.uses_additive_material ?? false),
+        additiveMaterialLabel: String(step?.additiveMaterialLabel || step?.additive_material_label || ""),
+        additiveAffectsOutputWeight: Boolean(step?.additiveAffectsOutputWeight ?? step?.additive_affects_output_weight ?? true)
+      };
+    })
+    .filter(Boolean);
+}
+
 async function getProcessTemplateStepsForLot(connection, companyId, processLot) {
   let templateId = Number(processLot?.template_id || 0) || null;
   const lotWorkCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory || "REGULAR_SANKHA");
+
+  const snapshotSteps = getProcessTemplateStepsFromSnapshot(processLot?.template_snapshot_json);
+  if (templateId && snapshotSteps.length) {
+    return {
+      templateId,
+      steps: snapshotSteps
+    };
+  }
 
   if (!templateId) {
     const [defaultRows] = await connection.query(
@@ -9601,6 +9783,12 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
+    const categoryTemplate = await getDefaultProcessTemplateForCategory(connection, companyId, workCategory);
+    const templateId = Number(categoryTemplate?.id || 0) || null;
+    const templateSnapshot = buildProcessTemplateSnapshot(categoryTemplate);
+    const templateSnapshotJson = templateSnapshot ? JSON.stringify(templateSnapshot) : null;
+    const templateVersionLabel = categoryTemplate?.name ? String(categoryTemplate.name).slice(0, 120) : null;
+
     const [existingRows] = await connection.query(
       `
       SELECT id, raw_weight, is_manual_lot
@@ -9642,20 +9830,52 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
             total_khadi_count = ?,
             expected_total_qty = ?,
             work_category = ?,
+            template_id = ?,
+            template_snapshot_json = ?,
+            template_version_label = ?,
             saved_at = NOW(),
             created_by = ?
         WHERE id = ?
         `,
-        [rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, workCategory, userId, processLotId]
+        [
+          rawWeight,
+          lossWeight,
+          finalWeight,
+          totalKhadiCount,
+          expectedTotalQty,
+          workCategory,
+          templateId,
+          templateSnapshotJson,
+          templateVersionLabel,
+          userId,
+          processLotId
+        ]
       );
     } else {
       const [insertResult] = await connection.query(
         `
         INSERT INTO process_lots
-        (company_id, lot_no, raw_weight, loss_weight, final_weight, total_khadi_count, expected_total_qty, work_category, saved_at, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+        (
+          company_id, lot_no, raw_weight, loss_weight, final_weight, total_khadi_count,
+          expected_total_qty, work_category, template_id, template_snapshot_json,
+          template_version_label, saved_at, created_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
         `,
-        [companyId, lotNo, rawWeight, lossWeight, finalWeight, totalKhadiCount, expectedTotalQty, workCategory, userId]
+        [
+          companyId,
+          lotNo,
+          rawWeight,
+          lossWeight,
+          finalWeight,
+          totalKhadiCount,
+          expectedTotalQty,
+          workCategory,
+          templateId,
+          templateSnapshotJson,
+          templateVersionLabel,
+          userId
+        ]
       );
       processLotId = Number(insertResult.insertId);
     }
@@ -12966,10 +13186,9 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
     }
 
     const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
-    const hasAssignedTemplate = Number(processLot.template_id || 0) > 0;
     const templateSteps = templateContext.steps || [];
 
-    if (hasAssignedTemplate && templateSteps.length) {
+    if (templateSteps.length) {
       const [completedStepRows] = await connection.query(
         `
         SELECT process_name

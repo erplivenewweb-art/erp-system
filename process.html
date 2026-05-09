@@ -237,93 +237,6 @@
       flex-wrap: wrap;
     }
 
-    .kdm-workflow-card {
-      display: none;
-      margin-top: 16px;
-      border-radius: 16px;
-      border: 1px solid #e6d6b2;
-      background: linear-gradient(140deg, #fff8eb 0%, #fffdf8 100%);
-      box-shadow: 0 12px 28px rgba(146, 112, 34, 0.1);
-      overflow: hidden;
-    }
-
-    .kdm-workflow-card.show {
-      display: block;
-    }
-
-    .kdm-workflow-header {
-      padding: 16px 16px 8px;
-      border-bottom: 1px solid rgba(230, 214, 178, 0.7);
-      background: linear-gradient(90deg, rgba(255, 245, 222, 0.95), rgba(255, 252, 242, 0.92));
-    }
-
-    .kdm-workflow-header h3 {
-      margin: 0;
-      font-size: 20px;
-      color: #8a6714;
-    }
-
-    .kdm-workflow-header p {
-      margin: 8px 0 0;
-      color: #6e644f;
-      font-size: 13px;
-    }
-
-    .kdm-workflow-body {
-      padding: 14px 16px 16px;
-    }
-
-    .kdm-helper-note {
-      margin: 0 0 10px;
-      color: #7a6f5c;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .kdm-step-grid {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 8px;
-    }
-
-    .kdm-step-tile {
-      border: 1px solid rgba(225, 205, 163, 0.95);
-      background: rgba(255, 255, 255, 0.78);
-      border-radius: 12px;
-      padding: 10px;
-      min-height: 82px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 7px;
-    }
-
-    .kdm-step-badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 24px;
-      height: 24px;
-      border-radius: 999px;
-      border: 1px solid #d7bc80;
-      background: #fff6de;
-      color: #996f0f;
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .kdm-step-title {
-      color: #3b2e16;
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.35;
-    }
-
-    .category-hidden {
-      display: none !important;
-    }
-
     .lot-status-badge {
       display: inline-flex;
       align-items: center;
@@ -427,9 +340,6 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
-      .kdm-step-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
     }
 
     @media (max-width: 768px) {
@@ -647,16 +557,6 @@
         grid-template-columns: 1fr;
       }
 
-      .kdm-workflow-header,
-      .kdm-workflow-body {
-        padding-left: 14px;
-        padding-right: 14px;
-      }
-
-      .kdm-step-grid {
-        grid-template-columns: 1fr;
-      }
-
       table th,
       table td {
         padding: 10px;
@@ -829,7 +729,7 @@
                     <option value="JALI_SANKHA">JALI_SANKHA</option>
                     <option value="MANGALSUTRA">MANGALSUTRA</option>
                   </select>
-                  <p class="work-category-note">REGULAR_SANKHA remains the current production workflow. Other categories are UI-scaffold only in this phase.</p>
+                  <p class="work-category-note">Each category uses its configured process step chain.</p>
                 </div>
 
                 <div class="input-box">
@@ -903,7 +803,7 @@
           <div id="lotMaterialLedgerCard" class="ledger-card workflow-card">
             <div class="ledger-header">
               <div>
-                <h3>Lot-Level Material Ledger (independent workflow)</h3>
+                <h3>Lot-Level Material Ledger</h3>
                 <p>This is read-only scaffolding. Lot-level issue/return will go live after accounting integration.</p>
               </div>
               <button id="lotLedgerToggleBtn" class="ledger-collapse-btn" type="button" onclick="toggleLotLedgerCard()" aria-expanded="true">Collapse</button>
@@ -933,38 +833,6 @@
                 <button class="secondary-btn" type="button" disabled title="Coming soon after accounting integration">Return (Coming Soon)</button>
               </div>
               <p class="ledger-coming-soon">Coming soon after accounting integration.</p>
-            </div>
-          </div>
-
-          <div id="kdmWorkflowCard" class="kdm-workflow-card workflow-card" aria-live="polite">
-            <div class="kdm-workflow-header">
-              <h3>KDM Workflow</h3>
-              <p>KDM uses independent workflow. Regular Sankha process rules do not apply.</p>
-            </div>
-            <div class="kdm-workflow-body">
-              <p class="kdm-helper-note">UI-only phase: these steps are indicators and do not submit workflow state yet.</p>
-              <div class="kdm-step-grid">
-                <div class="kdm-step-tile">
-                  <span class="kdm-step-badge">1</span>
-                  <span class="kdm-step-title">Material Given</span>
-                </div>
-                <div class="kdm-step-tile">
-                  <span class="kdm-step-badge">2</span>
-                  <span class="kdm-step-title">Karigar Return</span>
-                </div>
-                <div class="kdm-step-tile">
-                  <span class="kdm-step-badge">3</span>
-                  <span class="kdm-step-title">Cutting Done</span>
-                </div>
-                <div class="kdm-step-tile">
-                  <span class="kdm-step-badge">4</span>
-                  <span class="kdm-step-title">Output Ready</span>
-                </div>
-                <div class="kdm-step-tile">
-                  <span class="kdm-step-badge">5</span>
-                  <span class="kdm-step-title">Complete</span>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -1633,27 +1501,7 @@
     }
 
     function applyWorkCategoryMode() {
-      const isKdm = getSelectedWorkCategory() === "KDM";
-      const kdmCard = document.getElementById("kdmWorkflowCard");
-      if (kdmCard) {
-        kdmCard.classList.toggle("show", isKdm);
-      }
-
-      [
-        "processGuideCard",
-        "processStepEntryCard",
-        "processStepHistoryCard",
-        "processNameLossCard",
-        "processKarigarLossCard",
-        "processLotLossCard",
-        "karigarWorkSection",
-        "processLiveSummaryPanel",
-        "processStepHintCard"
-      ].forEach((id) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.classList.toggle("category-hidden", isKdm);
-      });
+      renderLiveProcessSummary();
     }
 
     function normalizeProcessGuideData(data = {}) {
@@ -3403,6 +3251,3 @@
   <script src="js/help-guide.js"></script>
 </body>
 </html>
-
-
-
