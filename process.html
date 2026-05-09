@@ -808,6 +808,7 @@
                   <thead>
                     <tr>
                       <th>Lot No</th>
+                      <th>Category</th>
                       <th>Raw Weight</th>
                       <th>Khadi</th>
                       <th>Expected Qty</th>
@@ -1362,6 +1363,7 @@
       processSummary: []
     };
     let processLotLoadTimer = null;
+    let selectedStepWorkCategory = "REGULAR_SANKHA";
     let lotLedgerUiState = {
       totalGiven: 0,
       totalReturned: 0,
@@ -1496,6 +1498,7 @@
     function normalizeProcessLot(item) {
       return {
         id: item?.id ?? null,
+        processLotId: Number(item?.processLotId ?? item?.process_lot_id ?? 0),
         lotNo: String(item?.lotNo ?? item?.lot_no ?? "").trim(),
         rawWeight: Number(item?.rawWeight ?? item?.raw_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
@@ -1548,11 +1551,32 @@
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
     }
 
+    function normalizeWorkCategory(value = "") {
+      return String(value || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
+    }
+
     function getSelectedWorkCategory() {
-      return String(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
+      return normalizeWorkCategory(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA");
+    }
+
+    function getLotIdentityKey(lotNo, workCategory) {
+      return `${normalizeWorkCategory(workCategory)}::${String(lotNo || "").trim()}`;
+    }
+
+    function getActiveStepWorkCategory() {
+      return normalizeWorkCategory(selectedStepWorkCategory || getSelectedWorkCategory());
+    }
+
+    function addWorkCategoryParam(params, workCategory = getActiveStepWorkCategory()) {
+      params.set("workCategory", normalizeWorkCategory(workCategory));
+      return params;
     }
 
     function applyWorkCategoryMode() {
+      const activeStepLot = document.getElementById("stepLotNo")?.value?.trim() || "";
+      if (!activeStepLot) {
+        selectedStepWorkCategory = getSelectedWorkCategory();
+      }
       renderLiveProcessSummary();
     }
 
@@ -1581,7 +1605,8 @@
     function getSelectedProcessLot() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       if (!lotNo) return null;
-      return lotData.find((lot) => String(lot.lotNo || "").trim() === lotNo) || null;
+      const category = getActiveStepWorkCategory();
+      return lotData.find((lot) => getLotIdentityKey(lot.lotNo, lot.workCategory) === getLotIdentityKey(lotNo, category)) || null;
     }
 
     function getLatestCompletedProcessStep() {
@@ -1702,6 +1727,7 @@
 
       try {
         const params = buildAuthParams();
+        addWorkCategoryParam(params);
         const query = params.toString() ? `?${params.toString()}` : "";
         const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(cleanLotNo)}/next-step${query}`, {
           cache: "no-store"
@@ -1939,6 +1965,7 @@
       try {
         const params = buildAuthParams();
         params.set("lotNo", cleanLotNo);
+        addWorkCategoryParam(params);
         const res = await fetch(`${API_BASE}/process/material-issues?${params.toString()}`, {
           cache: "no-store"
         });
@@ -1995,7 +2022,8 @@
         pendingWeight: Math.max(given - returned, 0),
         status: String(item.status || "ISSUED").toUpperCase(),
         materialLabel: String(item.materialLabel ?? item.material_label ?? getAdditiveMaterialLabel()).trim(),
-        karigarName: String(item.karigarName ?? item.karigar_name ?? "").trim()
+        karigarName: String(item.karigarName ?? item.karigar_name ?? "").trim(),
+        lotNo: String(item.lotNo ?? item.lot_no ?? "").trim()
       };
     }
 
@@ -2066,6 +2094,7 @@
       try {
         const params = buildAuthParams();
         params.set("lotNo", cleanLotNo);
+        addWorkCategoryParam(params);
         const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
           cache: "no-store"
         });
@@ -2096,6 +2125,7 @@
       try {
         const params = buildAuthParams();
         params.set("lotNo", cleanLotNo);
+        addWorkCategoryParam(params);
         const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
           cache: "no-store"
         });
@@ -2132,6 +2162,7 @@
       const givenWeight = Number(givenInput?.value || 0);
       const karigar = String(karigarInput?.value || document.getElementById("stepKarigarName")?.value || currentOpenProcessStep.karigarName || "").trim();
       const notes = String(notesInput?.value || "").trim();
+      const workCategory = getActiveStepWorkCategory();
 
       givenInput?.setCustomValidity("");
       if (!givenWeight || givenWeight <= 0) {
@@ -2153,6 +2184,7 @@
           },
           body: JSON.stringify(buildAuthPayload({
             lot_no: lotNo,
+            workCategory,
             karigar,
             given_weight: givenWeight,
             material_label: getAdditiveMaterialLabel(),
@@ -2406,12 +2438,8 @@
       const loss = raw - finalWeight;
       const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
       const categorySelect = document.getElementById("processWorkCategory");
-      const savedLot = lotData.find((item) => String(item.lotNo || "").trim() === lotNo);
 
-      if (savedLot && categorySelect) {
-        const nextCategory = String(savedLot.workCategory || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
-        categorySelect.value = nextCategory;
-      } else if (!lotNo && categorySelect) {
+      if (!lotNo && categorySelect) {
         categorySelect.value = "REGULAR_SANKHA";
       }
       applyWorkCategoryMode();
@@ -2493,7 +2521,7 @@
           workCategory
         });
         const existingIndex = lotData.findIndex(
-          (item) => String(item.lotNo || "").trim() === lotObj.lotNo
+          (item) => getLotIdentityKey(item.lotNo, item.workCategory) === getLotIdentityKey(lotObj.lotNo, lotObj.workCategory)
         );
 
         if (existingIndex >= 0) {
@@ -2543,7 +2571,7 @@
       tbody.innerHTML = "";
 
       if (!lotData.length) {
-        tbody.innerHTML = `<tr><td colspan="9">No process lots found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10">No process lots found</td></tr>`;
         return;
       }
 
@@ -2554,8 +2582,9 @@
         const lotLabel = lot.isManualLot ? `${lot.lotNo || ""} (Manual)` : (lot.lotNo || "");
 
         tbody.innerHTML += `
-          <tr onclick="selectProcessLotForSteps('${encodeURIComponent(lot.lotNo || "")}')" style="cursor:pointer;">
+          <tr onclick="selectProcessLotForSteps('${encodeURIComponent(lot.lotNo || "")}', '${encodeURIComponent(lot.workCategory || "REGULAR_SANKHA")}')" style="cursor:pointer;">
             <td>${escapeHtml(lotLabel)}</td>
+            <td>${escapeHtml(lot.workCategory || "REGULAR_SANKHA")}</td>
             <td>${Number(lot.rawWeight || 0).toFixed(3)}</td>
             <td>${Number(lot.totalKhadiCount || 1)}</td>
             <td>${formatProcessQty(lot.expectedTotalQty || 0)}</td>
@@ -2662,6 +2691,7 @@
     async function loadProcessSteps(lotNo) {
       const params = buildAuthParams();
       if (lotNo) params.set("lotNo", lotNo);
+      if (lotNo) addWorkCategoryParam(params);
 
       try {
         const res = await fetch(`${API_BASE}/process/steps${params.toString() ? `?${params.toString()}` : ""}`, {
@@ -2701,6 +2731,7 @@
 
       const params = buildAuthParams();
       params.set("lotNo", lotNo);
+      addWorkCategoryParam(params);
 
       try {
         const res = await fetch(`${API_BASE}/process/next-input?${params.toString()}`, {
@@ -2776,8 +2807,12 @@
       }, 350);
     }
 
-    async function selectProcessLotForSteps(encodedLotNo) {
+    async function selectProcessLotForSteps(encodedLotNo, encodedWorkCategory = "") {
       const lotNo = decodeURIComponent(String(encodedLotNo || ""));
+      const workCategory = normalizeWorkCategory(decodeURIComponent(String(encodedWorkCategory || "REGULAR_SANKHA")));
+      selectedStepWorkCategory = workCategory;
+      const categorySelect = document.getElementById("processWorkCategory");
+      if (categorySelect) categorySelect.value = workCategory;
       const input = document.getElementById("stepLotNo");
       if (input) input.value = lotNo;
       await loadProcessStepContext();
@@ -2785,6 +2820,7 @@
 
     async function completeCurrentProcessLot() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const workCategory = getActiveStepWorkCategory();
 
       if (!lotNo) {
         showToast("Please select a lot first.", "error", "Missing Lot");
@@ -2801,12 +2837,15 @@
       if (button) button.disabled = true;
 
       try {
-        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/complete`, {
+        const params = buildAuthParams();
+        addWorkCategoryParam(params, workCategory);
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/complete${query}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify(buildAuthPayload({}))
+          body: JSON.stringify(buildAuthPayload({ workCategory }))
         });
         const data = await res.json();
 
@@ -2830,6 +2869,7 @@
 
     async function saveOrCompleteProcessStep() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const workCategory = getActiveStepWorkCategory();
       const processName = document.getElementById("stepProcessName")?.value?.trim() || "";
       const karigarName = document.getElementById("stepKarigarName")?.value?.trim() || "";
       const inputWeight = Number(document.getElementById("stepInputWeight")?.value || 0);
@@ -2893,6 +2933,7 @@
             body: JSON.stringify(buildAuthPayload({
               outputWeight: finishedOutputWeight,
               recoveryWeight,
+              workCategory,
               ...additivePayload,
               outputQty: hasOutputQty ? Number(outputQtyRaw) : undefined,
               lossReason
@@ -2906,6 +2947,7 @@
             },
             body: JSON.stringify(buildAuthPayload({
               lotNo,
+              workCategory,
               processName,
               karigarName,
               inputQty: hasInputQty ? Number(inputQtyRaw) : undefined,
@@ -2941,7 +2983,10 @@
     }
 
     function clearProcessStepForm(clearLot = true) {
-      if (clearLot) document.getElementById("stepLotNo").value = "";
+      if (clearLot) {
+        document.getElementById("stepLotNo").value = "";
+        selectedStepWorkCategory = getSelectedWorkCategory();
+      }
       document.getElementById("stepProcessName").value = "";
       document.getElementById("stepKarigarName").value = "";
       selectedRecoveryStockIds.clear();
@@ -3032,6 +3077,8 @@
       const stepLotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const entryLotNo = document.getElementById("processLotNo")?.value?.trim() || "";
       const lotNo = stepLotNo || entryLotNo;
+      const activeCategory = stepLotNo ? getActiveStepWorkCategory() : getSelectedWorkCategory();
+      const activeLot = lotData.find((lot) => getLotIdentityKey(lot.lotNo, lot.workCategory) === getLotIdentityKey(lotNo, activeCategory));
       const activeSteps = processStepData.filter((step) => !lotNo || step.lotNo === lotNo);
       const completedSteps = activeSteps.filter((step) => step.status === "COMPLETED");
       const latestStep = completedSteps.length ? completedSteps[completedSteps.length - 1] : null;
@@ -3043,7 +3090,7 @@
       const totalInputQty = firstStep ? firstStep.inputQty : 0;
       const currentOutputQty = latestStep ? latestStep.outputQty : 0;
       const totalQtyLoss = totalInputQty - currentOutputQty;
-      const savedLot = lotData.find((lot) => String(lot.lotNo || "").trim() === lotNo);
+      const savedLot = activeLot;
       const formFinalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const finalAvailableWeight = savedLot ? Number(savedLot.finalWeight || 0) : formFinalWeight;
       const usedWeight = lotNo ? getUsedWeightByLot(lotNo) : 0;
@@ -3081,6 +3128,7 @@
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const params = buildAuthParams();
       if (lotNo) params.set("lotNo", lotNo);
+      if (lotNo) addWorkCategoryParam(params);
 
       try {
         const res = await fetch(`${API_BASE}/process/loss-summary${params.toString() ? `?${params.toString()}` : ""}`, {
@@ -3254,9 +3302,21 @@
     document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
-    document.getElementById("processWorkCategory")?.addEventListener("change", applyWorkCategoryMode);
-    document.getElementById("stepLotNo")?.addEventListener("input", scheduleProcessStepContextLoad);
-    document.getElementById("stepLotNo")?.addEventListener("change", loadProcessStepContext);
+    document.getElementById("processWorkCategory")?.addEventListener("change", () => {
+      selectedStepWorkCategory = getSelectedWorkCategory();
+      applyWorkCategoryMode();
+      if (document.getElementById("stepLotNo")?.value?.trim()) {
+        loadProcessStepContext();
+      }
+    });
+    document.getElementById("stepLotNo")?.addEventListener("input", () => {
+      selectedStepWorkCategory = getSelectedWorkCategory();
+      scheduleProcessStepContextLoad();
+    });
+    document.getElementById("stepLotNo")?.addEventListener("change", () => {
+      selectedStepWorkCategory = getSelectedWorkCategory();
+      loadProcessStepContext();
+    });
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
       renderAdditiveMaterialFields();
       loadAdditiveIssues();

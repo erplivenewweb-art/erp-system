@@ -869,6 +869,8 @@ function normalizeProcessStepStatus(value) {
 function normalizeProcessStepRow(row) {
   return {
     ...row,
+    process_lot_id: Number(row.process_lot_id || 0),
+    processLotId: Number(row.processLotId ?? row.process_lot_id ?? 0),
     step_no: Number(row.step_no || 0),
     input_weight: toNumber(row.input_weight),
     output_weight: toNumber(row.output_weight),
@@ -2678,6 +2680,14 @@ async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
   }
 }
 
+async function dropIndexIfExists(tableName, indexName) {
+  const exists = await indexExists(tableName, indexName);
+  if (exists) {
+    await pool.query(`ALTER TABLE ${tableName} DROP INDEX ${indexName}`);
+    console.log(`Index dropped: ${tableName}.${indexName}`);
+  }
+}
+
 function getPagination(req, { defaultLimit = 100, maxLimit = 1000 } = {}) {
   const requestedLimit = Number(req.query.limit ?? req.query.pageSize ?? defaultLimit);
   const requestedOffset = Number(req.query.offset ?? 0);
@@ -3465,7 +3475,8 @@ async function ensureSchema() {
       saved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_process_lots_company_category_lot (company_id, work_category, lot_no)
     )
   `);
 
@@ -3497,7 +3508,7 @@ async function ensureSchema() {
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_process_steps_company_lot_step (company_id, lot_no, step_no)
+      UNIQUE KEY uq_process_steps_company_process_lot_step (company_id, process_lot_id, step_no)
     )
   `);
 
@@ -4182,15 +4193,27 @@ async function ensureSchema() {
 
   if (await tableExists("process_lots")) {
     await addIndexIfMissing("process_lots", "idx_process_lots_category_lot", "(company_id, work_category, lot_no)");
+    await addUniqueIndexIfMissing("process_lots", "uq_process_lots_company_category_lot", "(company_id, work_category, lot_no)");
   }
 
   if (await tableExists("process_steps")) {
+    await pool.query(`
+      UPDATE process_steps ps
+      JOIN process_lots pl
+        ON pl.company_id = ps.company_id
+       AND pl.lot_no = ps.lot_no
+       AND pl.work_category = 'REGULAR_SANKHA'
+      SET ps.process_lot_id = pl.id
+      WHERE ps.process_lot_id IS NULL
+         OR ps.process_lot_id = 0
+    `);
+    await dropIndexIfExists("process_steps", "uq_process_steps_company_lot_step");
     await addIndexIfMissing("process_steps", "idx_process_steps_lot_step", "(company_id, lot_no, step_no)");
     await addIndexIfMissing("process_steps", "idx_process_steps_lot_status", "(company_id, lot_no, status)");
     await addIndexIfMissing("process_steps", "idx_process_steps_karigar", "(company_id, karigar_id)");
     await addIndexIfMissing("process_steps", "idx_process_steps_process_lot", "(process_lot_id)");
     await addIndexIfMissing("process_steps", "idx_process_steps_completed", "(company_id, completed_at)");
-    await addUniqueIndexIfMissing("process_steps", "uq_process_steps_company_lot_step", "(company_id, lot_no, step_no)");
+    await addUniqueIndexIfMissing("process_steps", "uq_process_steps_company_process_lot_step", "(company_id, process_lot_id, step_no)");
   }
 
   if (await tableExists("process_step_additive_issues")) {
@@ -7458,6 +7481,7 @@ app.get("/process/data", authMiddleware, async (req, res) => {
       ORDER BY
         CAST(COALESCE(lot_no, '0') AS UNSIGNED) ASC,
         lot_no ASC,
+        work_category ASC,
         id ASC
       `,
       lotParams
@@ -7503,6 +7527,7 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
     }
 
     const lotNo = normalizeProcessLotNo(req.params.lotNo);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     if (!lotNo) {
       return res.status(400).json({
         success: false,
@@ -7510,7 +7535,7 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
       });
     }
 
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo, workCategory);
     if (!processLot) {
       return res.status(404).json({
         success: false,
@@ -7534,11 +7559,11 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
       SELECT process_name
       FROM process_steps
       WHERE company_id = ?
-        AND lot_no = ?
+        AND process_lot_id = ?
         AND status = 'COMPLETED'
       ORDER BY step_no ASC, id ASC
       `,
-      [access.companyScope, lotNo]
+      [access.companyScope, processLot.id]
     );
 
     const completedSteps = completedRows
@@ -7580,33 +7605,51 @@ app.get("/process/lots/:lotNo/next-step", authMiddleware, async (req, res) => {
   }
 });
 
-async function getProcessLotForSteps(connection, companyId, lotNo) {
+async function getProcessLotForSteps(connection, companyId, lotNo, workCategory = "REGULAR_SANKHA") {
+  const normalizedCategory = normalizeWorkCategory(workCategory || "REGULAR_SANKHA");
   const [rows] = await connection.query(
     `
     SELECT *
     FROM process_lots
-    WHERE company_id = ? AND lot_no = ?
+    WHERE company_id = ?
+      AND work_category = ?
+      AND lot_no = ?
     LIMIT 1
     `,
-    [companyId, lotNo]
+    [companyId, normalizedCategory, lotNo]
   );
   return rows.length ? normalizeProcessLotRow(rows[0]) : null;
 }
 
-async function getProcessStepCount(connection, companyId, lotNo) {
+async function getProcessLotById(connection, companyId, processLotId) {
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM process_lots
+    WHERE company_id = ?
+      AND id = ?
+    LIMIT 1
+    `,
+    [companyId, processLotId]
+  );
+  return rows.length ? normalizeProcessLotRow(rows[0]) : null;
+}
+
+async function getProcessStepCount(connection, companyId, processLotId) {
   const [rows] = await connection.query(
     `
     SELECT COUNT(*) AS total
     FROM process_steps
-    WHERE company_id = ? AND lot_no = ?
+    WHERE company_id = ?
+      AND process_lot_id = ?
     `,
-    [companyId, lotNo]
+    [companyId, processLotId]
   );
   return Number(rows[0]?.total || 0);
 }
 
-async function getOpenProcessStep(connection, companyId, lotNo, excludeStepId = null) {
-  const params = [companyId, lotNo];
+async function getOpenProcessStep(connection, companyId, processLotId, excludeStepId = null) {
+  const params = [companyId, processLotId];
   let excludeSql = "";
   if (excludeStepId) {
     excludeSql = "AND id <> ?";
@@ -7618,7 +7661,7 @@ async function getOpenProcessStep(connection, companyId, lotNo, excludeStepId = 
     SELECT *
     FROM process_steps
     WHERE company_id = ?
-      AND lot_no = ?
+      AND process_lot_id = ?
       AND status = 'OPEN'
       ${excludeSql}
     ORDER BY step_no ASC, id ASC
@@ -7629,18 +7672,18 @@ async function getOpenProcessStep(connection, companyId, lotNo, excludeStepId = 
   return rows.length ? normalizeProcessStepRow(rows[0]) : null;
 }
 
-async function getLastCompletedProcessStep(connection, companyId, lotNo) {
+async function getLastCompletedProcessStep(connection, companyId, processLotId) {
   const [rows] = await connection.query(
     `
     SELECT *
     FROM process_steps
     WHERE company_id = ?
-      AND lot_no = ?
+      AND process_lot_id = ?
       AND status = 'COMPLETED'
     ORDER BY step_no DESC, id DESC
     LIMIT 1
     `,
-    [companyId, lotNo]
+    [companyId, processLotId]
   );
   return rows.length ? normalizeProcessStepRow(rows[0]) : null;
 }
@@ -7933,7 +7976,7 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     return { ok: true };
   }
 
-  const finalStep = await getLastCompletedProcessStep(connection, companyId, cleanLot);
+  const finalStep = await getLastCompletedProcessStep(connection, companyId, processLot.id);
   if (!finalStep) {
     return {
       ok: false,
@@ -7992,8 +8035,8 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   return { ok: true };
 }
 
-async function getNextProcessStepContext(connection, companyId, lotNo, excludeStepId = null) {
-  const processLot = await getProcessLotForSteps(connection, companyId, lotNo);
+async function getNextProcessStepContext(connection, companyId, lotNo, workCategory = "REGULAR_SANKHA", excludeStepId = null) {
+  const processLot = await getProcessLotForSteps(connection, companyId, lotNo, workCategory);
   if (!processLot) {
     return {
       ok: false,
@@ -8009,7 +8052,7 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     };
   }
 
-  const openStep = await getOpenProcessStep(connection, companyId, lotNo, excludeStepId);
+  const openStep = await getOpenProcessStep(connection, companyId, processLot.id, excludeStepId);
   if (openStep) {
     return {
       ok: false,
@@ -8019,14 +8062,14 @@ async function getNextProcessStepContext(connection, companyId, lotNo, excludeSt
     };
   }
 
-  const lastCompletedStep = await getLastCompletedProcessStep(connection, companyId, lotNo);
+  const lastCompletedStep = await getLastCompletedProcessStep(connection, companyId, processLot.id);
   const [stepRows] = await connection.query(
     `
     SELECT COALESCE(MAX(step_no), 0) AS max_step_no
     FROM process_steps
-    WHERE company_id = ? AND lot_no = ?
+    WHERE company_id = ? AND process_lot_id = ?
     `,
-    [companyId, lotNo]
+    [companyId, processLot.id]
   );
   const lastStepNo = Number(stepRows[0]?.max_step_no || 0);
   const nextStepNo = lastStepNo + 1;
@@ -8065,6 +8108,7 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
 
     const companyId = access.companyScope;
     const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     const params = [];
     const whereParts = [];
 
@@ -8073,7 +8117,22 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
       params.push(companyId);
     }
 
-    if (lotNo) {
+    if (lotNo && companyId !== null) {
+      const connection = await pool.getConnection();
+      try {
+        const processLot = await getProcessLotForSteps(connection, companyId, lotNo, workCategory);
+        if (!processLot) {
+          return res.json({
+            success: true,
+            steps: []
+          });
+        }
+        whereParts.push("process_lot_id = ?");
+        params.push(processLot.id);
+      } finally {
+        connection.release();
+      }
+    } else if (lotNo) {
       whereParts.push("lot_no = ?");
       params.push(lotNo);
     }
@@ -8174,20 +8233,40 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
     }
 
     const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     const params = [access.companyScope];
-    const whereParts = ["company_id = ?"];
+    const whereParts = ["pai.company_id = ?"];
 
     if (lotNo) {
-      whereParts.push("lot_no = ?");
-      params.push(lotNo);
+      const connection = await pool.getConnection();
+      try {
+        const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo, workCategory);
+        if (!processLot) {
+          return res.json({
+            success: true,
+            lotNo,
+            totalGiven: 0,
+            totalReturned: 0,
+            pendingWeight: 0,
+            issues: []
+          });
+        }
+        whereParts.push("ps.process_lot_id = ?");
+        params.push(processLot.id);
+      } finally {
+        connection.release();
+      }
     }
 
     const [rows] = await pool.query(
       `
-      SELECT *
-      FROM process_step_additive_issues
+      SELECT pai.*
+      FROM process_step_additive_issues pai
+      LEFT JOIN process_steps ps
+        ON ps.id = pai.process_step_id
+       AND ps.company_id = pai.company_id
       WHERE ${whereParts.join(" AND ")}
-      ORDER BY issued_at DESC, id DESC
+      ORDER BY pai.issued_at DESC, pai.id DESC
       `,
       params
     );
@@ -8230,6 +8309,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
 
     const stepId = Number(req.params.id || 0);
     const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const workCategory = normalizeWorkCategory(req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
     const givenRaw = req.body.given_weight ?? req.body.givenWeight;
     const parsedGiven = parseRequiredNumber(givenRaw, "KDM/Solder given weight");
     const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
@@ -8271,14 +8351,18 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
 
     const [stepRows] = await connection.query(
       `
-      SELECT *
-      FROM process_steps
-      WHERE id = ?
-        AND company_id = ?
-        AND lot_no = ?
+      SELECT ps.*
+      FROM process_steps ps
+      JOIN process_lots pl
+        ON pl.id = ps.process_lot_id
+       AND pl.company_id = ps.company_id
+      WHERE ps.id = ?
+        AND ps.company_id = ?
+        AND ps.lot_no = ?
+        AND pl.work_category = ?
       LIMIT 1
       `,
-      [stepId, access.companyScope, lotNo]
+      [stepId, access.companyScope, lotNo, workCategory]
     );
 
     if (!stepRows.length) {
@@ -8290,7 +8374,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     }
 
     const step = normalizeProcessStepRow(stepRows[0]);
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, step.lot_no);
+    const processLot = await getProcessLotById(connection, access.companyScope, step.process_lot_id);
     if (isManualProcessLot(processLot)) {
       await connection.rollback();
       return res.status(400).json({
@@ -8421,7 +8505,20 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     }
 
     const issue = normalizeAdditiveIssueRow(issueRows[0]);
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, issue.lot_no);
+    const [issueLotRows] = await connection.query(
+      `
+      SELECT pl.*
+      FROM process_steps ps
+      JOIN process_lots pl
+        ON pl.id = ps.process_lot_id
+       AND pl.company_id = ps.company_id
+      WHERE ps.company_id = ?
+        AND ps.id = ?
+      LIMIT 1
+      `,
+      [access.companyScope, issue.process_step_id]
+    );
+    const processLot = issueLotRows.length ? normalizeProcessLotRow(issueLotRows[0]) : null;
     if (isManualProcessLot(processLot)) {
       await connection.rollback();
       return res.status(400).json({
@@ -8578,7 +8675,8 @@ app.post("/process/material-issues", authMiddleware, checkRole(["SUPERADMIN", "O
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    const requestedLotCategory = normalizeWorkCategory(requestedWorkCategory || "REGULAR_SANKHA");
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo, requestedLotCategory);
     if (!processLot) {
       await connection.rollback();
       return res.status(404).json({
@@ -8871,7 +8969,7 @@ app.get("/process/next-input", authMiddleware, async (req, res) => {
       });
     }
 
-    const context = await getNextProcessStepContext(connection, access.companyScope, lotNo);
+    const context = await getNextProcessStepContext(connection, access.companyScope, lotNo, workCategory);
     return res.status(context.ok ? 200 : 400).json({
       success: context.ok,
       message: context.ok ? "Next process input resolved" : context.message,
@@ -8913,6 +9011,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const companyId = access.companyScope;
     const userId = access.actingUserId;
     const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const workCategory = normalizeWorkCategory(req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
     const processName = normalizeProcessName(req.body.processName || req.body.process_name || "");
     const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
     const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
@@ -8957,7 +9056,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const context = await getNextProcessStepContext(connection, companyId, lotNo);
+    const context = await getNextProcessStepContext(connection, companyId, lotNo, workCategory);
     if (!context.ok) {
       await connection.rollback();
       return res.status(400).json({
@@ -9444,7 +9543,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     }
 
     const step = normalizeProcessStepRow(stepRows[0]);
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, step.lot_no);
+    const processLot = await getProcessLotById(connection, access.companyScope, step.process_lot_id);
     if (isManualProcessLot(processLot)) {
       await connection.rollback();
       return res.status(400).json({
@@ -9654,6 +9753,7 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
 
     const companyId = access.companyScope;
     const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || "");
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     const karigarId = Number(req.query.karigarId || req.query.karigar_id || 0);
     const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
     const toDate = String(req.query.toDate || req.query.to_date || "").trim();
@@ -9664,7 +9764,24 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
       whereParts.push("company_id = ?");
       params.push(companyId);
     }
-    if (lotNo) {
+    if (lotNo && companyId !== null) {
+      const connection = await pool.getConnection();
+      try {
+        const processLot = await getProcessLotForSteps(connection, companyId, lotNo, workCategory);
+        if (!processLot) {
+          return res.json({
+            success: true,
+            lotSummary: [],
+            karigarSummary: [],
+            processSummary: []
+          });
+        }
+        whereParts.push("process_lot_id = ?");
+        params.push(processLot.id);
+      } finally {
+        connection.release();
+      }
+    } else if (lotNo) {
       whereParts.push("lot_no = ?");
       params.push(lotNo);
     }
@@ -9684,14 +9801,14 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
     const whereClause = `WHERE ${whereParts.join(" AND ")}`;
     const [lotSummary] = await pool.query(
       `
-      SELECT lot_no, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
+      SELECT process_lot_id, lot_no, COUNT(*) AS step_count, COALESCE(SUM(input_weight), 0) AS total_input,
         COALESCE(SUM(output_weight), 0) AS total_output, COALESCE(SUM(loss_weight), 0) AS total_loss,
         COALESCE(SUM(input_qty), 0) AS total_input_qty,
         COALESCE(SUM(output_qty), 0) AS total_output_qty,
         COALESCE(SUM(loss_qty), 0) AS total_loss_qty
       FROM process_steps
       ${whereClause}
-      GROUP BY lot_no
+      GROUP BY process_lot_id, lot_no
       ORDER BY lot_no ASC
       `,
       params
@@ -9793,10 +9910,12 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
       `
       SELECT id, raw_weight, is_manual_lot
       FROM process_lots
-      WHERE company_id = ? AND lot_no = ?
+      WHERE company_id = ?
+        AND work_category = ?
+        AND lot_no = ?
       LIMIT 1
       `,
-      [companyId, lotNo]
+      [companyId, workCategory, lotNo]
     );
 
     let processLotId = null;
@@ -9812,7 +9931,7 @@ app.post("/process/lots", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 
       processLotId = Number(existingRows[0].id);
       const existingRawWeight = toNumber(existingRows[0].raw_weight);
-      const stepCount = await getProcessStepCount(connection, companyId, lotNo);
+      const stepCount = await getProcessStepCount(connection, companyId, processLotId);
       if (stepCount > 0 && Math.abs(existingRawWeight - rawWeight) > 0.0005) {
         await connection.rollback();
         return res.status(400).json({
@@ -13088,6 +13207,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
     }
 
     const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
     if (!lotNo) {
       return res.status(400).json({
         success: false,
@@ -13098,7 +13218,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo);
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo, workCategory);
     if (!processLot) {
       await connection.rollback();
       return res.status(404).json({
@@ -13115,7 +13235,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       });
     }
 
-    const openStep = await getOpenProcessStep(connection, access.companyScope, lotNo);
+    const openStep = await getOpenProcessStep(connection, access.companyScope, processLot.id);
     if (openStep) {
       await connection.rollback();
       return res.status(400).json({
@@ -13124,7 +13244,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       });
     }
 
-    const finalStep = await getLastCompletedProcessStep(connection, access.companyScope, lotNo);
+    const finalStep = await getLastCompletedProcessStep(connection, access.companyScope, processLot.id);
     if (!finalStep) {
       await connection.rollback();
       return res.status(400).json({
@@ -13146,12 +13266,12 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       SELECT id, step_no, process_name, loss_weight
       FROM process_steps
       WHERE company_id = ?
-        AND lot_no = ?
+        AND process_lot_id = ?
         AND status = 'COMPLETED'
         AND COALESCE(loss_weight, 0) < 0
       LIMIT 1
       `,
-      [access.companyScope, lotNo]
+      [access.companyScope, processLot.id]
     );
 
     if (negativeLossRows.length) {
@@ -13170,9 +13290,14 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
         COALESCE(SUM(GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)), 0) AS pending_weight
       FROM process_step_additive_issues
       WHERE company_id = ?
-        AND lot_no = ?
+        AND process_step_id IN (
+          SELECT id
+          FROM process_steps
+          WHERE company_id = ?
+            AND process_lot_id = ?
+        )
       `,
-      [access.companyScope, lotNo]
+      [access.companyScope, access.companyScope, processLot.id]
     );
     const additiveIssueCount = Number(pendingAdditiveRows[0]?.issue_count || 0);
     const pendingAdditiveWeight = toNumber(pendingAdditiveRows[0]?.pending_weight);
@@ -13194,11 +13319,11 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
         SELECT process_name
         FROM process_steps
         WHERE company_id = ?
-          AND lot_no = ?
+          AND process_lot_id = ?
           AND status = 'COMPLETED'
         ORDER BY step_no ASC, id ASC
         `,
-        [access.companyScope, lotNo]
+        [access.companyScope, processLot.id]
       );
       const completedNameSet = new Set(
         completedStepRows
