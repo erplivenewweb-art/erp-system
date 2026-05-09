@@ -8962,6 +8962,7 @@ app.get("/process/next-input", authMiddleware, async (req, res) => {
     }
 
     const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     if (!lotNo) {
       return res.status(400).json({
         success: false,

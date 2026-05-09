@@ -834,7 +834,7 @@
               <div class="form-grid">
                 <div class="input-box">
                   <label for="stepLotNo">Lot No</label>
-                  <input id="stepLotNo" type="text" placeholder="Enter saved Lot No" onblur="loadProcessStepContext()" />
+                  <input id="stepLotNo" type="text" placeholder="Enter saved Lot No" />
                 </div>
 
                 <div class="input-box">
@@ -1565,6 +1565,11 @@
 
     function getActiveStepWorkCategory() {
       return normalizeWorkCategory(selectedStepWorkCategory || getSelectedWorkCategory());
+    }
+
+    function syncStepWorkCategoryFromSelector() {
+      selectedStepWorkCategory = getSelectedWorkCategory();
+      return selectedStepWorkCategory;
     }
 
     function addWorkCategoryParam(params, workCategory = getActiveStepWorkCategory()) {
@@ -2777,6 +2782,7 @@
 
     async function loadProcessStepContext() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const activeCategory = getActiveStepWorkCategory();
       if (!lotNo) {
         processStepData = [];
         currentOpenProcessStep = null;
@@ -2791,6 +2797,18 @@
 
       processGuideData = null;
       renderProcessGuide();
+      const selectedLot = lotData.find((lot) => getLotIdentityKey(lot.lotNo, lot.workCategory) === getLotIdentityKey(lotNo, activeCategory));
+      if (!selectedLot) {
+        currentOpenProcessStep = null;
+        processStepData = [];
+        lotAdditiveStatus = { pendingWeight: 0, loaded: false };
+        resetAdditiveIssueData();
+        renderProcessStepTable();
+        renderProcessLossSummary();
+        setBaseProcessInputWeight(0);
+        setProcessStepHint(`No ${activeCategory} lot found for ${lotNo}.`);
+        return;
+      }
       await loadProcessSteps(lotNo);
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
@@ -2985,7 +3003,7 @@
     function clearProcessStepForm(clearLot = true) {
       if (clearLot) {
         document.getElementById("stepLotNo").value = "";
-        selectedStepWorkCategory = getSelectedWorkCategory();
+        syncStepWorkCategoryFromSelector();
       }
       document.getElementById("stepProcessName").value = "";
       document.getElementById("stepKarigarName").value = "";
@@ -3303,18 +3321,18 @@
     document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processWorkCategory")?.addEventListener("change", () => {
-      selectedStepWorkCategory = getSelectedWorkCategory();
+      syncStepWorkCategoryFromSelector();
       applyWorkCategoryMode();
       if (document.getElementById("stepLotNo")?.value?.trim()) {
         loadProcessStepContext();
       }
     });
     document.getElementById("stepLotNo")?.addEventListener("input", () => {
-      selectedStepWorkCategory = getSelectedWorkCategory();
+      syncStepWorkCategoryFromSelector();
       scheduleProcessStepContextLoad();
     });
     document.getElementById("stepLotNo")?.addEventListener("change", () => {
-      selectedStepWorkCategory = getSelectedWorkCategory();
+      syncStepWorkCategoryFromSelector();
       loadProcessStepContext();
     });
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
