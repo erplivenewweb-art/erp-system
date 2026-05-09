@@ -842,6 +842,12 @@ function normalizeWorkCategory(value = "") {
   return clean.slice(0, 40) || "REGULAR_SANKHA";
 }
 
+function getWorkCategoryDestination(workCategory) {
+  const category = normalizeWorkCategory(workCategory);
+  if (category === "KDM" || category === "PIN") return "STOCK";
+  return "STICKER";
+}
+
 function normalizeMaterialType(value = "") {
   const clean = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
   if (!clean) return "KDM";
@@ -7964,7 +7970,29 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     };
   }
 
-  const processLot = await getProcessLotForSteps(connection, companyId, cleanLot);
+  const [lotRows] = await connection.query(
+    `
+    SELECT *
+    FROM process_lots
+    WHERE company_id = ?
+      AND lot_no = ?
+      AND UPPER(COALESCE(status, 'OPEN')) = 'COMPLETED'
+    ORDER BY id ASC
+    `,
+    [companyId, cleanLot]
+  );
+  const completedLots = lotRows.map(normalizeProcessLotRow);
+  const stickerLots = completedLots.filter((lot) => getWorkCategoryDestination(lot.workCategory || lot.work_category) === "STICKER");
+  const directStockLot = completedLots.find((lot) => getWorkCategoryDestination(lot.workCategory || lot.work_category) === "STOCK");
+  const processLot = stickerLots[0] || null;
+
+  if (!processLot && directStockLot) {
+    return {
+      ok: false,
+      message: `Lot ${cleanLot} is already in Stock and is not available for Sticker`
+    };
+  }
+
   if (!processLot || normalizeProcessLotStatus(processLot.status) !== "COMPLETED") {
     return {
       ok: false,
@@ -8033,6 +8061,86 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   }
 
   return { ok: true };
+}
+
+async function moveCompletedProcessLotToStock(connection, companyId, processLot, finalStep, userId = null) {
+  const workCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory);
+  if (getWorkCategoryDestination(workCategory) !== "STOCK") return null;
+
+  const outputWeight = toNumber(finalStep?.output_weight);
+  if (outputWeight <= 0) return null;
+
+  const lotNo = normalizeProcessLotNo(processLot?.lot_no || processLot?.lotNo);
+  const source = workCategory === "PIN" ? "PROCESS_PIN" : "PROCESS_KDM";
+  const referenceStepId = String(finalStep?.id || "").trim();
+  const outputQty = toNumber(finalStep?.output_qty);
+  const expectedQty = toNumber(processLot?.expected_total_qty);
+  const qty = Math.max(1, Math.round(outputQty > 0 ? outputQty : expectedQty > 0 ? expectedQty : 1));
+
+  const [existingRows] = await connection.query(
+    `
+    SELECT id
+    FROM stock
+    WHERE company_id = ?
+      AND source = ?
+      AND manual_lot_id = ?
+    LIMIT 1
+    `,
+    [companyId, source, Number(processLot?.id || 0)]
+  );
+
+  if (existingRows.length) {
+    return {
+      stockId: Number(existingRows[0].id || 0),
+      alreadyMoved: true
+    };
+  }
+
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO stock (
+      serial,
+      product_name,
+      purity,
+      sku,
+      mm,
+      size,
+      weight,
+      qty,
+      category,
+      lot_number,
+      barcode,
+      metal_type,
+      process_type,
+      source,
+      manual_lot_id,
+      reference_step_id,
+      status,
+      company_id,
+      created_by,
+      deleted_at
+    ) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, NULL, '', ?, ?, ?, ?, 'IN_STOCK', ?, ?, NULL)
+    `,
+    [
+      "",
+      workCategory,
+      Number(format3(outputWeight)),
+      qty,
+      workCategory,
+      lotNo,
+      workCategory,
+      source,
+      Number(processLot?.id || 0) || null,
+      referenceStepId,
+      companyId,
+      userId
+    ]
+  );
+
+  return {
+    stockId: Number(insertResult.insertId || 0),
+    alreadyMoved: false
+  };
 }
 
 async function getNextProcessStepContext(connection, companyId, lotNo, workCategory = "REGULAR_SANKHA", excludeStepId = null) {
@@ -10402,7 +10510,10 @@ app.get("/getSticker/:barcode", authMiddleware, async (req, res) => {
       SELECT *
       FROM stock
       WHERE barcode = ?
-      AND company_id = ?
+        AND company_id = ?
+        AND barcode IS NOT NULL
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
       LIMIT 1
       `,
       [barcode, companyId]
@@ -11668,6 +11779,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         SET status = ?, invoice_number = ?, sold_at = NOW(), deleted_at = NULL
         WHERE barcode = ?
           AND company_id = ?
+          AND barcode IS NOT NULL
+          AND TRIM(COALESCE(barcode, '')) <> ''
+          AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
       `;
 
       const [soldResult] = await pool.query(soldSql, soldParams);
@@ -11718,6 +11832,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       SELECT id
       FROM stock
       WHERE barcode = ? AND company_id = ?
+        AND barcode IS NOT NULL
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
       LIMIT 1
       `,
       [oldBarcode, finalCompanyId]
@@ -11874,6 +11991,9 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
       SET status = 'DELETED', deleted_at = NOW()
       WHERE barcode = ?
         AND company_id = ?
+        AND barcode IS NOT NULL
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
     `;
     const params = [barcode, companyId];
 
@@ -11932,6 +12052,9 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
       SET status = 'IN_STOCK', deleted_at = NULL
       WHERE barcode = ?
         AND company_id = ?
+        AND barcode IS NOT NULL
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
     `;
     const params = [barcode, companyId];
 
@@ -12112,6 +12235,9 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
       SELECT *
       FROM stock
       WHERE barcode = ? AND company_id = ?
+        AND barcode IS NOT NULL
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
       LIMIT 1
       `,
       [barcode, access.companyScope]
@@ -12640,7 +12766,12 @@ app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), asy
           `
           UPDATE stock
           SET status = 'SOLD', invoice_number = ?, sold_at = NOW()
-          WHERE barcode = ? AND company_id = ? AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+          WHERE barcode = ?
+            AND company_id = ?
+            AND barcode IS NOT NULL
+            AND TRIM(COALESCE(barcode, '')) <> ''
+            AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+            AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
           `,
           [cleanInvoiceNumber, barcode, finalCompanyId]
         );
@@ -12951,7 +13082,12 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
               invoice_number = ?,
               sold_at = NOW(),
               deleted_at = NULL
-          WHERE barcode = ? AND company_id = ? AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+          WHERE barcode = ?
+            AND company_id = ?
+            AND barcode IS NOT NULL
+            AND TRIM(COALESCE(barcode, '')) <> ''
+            AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+            AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
           `,
           [cleanInvoiceNumber, barcode, finalCompanyId]
         );
@@ -13236,6 +13372,7 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       });
     }
 
+    const destination = getWorkCategoryDestination(workCategory);
     const openStep = await getOpenProcessStep(connection, access.companyScope, processLot.id);
     if (openStep) {
       await connection.rollback();
@@ -13358,6 +13495,16 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       [access.actingUserId || null, processLot.id]
     );
 
+    const directStockItem = destination === "STOCK"
+      ? await moveCompletedProcessLotToStock(
+        connection,
+        access.companyScope,
+        processLot,
+        finalStep,
+        access.actingUserId || null
+      )
+      : null;
+
     const [savedRows] = await connection.query(
       `
       SELECT *
@@ -13372,7 +13519,11 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
 
     return res.json({
       success: true,
-      message: "Process lot completed successfully",
+      message: destination === "STOCK"
+        ? "Lot completed. Added to Stock."
+        : "Lot completed. Ready for Sticker.",
+      destination,
+      directStockItem,
       lot: savedRows.length ? normalizeProcessLotRow(savedRows[0]) : null
     });
   } catch (error) {

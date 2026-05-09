@@ -988,19 +988,25 @@
       await loadStockData();
     }
 
+    function buildStockAuthParams() {
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      const actingUserId = getCurrentUserId();
+      const params = new URLSearchParams();
+
+      if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+        params.set("actingUserId", String(actingUserId));
+      }
+
+      if (!isSuperAdmin()) {
+        params.set("companyId", String(companyId));
+      }
+
+      return params;
+    }
+
     async function loadStockData() {
       try {
-        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
-        const actingUserId = getCurrentUserId();
-        const params = new URLSearchParams();
-
-        if (actingUserId !== null && !Number.isNaN(actingUserId)) {
-          params.set("actingUserId", String(actingUserId));
-        }
-
-        if (!isSuperAdmin()) {
-          params.set("companyId", String(companyId));
-        }
+        const params = buildStockAuthParams();
 
         params.set("limit", String(STOCK_PAGE_LIMIT));
         params.set("offset", String((stockCurrentPage - 1) * STOCK_PAGE_LIMIT));
@@ -1522,18 +1528,8 @@
       tbody.innerHTML = items.slice(0, 1000).map((item) => {
         const status = getItemStatus(item);
         const barcode = String(item.barcode || "").trim();
-
-        return `
-          <tr>
-            <td>${escapeHtml(getItemSerial(item))}</td>
-            <td>${escapeHtml(barcode)}</td>
-            <td>${escapeHtml(getItemProduct(item))}</td>
-            <td>${escapeHtml(item.sku || "")}</td>
-            <td>${escapeHtml(item.size || "")}</td>
-            <td>${getItemWeight(item).toFixed(3)}</td>
-            <td>${escapeHtml(getItemLot(item))}</td>
-            <td>${getStatusBadge(status)}</td>
-            <td>
+        const actionHtml = barcode
+          ? `
               <button
                 type="button"
                 class="delete-icon-btn"
@@ -1542,7 +1538,20 @@
               >
                 <i class="fas fa-trash"></i>
               </button>
-            </td>
+            `
+          : "-";
+
+        return `
+          <tr>
+            <td>${escapeHtml(getItemSerial(item))}</td>
+            <td>${escapeHtml(barcode || "-")}</td>
+            <td>${escapeHtml(getItemProduct(item))}</td>
+            <td>${escapeHtml(item.sku || "")}</td>
+            <td>${escapeHtml(item.size || "")}</td>
+            <td>${getItemWeight(item).toFixed(3)}</td>
+            <td>${escapeHtml(getItemLot(item))}</td>
+            <td>${getStatusBadge(status)}</td>
+            <td>${actionHtml}</td>
           </tr>
         `;
       }).join("");

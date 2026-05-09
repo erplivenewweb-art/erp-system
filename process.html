@@ -1555,6 +1555,15 @@
       return String(value || "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA";
     }
 
+    function getWorkCategoryDestination(workCategory) {
+      const category = normalizeWorkCategory(workCategory);
+      return category === "KDM" || category === "PIN" ? "STOCK" : "STICKER";
+    }
+
+    function getWorkCategoryDestinationLabel(workCategory) {
+      return getWorkCategoryDestination(workCategory) === "STOCK" ? "Stock" : "Sticker";
+    }
+
     function getSelectedWorkCategory() {
       return normalizeWorkCategory(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA");
     }
@@ -1681,12 +1690,13 @@
       const isManualLot = Boolean(getSelectedProcessLot()?.isManualLot);
       const templateGuideExists = hasTemplateGuideSteps();
       const latestCompletedStep = getLatestCompletedProcessStep();
+      const destinationLabel = getWorkCategoryDestinationLabel(getActiveStepWorkCategory());
 
       completedEl.textContent = lotNo
         ? (isManualLot ? "Manual lot" : (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed")))
         : "Select a lot";
       nextEl.textContent = lotNo
-        ? (isManualLot ? "Use Sticker page" : (lotStatus === "COMPLETED" ? "Ready for Sticker" : (canCompleteLot ? "Ready to Complete Lot" : (nextStep || "-"))))
+        ? (isManualLot ? "Use Sticker page" : (lotStatus === "COMPLETED" ? `Ready for ${destinationLabel}` : (canCompleteLot ? "Ready to Complete Lot" : (nextStep || "-"))))
         : "-";
       nextEl.classList.toggle("process-guide-ready", canCompleteLot || lotStatus === "COMPLETED");
       progressEl.textContent = lotNo ? progress : "0/0";
@@ -1702,7 +1712,7 @@
         } else if (isManualLot) {
           actionHint.textContent = "Manual lot: no process workflow. Use Sticker page.";
         } else if (lotStatus === "COMPLETED") {
-          actionHint.textContent = "Ready for Sticker";
+          actionHint.textContent = `Ready for ${destinationLabel}`;
         } else if (currentOpenProcessStep) {
           actionHint.textContent = "Complete the open step before completing this lot.";
         } else if (templateGuideExists && !isReady) {
@@ -2871,7 +2881,13 @@
           throw new Error(data?.message || "Lot completion failed");
         }
 
-        showToast("Lot completed. Ready for Sticker.", "success", "Ready for Sticker");
+        const destination = String(data?.destination || getWorkCategoryDestination(workCategory)).trim().toUpperCase();
+        const successMessage = data?.message || (
+          destination === "STOCK"
+            ? "Lot completed. Added to Stock."
+            : "Lot completed. Ready for Sticker."
+        );
+        showToast(successMessage, "success", destination === "STOCK" ? "Added to Stock" : "Ready for Sticker");
         await loadProcessData();
         renderProcessTable();
         loadKarigarLotDropdown();
