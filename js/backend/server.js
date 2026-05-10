@@ -10436,14 +10436,6 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     });
     const hasIssueLedger = issueTotals.issueCount > 0;
 
-    if (hasIssueLedger && issueTotals.pendingWeight > 0) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: `Cannot complete this step. Pending KDM/Solder return weight is ${issueTotals.pendingWeight.toFixed(3)}g. Return all issued material before completing the process step.`
-      });
-    }
-
     const additiveGivenWeight = hasIssueLedger ? issueTotals.additiveGivenWeight : additivePayload.givenWeight;
     const additiveReturnedWeight = hasIssueLedger ? issueTotals.additiveReturnedWeight : additivePayload.returnedWeight;
     const additiveUsedWeight = hasIssueLedger ? issueTotals.additiveUsedWeight : additivePayload.usedWeight;
@@ -14179,33 +14171,6 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       return res.status(400).json({
         success: false,
         message: `Process step ${badStep.step_no || badStep.id} has negative loss. Correct the process loss before completing the lot.`
-      });
-    }
-
-    const [pendingAdditiveRows] = await connection.query(
-      `
-      SELECT
-        COUNT(*) AS issue_count,
-        COALESCE(SUM(GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)), 0) AS pending_weight
-      FROM process_step_additive_issues
-      WHERE company_id = ?
-        AND process_step_id IN (
-          SELECT id
-          FROM process_steps
-          WHERE company_id = ?
-            AND process_lot_id = ?
-        )
-      `,
-      [access.companyScope, access.companyScope, processLot.id]
-    );
-    const additiveIssueCount = Number(pendingAdditiveRows[0]?.issue_count || 0);
-    const pendingAdditiveWeight = toNumber(pendingAdditiveRows[0]?.pending_weight);
-
-    if (additiveIssueCount > 0 && pendingAdditiveWeight > 0) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: `Cannot complete this lot. Pending KDM/Solder return weight is ${pendingAdditiveWeight.toFixed(3)}g. Return all issued material before completing the lot.`
       });
     }
 

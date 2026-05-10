@@ -1731,7 +1731,7 @@
       const latestCompletedStep = getLatestCompletedProcessStep();
       const templateGuideExists = hasTemplateGuideSteps();
 
-      if (!lotNo || !lot || lot.isManualLot || rawStatus === "COMPLETED" || currentOpenProcessStep || !lotAdditiveStatus.loaded || pendingKdm > 0.0009) {
+      if (!lotNo || !lot || lot.isManualLot || rawStatus === "COMPLETED" || currentOpenProcessStep || !lotAdditiveStatus.loaded) {
         return false;
       }
 
@@ -1771,7 +1771,7 @@
       const isReady = Boolean(processGuideData?.isReadyToComplete);
       const canCompleteLot = isCompleteLotAvailable();
       const lotStatus = lotNo ? getSelectedLotStatusLabel() : "OPEN";
-      const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
+      const usedKdm = Number(lotAdditiveStatus.pendingWeight || 0);
       const isManualLot = Boolean(getSelectedProcessLot()?.isManualLot);
       const templateGuideExists = hasTemplateGuideSteps();
       const latestCompletedStep = getLatestCompletedProcessStep();
@@ -1811,9 +1811,9 @@
         } else if (!templateGuideExists && (!latestCompletedStep || Number(latestCompletedStep.outputWeight || 0) <= 0)) {
           actionHint.textContent = "Complete at least one process step with output weight before completing this lot.";
         } else if (!lotAdditiveStatus.loaded) {
-          actionHint.textContent = "Checking KDM/Solder pending status.";
-        } else if (pendingKdm > 0.0009) {
-          actionHint.textContent = `Return pending KDM/Solder weight ${pendingKdm.toFixed(3)}g before completing.`;
+          actionHint.textContent = "Checking KDM/Solder used weight.";
+        } else if (usedKdm > 0.0009) {
+          actionHint.textContent = `Used KDM ${usedKdm.toFixed(3)}g will be included in allowed output.`;
         } else {
           actionHint.textContent = "This lot can be completed now.";
         }
