@@ -127,6 +127,8 @@ const SMTP_PLACEHOLDER_VALUES = new Set([
   "your-password",
   "your-smtp-user",
   "your-smtp-password",
+  "your_16_digit_gmail_app_password",
+  "yourgmail@gmail.com",
   "no-reply@your-domain.com"
 ]);
 
@@ -134,15 +136,52 @@ function getMissingEnvKeys(keys) {
   return keys.filter((key) => !String(process.env[key] || "").trim());
 }
 
-function hasPlaceholderSmtpConfig() {
-  const values = [
-    process.env.SMTP_HOST,
-    process.env.SMTP_USER,
-    process.env.SMTP_PASS,
-    process.env.SMTP_FROM
-  ].map((value) => String(value || "").trim().toLowerCase());
+function isSmtpPlaceholderValue(value) {
+  return SMTP_PLACEHOLDER_VALUES.has(String(value || "").trim().toLowerCase());
+}
 
-  return !String(process.env.SMTP_PASS || "").trim() || values.some((value) => SMTP_PLACEHOLDER_VALUES.has(value));
+function getSmtpPlaceholderReasons() {
+  const checks = [
+    ["SMTP_HOST", process.env.SMTP_HOST],
+    ["SMTP_USER", process.env.SMTP_USER],
+    ["SMTP_FROM", process.env.SMTP_FROM]
+  ];
+  const reasons = checks
+    .filter(([, value]) => isSmtpPlaceholderValue(value))
+    .map(([key]) => `${key} placeholder`);
+
+  const pass = String(process.env.SMTP_PASS || "").trim();
+  if (!pass) {
+    reasons.push("SMTP_PASS missing");
+  } else if (isSmtpPlaceholderValue(pass)) {
+    reasons.push("SMTP_PASS placeholder");
+  }
+
+  return reasons;
+}
+
+function hasPlaceholderSmtpConfig() {
+  return getSmtpPlaceholderReasons().length > 0;
+}
+
+function getSmtpPlaceholderMessage() {
+  const reasons = getSmtpPlaceholderReasons();
+  return reasons.length
+    ? `SMTP not configured: ${reasons.join(", ")}.`
+    : "";
+}
+
+function getEmailDomainOnly(value) {
+  const clean = String(value || "").trim();
+  const atIndex = clean.lastIndexOf("@");
+  return atIndex >= 0 && clean.slice(atIndex + 1) ? clean.slice(atIndex + 1) : "(missing)";
+}
+
+function getSmtpPassState() {
+  const pass = String(process.env.SMTP_PASS || "").trim();
+  if (!pass) return "missing";
+  if (isSmtpPlaceholderValue(pass)) return "placeholder";
+  return `set length ${pass.length}`;
 }
 
 function parseEnvBoolean(value, fallback = false) {
@@ -262,13 +301,14 @@ function logDbStartupConfig() {
 
 function logSmtpStartupConfig() {
   const enabled = isSmtpEnabled();
-  console.log("[STARTUP] SMTP CONFIG:", {
+  console.log("[STARTUP] SMTP SAFE DEBUG:", {
     enabled,
     host: String(process.env.SMTP_HOST || "").trim() || "(missing)",
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: parseEnvBoolean(process.env.SMTP_SECURE, Number(process.env.SMTP_PORT || 587) === 465),
-    user: String(process.env.SMTP_USER || "").trim() || "(missing)",
-    from: String(process.env.SMTP_FROM || "").trim() || "(missing)"
+    port: String(process.env.SMTP_PORT || "").trim() || "(missing)",
+    secure: String(process.env.SMTP_SECURE || "").trim() || "(missing)",
+    userDomain: getEmailDomainOnly(process.env.SMTP_USER),
+    fromDomain: getEmailDomainOnly(process.env.SMTP_FROM),
+    passState: getSmtpPassState()
   });
 }
 
@@ -626,7 +666,7 @@ function assertSmtpAvailableForOtp() {
   }
 
   if (hasPlaceholderSmtpConfig()) {
-    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
+    markSmtpUnavailable(getSmtpPlaceholderMessage());
     startupStatus.smtp = "failed";
     throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
@@ -651,7 +691,7 @@ function getMailTransporter() {
   }
 
   if (hasPlaceholderSmtpConfig()) {
-    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
+    markSmtpUnavailable(getSmtpPlaceholderMessage());
     startupStatus.smtp = "failed";
     throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
@@ -694,8 +734,9 @@ async function testSmtpConnection() {
 
   if (hasPlaceholderSmtpConfig()) {
     startupStatus.smtp = "failed";
-    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
-    console.warn("[STARTUP] SMTP not configured: placeholder SMTP env detected.");
+    const placeholderMessage = getSmtpPlaceholderMessage();
+    markSmtpUnavailable(placeholderMessage);
+    console.warn(`[STARTUP] ${placeholderMessage}`);
     return;
   }
 
