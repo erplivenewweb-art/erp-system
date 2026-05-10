@@ -121,8 +121,28 @@ const SMTP_REQUIRED_ENV_KEYS = [
   "SMTP_FROM"
 ];
 
+const SMTP_PLACEHOLDER_VALUES = new Set([
+  "smtp.your-provider.com",
+  "your-email@example.com",
+  "your-password",
+  "your-smtp-user",
+  "your-smtp-password",
+  "no-reply@your-domain.com"
+]);
+
 function getMissingEnvKeys(keys) {
   return keys.filter((key) => !String(process.env[key] || "").trim());
+}
+
+function hasPlaceholderSmtpConfig() {
+  const values = [
+    process.env.SMTP_HOST,
+    process.env.SMTP_USER,
+    process.env.SMTP_PASS,
+    process.env.SMTP_FROM
+  ].map((value) => String(value || "").trim().toLowerCase());
+
+  return !String(process.env.SMTP_PASS || "").trim() || values.some((value) => SMTP_PLACEHOLDER_VALUES.has(value));
 }
 
 function parseEnvBoolean(value, fallback = false) {
@@ -604,6 +624,12 @@ function assertSmtpAvailableForOtp() {
     startupStatus.smtp = "failed";
     throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
+
+  if (hasPlaceholderSmtpConfig()) {
+    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
+    startupStatus.smtp = "failed";
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
 }
 
 function getMailTransporter() {
@@ -621,6 +647,12 @@ function getMailTransporter() {
   const missingSmtpEnv = getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS);
   if (missingSmtpEnv.length) {
     markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+
+  if (hasPlaceholderSmtpConfig()) {
+    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
+    startupStatus.smtp = "failed";
     throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
 
@@ -657,6 +689,13 @@ async function testSmtpConnection() {
     startupStatus.smtp = "failed";
     markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
     console.warn(`[STARTUP] SMTP not configured. Missing: ${missingSmtpEnv.join(", ")}`);
+    return;
+  }
+
+  if (hasPlaceholderSmtpConfig()) {
+    startupStatus.smtp = "failed";
+    markSmtpUnavailable("SMTP not configured: placeholder SMTP env detected.");
+    console.warn("[STARTUP] SMTP not configured: placeholder SMTP env detected.");
     return;
   }
 
