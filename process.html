@@ -142,6 +142,28 @@
       color: #9a7418;
     }
 
+    .process-destination-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .process-destination-badge.direct-stock {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .process-destination-badge.sticker-flow {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
     .additive-issue-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -840,6 +862,7 @@
                 <div class="input-box">
                   <label for="stepProcessName">Process Name</label>
                   <input id="stepProcessName" type="text" placeholder="Example: Cutting / Polish" />
+                  <p id="outsideKarigarStepNote" class="additive-issue-note" style="display:none;">This step involves outside karigar workflow.</p>
                 </div>
 
                 <div class="input-box">
@@ -1140,6 +1163,14 @@
                     <div class="process-guide-item">
                       <span class="process-guide-label">Lot Status</span>
                       <span id="processLotStatus" class="process-guide-value">OPEN</span>
+                    </div>
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Work Category</span>
+                      <span id="processGuideCategory" class="process-guide-value">REGULAR_SANKHA</span>
+                    </div>
+                    <div class="process-guide-item">
+                      <span class="process-guide-label">Destination</span>
+                      <span id="processGuideDestination" class="process-guide-value">Sticker Flow</span>
                     </div>
                   </div>
                   <div class="lot-complete-row">
@@ -1561,7 +1592,13 @@
     }
 
     function getWorkCategoryDestinationLabel(workCategory) {
-      return getWorkCategoryDestination(workCategory) === "STOCK" ? "Stock" : "Sticker";
+      return getWorkCategoryDestination(workCategory) === "STOCK" ? "Direct Stock" : "Sticker Flow";
+    }
+
+    function getWorkCategoryDestinationBadge(workCategory) {
+      const label = getWorkCategoryDestinationLabel(workCategory);
+      const badgeClass = getWorkCategoryDestination(workCategory) === "STOCK" ? "direct-stock" : "sticker-flow";
+      return `<span class="process-destination-badge ${badgeClass}">${escapeHtml(label)}</span>`;
     }
 
     function getSelectedWorkCategory() {
@@ -1675,11 +1712,14 @@
       const nextEl = document.getElementById("processGuideNext");
       const progressEl = document.getElementById("processGuideProgress");
       const statusEl = document.getElementById("processLotStatus");
+      const categoryEl = document.getElementById("processGuideCategory");
+      const destinationEl = document.getElementById("processGuideDestination");
       const completeButton = document.getElementById("completeLotButton");
       const actionHint = document.getElementById("processLotActionHint");
       if (!completedEl || !nextEl || !progressEl) return;
 
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const activeWorkCategory = getActiveStepWorkCategory();
       const completedSteps = processGuideData?.completedSteps || [];
       const nextStep = processGuideData?.nextStep || "";
       const progress = processGuideData?.progress || "0/0";
@@ -1690,7 +1730,7 @@
       const isManualLot = Boolean(getSelectedProcessLot()?.isManualLot);
       const templateGuideExists = hasTemplateGuideSteps();
       const latestCompletedStep = getLatestCompletedProcessStep();
-      const destinationLabel = getWorkCategoryDestinationLabel(getActiveStepWorkCategory());
+      const destinationLabel = getWorkCategoryDestinationLabel(activeWorkCategory);
 
       completedEl.textContent = lotNo
         ? (isManualLot ? "Manual lot" : (message || (completedSteps.length ? completedSteps.join(", ") : "No template steps completed")))
@@ -1702,6 +1742,12 @@
       progressEl.textContent = lotNo ? progress : "0/0";
       if (statusEl) {
         statusEl.innerHTML = `<span class="lot-status-badge ${lotStatus === "COMPLETED" ? "completed" : canCompleteLot ? "ready" : ""}">${escapeHtml(lotStatus)}</span>`;
+      }
+      if (categoryEl) {
+        categoryEl.textContent = activeWorkCategory;
+      }
+      if (destinationEl) {
+        destinationEl.innerHTML = getWorkCategoryDestinationBadge(activeWorkCategory);
       }
       if (completeButton) {
         completeButton.style.display = canCompleteLot ? "" : "none";
@@ -1729,6 +1775,7 @@
       }
 
       prefillSuggestedProcessName(nextStep);
+      renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
     }
 
@@ -1772,6 +1819,19 @@
 
     function isSolderingLikeStepName(value = "") {
       return ["soldering", "solding", "solder", "kdm"].includes(normalizeStepNameForMatch(value));
+    }
+
+    function isOutsideKarigarStepName(value = "") {
+      return ["khadi issue", "jali receive", "outside issue", "receive"].includes(normalizeStepNameForMatch(value));
+    }
+
+    function renderOutsideKarigarStepNote() {
+      const note = document.getElementById("outsideKarigarStepNote");
+      if (!note) return;
+
+      const processName = document.getElementById("stepProcessName")?.value || "";
+      const activeName = processName || currentOpenProcessStep?.processName || processGuideData?.nextStep || "";
+      note.style.display = isOutsideKarigarStepName(activeName) ? "" : "none";
     }
 
     function isAdditiveMaterialStepActive() {
@@ -3352,6 +3412,7 @@
       loadProcessStepContext();
     });
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
+      renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
       loadAdditiveIssues();
     });

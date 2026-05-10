@@ -60,6 +60,30 @@
       border-color: #d1d5db;
     }
 
+    .destination-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .destination-badge.sticker {
+      color: #92400e;
+      background: linear-gradient(180deg, #fef3c7, #fde68a);
+      border-color: #fbbf24;
+    }
+
+    .destination-badge.direct-stock {
+      color: #166534;
+      background: linear-gradient(180deg, #dcfce7, #bbf7d0);
+      border-color: #86efac;
+    }
+
     .delete-icon-btn {
       width: 36px;
       height: 36px;
@@ -1065,6 +1089,27 @@
       return String(item.category || "").trim();
     }
 
+    function isDirectStockItem(item) {
+      const source = getItemSource(item).toUpperCase();
+      const category = getItemCategory(item).toUpperCase();
+      return source === "PROCESS_PIN" || source === "PROCESS_KDM" || category === "PIN" || category === "KDM";
+    }
+
+    function getDestinationBadge(type) {
+      const destination = String(type || "STICKER").trim().toUpperCase() === "DIRECT_STOCK" ? "DIRECT_STOCK" : "STICKER";
+      const label = destination === "DIRECT_STOCK" ? "DIRECT STOCK" : "STICKER";
+      const badgeClass = destination === "DIRECT_STOCK" ? "direct-stock" : "sticker";
+      return `<span class="destination-badge ${badgeClass}">${label}</span>`;
+    }
+
+    function getItemDestinationType(item) {
+      return isDirectStockItem(item) ? "DIRECT_STOCK" : "STICKER";
+    }
+
+    function getLotDestinationType(items) {
+      return items.some(isDirectStockItem) ? "DIRECT_STOCK" : "STICKER";
+    }
+
     function getReferenceStepId(item) {
       return item.reference_step_id || item.referenceStepId || "";
     }
@@ -1208,6 +1253,7 @@
             totalItems: 0,
             inStock: 0,
             sold: 0,
+            destinationType: "STICKER",
             sizeSet: new Set()
           };
         }
@@ -1225,6 +1271,7 @@
       return Object.values(lotMap)
         .map(group => ({
           ...group,
+          destinationType: getLotDestinationType(group.items),
           sizes: [...group.sizeSet].join(", ")
         }))
         .sort((a, b) => String(a.lot).localeCompare(String(b.lot), undefined, { numeric: true }));
@@ -1463,6 +1510,7 @@
           <th>Size</th>
           <th>Total Items</th>
           <th>Total Weight</th>
+          <th>Destination</th>
           <th>In Stock</th>
           <th>Sold</th>
           <th>Action</th>
@@ -1472,7 +1520,7 @@
       tbody.innerHTML = "";
 
       if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;">No stock data found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No stock data found</td></tr>`;
         return;
       }
 
@@ -1487,6 +1535,7 @@
             <td>${escapeHtml(group.sizes || "-")}</td>
             <td>${group.totalItems}</td>
             <td>${group.totalWeight.toFixed(3)}</td>
+            <td>${getDestinationBadge(group.destinationType)}</td>
             <td>${group.inStock}</td>
             <td>${group.sold}</td>
             <td><button class="view-btn" type="button" onclick="showLotItems('${safeLot}')">View</button></td>
@@ -1513,6 +1562,7 @@
           <th>Size</th>
           <th>Weight</th>
           <th>Lot Number</th>
+          <th>Destination</th>
           <th>Status</th>
           <th>Action</th>
         </tr>
@@ -1521,7 +1571,7 @@
       tbody.innerHTML = "";
 
       if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">No item data found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">No item data found</td></tr>`;
         return;
       }
 
@@ -1550,6 +1600,7 @@
             <td>${escapeHtml(item.size || "")}</td>
             <td>${getItemWeight(item).toFixed(3)}</td>
             <td>${escapeHtml(getItemLot(item))}</td>
+            <td>${getDestinationBadge(getItemDestinationType(item))}</td>
             <td>${getStatusBadge(status)}</td>
             <td>${actionHtml}</td>
           </tr>
