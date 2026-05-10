@@ -874,9 +874,9 @@
 
           <div id="processStepEntryCard" class="sub-card workflow-card">
             <h3>Step Entry</h3>
-            <p>Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
+            <p id="processStepEntryHelp">Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.</p>
 
-            <div class="step-section">
+            <div id="stepBasicSection" class="step-section">
               <h4 class="step-section-title">Basic Info</h4>
               <div class="form-grid">
                 <div class="input-box">
@@ -897,7 +897,7 @@
               </div>
             </div>
 
-            <div class="step-section">
+            <div id="stepInputSection" class="step-section">
               <h4 class="step-section-title">Input</h4>
               <div class="form-grid">
                 <div class="input-box">
@@ -913,10 +913,9 @@
             </div>
 
             <div id="additiveMaterialFields" class="step-section" style="display:none;">
-              <h4 class="step-section-title">Step KDM/Solder (OPEN step only)</h4>
+              <h4 class="step-section-title">Soldering KDM</h4>
               <div class="summary">
-                <p class="additive-issue-note">This step panel affects process-step completion and lot completion checks.</p>
-                <h3 id="additiveMaterialTitle">Solder/KDM Material</h3>
+                <h3 id="additiveMaterialTitle">KDM Issue & Return</h3>
                 <div id="additiveQuickFields" class="form-grid" style="display:none;">
                   <div class="input-box">
                     <label id="additiveGivenLabel" for="stepAdditiveGivenWeight">Solder/KDM Given Weight</label>
@@ -937,67 +936,57 @@
                 <div id="additiveIssuePanel" style="margin-top: 10px;">
                   <div class="form-grid">
                     <div class="input-box">
-                      <label id="additiveIssueGivenLabel" for="additiveIssueGivenWeight">Solder/KDM Given Weight</label>
+                      <label>Available KDM Stock</label>
+                      <input id="availableKdmStockDisplay" type="text" value="0.000g" readonly />
+                    </div>
+
+                    <div class="input-box">
+                      <label id="additiveIssueGivenLabel" for="additiveIssueGivenWeight">KDM Given Weight</label>
                       <input id="additiveIssueGivenWeight" type="number" step="0.001" placeholder="Issue weight" />
                     </div>
 
                     <div class="input-box">
-                      <label for="additiveIssueKarigarName">Karigar</label>
+                      <label for="additiveIssueKarigarName">Karigar Name</label>
                       <input id="additiveIssueKarigarName" type="text" placeholder="Karigar Name" />
                     </div>
 
-                    <div class="input-box" style="grid-column: span 2;">
+                    <div class="input-box">
                       <label for="additiveIssueNotes">Notes</label>
-                      <input id="additiveIssueNotes" type="text" placeholder="Optional note" />
+                      <input id="additiveIssueNotes" type="text" placeholder="Optional" />
                     </div>
                   </div>
 
                   <div class="btn-row" style="margin-top:10px;">
                     <button id="additiveIssueButton" class="secondary-btn" type="button" onclick="issueAdditiveMaterial()">Issue KDM</button>
-                    <button class="secondary-btn" type="button" onclick="loadAdditiveIssues()">Refresh Pending</button>
                   </div>
 
                   <p id="additiveIssueHelp" class="additive-issue-note"></p>
 
                   <div class="additive-issue-grid">
                     <div class="additive-issue-metric">
-                      <span>Total Given</span>
+                      <span>KDM Given</span>
                       <strong id="additiveIssueTotalGiven">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
-                      <span>Total Returned</span>
+                      <span>KDM Returned</span>
                       <strong id="additiveIssueTotalReturned">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
-                      <span>Total Used</span>
+                      <span>Used KDM</span>
                       <strong id="additiveIssueTotalUsed">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
-                      <span>Pending Weight</span>
+                      <span>Allowed Output</span>
                       <strong id="additiveIssuePendingWeight">0.000g</strong>
                     </div>
                   </div>
 
-                  <div class="table-wrap" style="margin-top:10px;">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Given Weight</th>
-                          <th>Returned Weight</th>
-                          <th>Used Weight</th>
-                          <th>Pending Weight</th>
-                          <th>Status</th>
-                          <th>Return</th>
-                        </tr>
-                      </thead>
-                      <tbody id="additiveIssueListBody"></tbody>
-                    </table>
-                  </div>
+                  <div id="additiveIssueListBody" style="margin-top:10px;"></div>
                 </div>
               </div>
             </div>
 
-            <div class="step-section">
+            <div id="stepOutputSection" class="step-section">
               <h4 class="step-section-title">Output</h4>
               <div class="form-grid">
                 <div class="input-box">
@@ -1005,22 +994,22 @@
                   <input id="stepOutputWeight" type="number" step="0.001" placeholder="Finished output weight" />
                 </div>
 
-                <div class="input-box">
+                <div id="stepRecoveryWeightBox" class="input-box">
                   <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
                   <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
                 </div>
 
-                <div class="input-box">
+                <div id="stepOutputQtyBox" class="input-box">
                   <label for="stepOutputQty">Output Qty</label>
                   <input id="stepOutputQty" type="number" step="1" placeholder="Returned count" />
                 </div>
 
-                <div class="input-box">
+                <div id="stepLossWeightBox" class="input-box">
                   <label for="stepLossWeight">Loss Weight</label>
                   <input id="stepLossWeight" type="number" step="0.001" readonly />
                 </div>
 
-                <div class="input-box">
+                <div id="stepLossQtyBox" class="input-box">
                   <label for="stepLossQty">Loss Qty</label>
                   <input id="stepLossQty" type="number" step="1" readonly />
                 </div>
@@ -1433,6 +1422,8 @@
       totalGiven: 0,
       totalReturned: 0,
       pendingWeight: 0,
+      availableKdmStock: 0,
+      projectedAllowedOutput: 0,
       issues: []
     };
     let processLossSummaryData = {
@@ -1649,6 +1640,11 @@
       return `<span class="process-destination-badge ${badgeClass}">${escapeHtml(label)}</span>`;
     }
 
+    function isOutsideWorkCategory(category) {
+      const normalized = normalizeWorkCategory(category);
+      return normalized === "JALI_SANKHA" || normalized === "MANGALSUTRA";
+    }
+
     function getSelectedWorkCategory() {
       return normalizeWorkCategory(document.getElementById("processWorkCategory")?.value || "REGULAR_SANKHA");
     }
@@ -1676,6 +1672,7 @@
       if (!activeStepLot) {
         selectedStepWorkCategory = getSelectedWorkCategory();
       }
+      applyStepEntryMode();
       renderLiveProcessSummary();
     }
 
@@ -1825,6 +1822,7 @@
       prefillSuggestedProcessName(nextStep);
       renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
+      applyStepEntryMode();
     }
 
     async function loadProcessGuide(lotNo) {
@@ -1873,18 +1871,110 @@
       return ["khadi issue", "jali receive", "outside issue", "receive"].includes(normalizeStepNameForMatch(value));
     }
 
+    function isOutsideIssueStepName(value = "") {
+      return ["khadi issue", "outside issue"].includes(normalizeStepNameForMatch(value));
+    }
+
+    function isOutsideReceiveStepName(value = "") {
+      return ["jali receive", "receive"].includes(normalizeStepNameForMatch(value));
+    }
+
+    function setElementVisible(id, isVisible) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = isVisible ? "" : "none";
+    }
+
+    function setFieldLabel(inputId, text) {
+      const label = document.querySelector(`label[for="${inputId}"]`);
+      if (label) label.textContent = text;
+    }
+
+    function getActiveStepNameForMode() {
+      return String(
+        document.getElementById("stepProcessName")?.value ||
+        currentOpenProcessStep?.processName ||
+        processGuideData?.nextStep ||
+        ""
+      ).trim();
+    }
+
+    function applyStepEntryMode() {
+      const category = getActiveStepWorkCategory();
+      const isOutsideMode = isOutsideWorkCategory(category);
+      const stepName = getActiveStepNameForMode();
+      const isReceiveStep = isOutsideReceiveStepName(stepName);
+      const isIssueStep = isOutsideIssueStepName(stepName);
+      const outputLabel = isReceiveStep ? "Received Weight" : isIssueStep ? "Given Weight" : "Weight";
+      const outputPlaceholder = isReceiveStep ? "Received weight" : isIssueStep ? "Given weight" : "Weight";
+      const inputQty = document.getElementById("stepInputQty");
+      const outputQty = document.getElementById("stepOutputQty");
+
+      document.getElementById("processStepEntryCard")?.classList.toggle("outside-work-mode", isOutsideMode);
+      setElementVisible("stepInputSection", !isOutsideMode);
+      setElementVisible("additiveMaterialFields", !isOutsideMode && isAdditiveMaterialStepActive());
+      setElementVisible("stepRecoveryWeightBox", !isOutsideMode);
+      setElementVisible("stepOutputQtyBox", !isOutsideMode);
+      setElementVisible("stepLossWeightBox", !isOutsideMode);
+      setElementVisible("stepLossQtyBox", !isOutsideMode);
+      setElementVisible("recoverySideCard", !isOutsideMode);
+      setElementVisible("processStepHintCard", !isOutsideMode);
+      setElementVisible("lotMaterialLedgerCard", !isOutsideMode);
+      setElementVisible("processNameLossCard", !isOutsideMode);
+      setElementVisible("processKarigarLossCard", !isOutsideMode);
+
+      const help = document.getElementById("processStepEntryHelp");
+      if (help) {
+        help.textContent = isOutsideMode
+          ? "Track outside karigar issue and receive steps for this lot."
+          : "Track the current lot step in factory order: input, recovery, KDM/Solder, output, and loss.";
+      }
+
+      setFieldLabel("stepProcessName", isOutsideMode ? "Step Name" : "Process Name");
+      setFieldLabel("stepKarigarName", isOutsideMode ? "Outside Karigar" : "Karigar");
+      setFieldLabel("stepOutputWeight", isOutsideMode ? outputLabel : "Output Weight");
+      setFieldLabel("stepLossReason", isOutsideMode ? (isReceiveStep ? "Loss/Remarks" : "Notes") : "Loss Reason");
+
+      const outputInput = document.getElementById("stepOutputWeight");
+      if (outputInput) {
+        outputInput.placeholder = isOutsideMode ? outputPlaceholder : "Finished output weight";
+      }
+
+      const processNameInput = document.getElementById("stepProcessName");
+      if (processNameInput) {
+        processNameInput.placeholder = isOutsideMode ? "Outside step" : "Example: Cutting / Polish";
+      }
+
+      const lossReasonInput = document.getElementById("stepLossReason");
+      if (lossReasonInput) {
+        lossReasonInput.placeholder = isOutsideMode ? "Optional remarks" : "Optional note";
+      }
+
+      if (isOutsideMode) {
+        const recoveryInput = document.getElementById("stepRecoveryWeight");
+        if (recoveryInput) recoveryInput.value = "";
+        if (inputQty && outputQty && inputQty.value && !outputQty.value) {
+          outputQty.value = inputQty.value;
+        }
+        selectedRecoveryStockIds.clear();
+        resetAdditiveIssueData();
+      }
+
+      renderOutsideKarigarStepNote();
+    }
+
     function renderOutsideKarigarStepNote() {
       const note = document.getElementById("outsideKarigarStepNote");
       if (!note) return;
 
       const processName = document.getElementById("stepProcessName")?.value || "";
       const activeName = processName || currentOpenProcessStep?.processName || processGuideData?.nextStep || "";
-      note.style.display = isOutsideKarigarStepName(activeName) ? "" : "none";
+      note.style.display = isOutsideWorkCategory(getActiveStepWorkCategory()) && isOutsideKarigarStepName(activeName) ? "" : "none";
     }
 
     function isAdditiveMaterialStepActive() {
       const processName = document.getElementById("stepProcessName")?.value || "";
       return Boolean(
+        !isOutsideWorkCategory(getActiveStepWorkCategory()) &&
         !processGuideData?.isReadyToComplete &&
         (
           processGuideData?.usesAdditiveMaterial ||
@@ -1931,13 +2021,13 @@
       const returnedLabel = document.getElementById("additiveReturnedLabel");
       const usedLabel = document.getElementById("additiveUsedLabel");
 
-      if (title) title.textContent = `${label} Material`;
-      if (givenLabel) givenLabel.textContent = `${label} Given Weight`;
-      if (returnedLabel) returnedLabel.textContent = `${label} Returned Weight`;
-      if (usedLabel) usedLabel.textContent = `${label} Used Weight`;
+      if (title) title.textContent = "KDM Issue & Return";
+      if (givenLabel) givenLabel.textContent = "KDM Given Weight";
+      if (returnedLabel) returnedLabel.textContent = "KDM Returned Weight";
+      if (usedLabel) usedLabel.textContent = "Used KDM";
 
       const issueLabel = document.getElementById("additiveIssueGivenLabel");
-      if (issueLabel) issueLabel.textContent = `${label} Given Weight`;
+      if (issueLabel) issueLabel.textContent = "KDM Given Weight";
 
       const karigarInput = document.getElementById("additiveIssueKarigarName");
       if (karigarInput && !karigarInput.value.trim()) {
@@ -1949,12 +2039,12 @@
       const canIssue = Boolean(currentOpenProcessStep?.id);
       if (issueButton) {
         issueButton.disabled = !canIssue;
-        issueButton.textContent = `Issue ${label}`;
+        issueButton.textContent = "Issue KDM";
       }
       if (help) {
         help.textContent = canIssue
-          ? `${label} can be issued and returned here without completing the process step.`
-          : `Save this ${label} process step as OPEN before issuing material.`;
+          ? "Issue KDM to soldering, then enter returned KDM when it comes back."
+          : "Save this Soldering step as OPEN before issuing KDM.";
       }
 
       renderAdditiveIssueList();
@@ -2061,6 +2151,8 @@
         totalGiven: 0,
         totalReturned: 0,
         pendingWeight: 0,
+        availableKdmStock: 0,
+        projectedAllowedOutput: 0,
         issues: []
       };
       renderAdditiveIssueList();
@@ -2221,11 +2313,16 @@
       const totalGiven = Number(data.totalGiven ?? data.total_given ?? issues.reduce((sum, issue) => sum + issue.givenWeight, 0));
       const totalReturned = Number(data.totalReturned ?? data.total_returned ?? issues.reduce((sum, issue) => sum + issue.returnedWeight, 0));
       const pendingWeight = Number(data.pendingWeight ?? data.pending_weight ?? Math.max(totalGiven - totalReturned, 0));
+      const usedAdditiveWeight = Number(data.usedAdditiveWeight ?? data.used_additive_weight ?? Math.max(totalGiven - totalReturned, 0));
+      const availableKdmStock = Number(data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0);
+      const projectedAllowedOutput = Number(data.projectedAllowedOutput ?? data.projected_allowed_output ?? 0);
 
       additiveIssueData = {
         totalGiven,
         totalReturned,
         pendingWeight,
+        availableKdmStock,
+        projectedAllowedOutput,
         issues
       };
     }
@@ -2235,37 +2332,37 @@
       const totalReturnedEl = document.getElementById("additiveIssueTotalReturned");
       const totalUsedEl = document.getElementById("additiveIssueTotalUsed");
       const pendingEl = document.getElementById("additiveIssuePendingWeight");
+      const stockEl = document.getElementById("availableKdmStockDisplay");
       const body = document.getElementById("additiveIssueListBody");
       const totalUsed = Math.max(Number(additiveIssueData.totalGiven || 0) - Number(additiveIssueData.totalReturned || 0), 0);
+      const inputWeight = Number(document.getElementById("stepInputWeight")?.value || currentOpenProcessStep?.inputWeight || 0);
+      const allowedOutput = Number(additiveIssueData.projectedAllowedOutput || 0) || (inputWeight + totalUsed);
 
+      if (stockEl) stockEl.value = `${formatProcessWeight(additiveIssueData.availableKdmStock)}g`;
       if (totalGivenEl) totalGivenEl.textContent = `${formatProcessWeight(additiveIssueData.totalGiven)}g`;
       if (totalReturnedEl) totalReturnedEl.textContent = `${formatProcessWeight(additiveIssueData.totalReturned)}g`;
       if (totalUsedEl) totalUsedEl.textContent = `${formatProcessWeight(totalUsed)}g`;
-      if (pendingEl) pendingEl.textContent = `${formatProcessWeight(additiveIssueData.pendingWeight)}g`;
+      if (pendingEl) pendingEl.textContent = `${formatProcessWeight(allowedOutput)}g`;
 
       if (!body) return;
 
       if (!additiveIssueData.issues.length) {
-        body.innerHTML = `<tr><td colspan="6">No pending ${escapeHtml(getAdditiveMaterialLabel())} issues found</td></tr>`;
+        body.innerHTML = `<p class="additive-issue-note">No KDM issued yet.</p>`;
         return;
       }
 
       body.innerHTML = additiveIssueData.issues.map((issue) => {
         const canReturn = issue.pendingWeight > 0;
+        const usedWeight = Math.max(Number(issue.givenWeight || 0) - Number(issue.returnedWeight || 0), 0);
         return `
-          <tr>
-            <td>${formatProcessWeight(issue.givenWeight)}</td>
-            <td>${formatProcessWeight(issue.returnedWeight)}</td>
-            <td>${formatProcessWeight(issue.usedWeight)}</td>
-            <td>${formatProcessWeight(issue.pendingWeight)}</td>
-            <td><span class="additive-status-badge">${escapeHtml(issue.status)}</span></td>
-            <td>
-              <div class="additive-return-control">
-                <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Return" ${canReturn ? "" : "disabled"} />
-                <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return</button>
-              </div>
-            </td>
-          </tr>
+          <div class="ledger-metric" style="margin-top:8px;">
+            <span>Given ${formatProcessWeight(issue.givenWeight)}g | Returned ${formatProcessWeight(issue.returnedWeight)}g | Used ${formatProcessWeight(usedWeight)}g</span>
+            <div class="additive-return-control" style="margin-top:8px;">
+              <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Returned Weight" ${canReturn ? "" : "disabled"} />
+              <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return KDM</button>
+              <span class="additive-status-badge">${escapeHtml(issue.status)}</span>
+            </div>
+          </div>
         `;
       }).join("");
 
@@ -3083,9 +3180,11 @@
       const karigarName = document.getElementById("stepKarigarName")?.value?.trim() || "";
       const inputWeight = Number(document.getElementById("stepInputWeight")?.value || 0);
       const outputRaw = document.getElementById("stepOutputWeight")?.value;
-      const recoveryRaw = document.getElementById("stepRecoveryWeight")?.value;
+      const recoveryRaw = isOutsideWorkCategory(workCategory) ? "" : document.getElementById("stepRecoveryWeight")?.value;
       const inputQtyRaw = document.getElementById("stepInputQty")?.value;
-      const outputQtyRaw = document.getElementById("stepOutputQty")?.value;
+      const outputQtyRaw = isOutsideWorkCategory(workCategory) && inputQtyRaw
+        ? inputQtyRaw
+        : document.getElementById("stepOutputQty")?.value;
       const lossReason = document.getElementById("stepLossReason")?.value?.trim() || "";
       const additivePayload = getAdditiveMaterialPayload();
       const hasOutput = outputRaw !== "" && outputRaw !== null && outputRaw !== undefined;
@@ -3528,6 +3627,7 @@
       loadProcessStepContext();
     });
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
+      applyStepEntryMode();
       renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
       loadAdditiveIssues();
