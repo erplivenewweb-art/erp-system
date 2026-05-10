@@ -913,7 +913,7 @@
             </div>
 
             <div id="additiveMaterialFields" class="step-section" style="display:none;">
-              <h4 class="step-section-title">Soldering KDM</h4>
+              <h4 id="additiveMaterialSectionTitle" class="step-section-title">Soldering KDM</h4>
               <div class="summary">
                 <h3 id="additiveMaterialTitle">KDM Issue & Return</h3>
                 <div id="additiveQuickFields" class="form-grid" style="display:none;">
@@ -936,7 +936,7 @@
                 <div id="additiveIssuePanel" style="margin-top: 10px;">
                   <div class="form-grid">
                     <div class="input-box">
-                      <label>Available KDM Stock</label>
+                      <label id="availableAdditiveStockLabel">Available KDM Stock</label>
                       <input id="availableKdmStockDisplay" type="text" value="0.000g" readonly />
                     </div>
 
@@ -964,15 +964,15 @@
 
                   <div class="additive-issue-grid">
                     <div class="additive-issue-metric">
-                      <span>Issued KDM</span>
+                      <span id="additiveIssueTotalGivenLabel">Issued KDM</span>
                       <strong id="additiveIssueTotalGiven">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
-                      <span>KDM Returned</span>
+                      <span id="additiveIssueTotalReturnedLabel">KDM Returned</span>
                       <strong id="additiveIssueTotalReturned">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
-                      <span>Used KDM</span>
+                      <span id="additiveIssueTotalUsedLabel">Used KDM</span>
                       <strong id="additiveIssueTotalUsed">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
@@ -1727,7 +1727,6 @@
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const lot = getSelectedProcessLot();
       const rawStatus = String(lot?.status || "").trim().toUpperCase();
-      const pendingKdm = Number(lotAdditiveStatus.pendingWeight || 0);
       const latestCompletedStep = getLatestCompletedProcessStep();
       const templateGuideExists = hasTemplateGuideSteps();
 
@@ -1771,7 +1770,8 @@
       const isReady = Boolean(processGuideData?.isReadyToComplete);
       const canCompleteLot = isCompleteLotAvailable();
       const lotStatus = lotNo ? getSelectedLotStatusLabel() : "OPEN";
-      const usedKdm = Number(lotAdditiveStatus.pendingWeight || 0);
+      const usedAdditive = Number(lotAdditiveStatus.pendingWeight || 0);
+      const additiveLabel = getActiveAdditiveMaterialType();
       const isManualLot = Boolean(getSelectedProcessLot()?.isManualLot);
       const templateGuideExists = hasTemplateGuideSteps();
       const latestCompletedStep = getLatestCompletedProcessStep();
@@ -1811,9 +1811,9 @@
         } else if (!templateGuideExists && (!latestCompletedStep || Number(latestCompletedStep.outputWeight || 0) <= 0)) {
           actionHint.textContent = "Complete at least one process step with output weight before completing this lot.";
         } else if (!lotAdditiveStatus.loaded) {
-          actionHint.textContent = "Checking KDM/Solder used weight.";
-        } else if (usedKdm > 0.0009) {
-          actionHint.textContent = `Used KDM ${usedKdm.toFixed(3)}g will be included in allowed output.`;
+          actionHint.textContent = `Checking ${additiveLabel} used weight.`;
+        } else if (usedAdditive > 0.0009) {
+          actionHint.textContent = `Used ${additiveLabel} ${usedAdditive.toFixed(3)}g will be included in allowed output.`;
         } else {
           actionHint.textContent = "This lot can be completed now.";
         }
@@ -1856,7 +1856,7 @@
     }
 
     function getAdditiveMaterialLabel() {
-      return String(processGuideData?.additiveMaterialLabel || "Solder/KDM").trim() || "Solder/KDM";
+      return getActiveAdditiveMaterialType();
     }
 
     function normalizeStepNameForMatch(value = "") {
@@ -1865,6 +1865,27 @@
 
     function isSolderingLikeStepName(value = "") {
       return ["soldering", "solding", "solder", "kdm"].includes(normalizeStepNameForMatch(value));
+    }
+
+    function isFittingLikeStepName(value = "") {
+      return normalizeStepNameForMatch(value) === "fitting";
+    }
+
+    function getActiveAdditiveStepName() {
+      return String(
+        document.getElementById("stepProcessName")?.value ||
+        currentOpenProcessStep?.processName ||
+        processGuideData?.nextStep ||
+        ""
+      ).trim();
+    }
+
+    function getActiveAdditiveMaterialType() {
+      const label = String(processGuideData?.additiveMaterialLabel || "").trim().toUpperCase();
+      const stepName = getActiveAdditiveStepName();
+      if (label.includes("PIN") || isFittingLikeStepName(stepName)) return "PIN";
+      if (label.includes("KDM") || label.includes("SOLDER") || isSolderingLikeStepName(stepName)) return "KDM";
+      return "KDM";
     }
 
     function isOutsideKarigarStepName(value = "") {
@@ -1979,8 +2000,11 @@
         (
           processGuideData?.usesAdditiveMaterial ||
           isSolderingLikeStepName(processGuideData?.nextStep) ||
+          isFittingLikeStepName(processGuideData?.nextStep) ||
           isSolderingLikeStepName(currentOpenProcessStep?.processName) ||
-          isSolderingLikeStepName(processName)
+          isFittingLikeStepName(currentOpenProcessStep?.processName) ||
+          isSolderingLikeStepName(processName) ||
+          isFittingLikeStepName(processName)
         )
       );
     }
@@ -2016,18 +2040,29 @@
       }
 
       const label = getAdditiveMaterialLabel();
+      const sectionTitle = document.getElementById("additiveMaterialSectionTitle");
       const title = document.getElementById("additiveMaterialTitle");
       const givenLabel = document.getElementById("additiveGivenLabel");
       const returnedLabel = document.getElementById("additiveReturnedLabel");
       const usedLabel = document.getElementById("additiveUsedLabel");
 
-      if (title) title.textContent = "KDM Issue & Return";
-      if (givenLabel) givenLabel.textContent = "KDM Given Weight";
-      if (returnedLabel) returnedLabel.textContent = "KDM Returned Weight";
-      if (usedLabel) usedLabel.textContent = "Used KDM";
+      if (sectionTitle) sectionTitle.textContent = `${label} Issue & Return`;
+      if (title) title.textContent = `${label} Issue & Return`;
+      if (givenLabel) givenLabel.textContent = `${label} Given Weight`;
+      if (returnedLabel) returnedLabel.textContent = `${label} Returned Weight`;
+      if (usedLabel) usedLabel.textContent = `Used ${label}`;
 
+      const stockLabel = document.getElementById("availableAdditiveStockLabel");
+      if (stockLabel) stockLabel.textContent = `Available ${label} Stock`;
       const issueLabel = document.getElementById("additiveIssueGivenLabel");
-      if (issueLabel) issueLabel.textContent = "KDM Given Weight";
+      if (issueLabel) issueLabel.textContent = `${label} Given Weight`;
+
+      const issuedMetricLabel = document.getElementById("additiveIssueTotalGivenLabel");
+      const returnedMetricLabel = document.getElementById("additiveIssueTotalReturnedLabel");
+      const usedMetricLabel = document.getElementById("additiveIssueTotalUsedLabel");
+      if (issuedMetricLabel) issuedMetricLabel.textContent = `Issued ${label}`;
+      if (returnedMetricLabel) returnedMetricLabel.textContent = `${label} Returned`;
+      if (usedMetricLabel) usedMetricLabel.textContent = `Used ${label}`;
 
       const karigarInput = document.getElementById("additiveIssueKarigarName");
       if (karigarInput && !karigarInput.value.trim()) {
@@ -2039,15 +2074,15 @@
       const canIssue = Boolean(currentOpenProcessStep?.id);
       if (issueButton) {
         issueButton.disabled = false;
-        issueButton.textContent = "Issue KDM";
+        issueButton.textContent = `Issue ${label}`;
       }
       if (help) {
         if (!canIssue) {
-          help.textContent = "Click Issue KDM to open the Soldering step and issue KDM together.";
+          help.textContent = `Click Issue ${label} to open the ${getActiveAdditiveStepName() || "current"} step and issue ${label} together.`;
         } else if (Number(additiveIssueData.availableKdmStock || 0) <= 0 && !additiveIssueData.issues.length) {
-          help.textContent = "No KDM stock available.";
+          help.textContent = `No ${label} stock available.`;
         } else {
-          help.textContent = "Issue KDM to soldering, then enter returned KDM when it comes back.";
+          help.textContent = `Issue ${label}, then enter returned ${label} when it comes back.`;
         }
       }
 
@@ -2307,6 +2342,7 @@
         pendingWeight: Math.max(given - returned, 0),
         status: String(item.status || "ISSUED").toUpperCase(),
         materialLabel: String(item.materialLabel ?? item.material_label ?? getAdditiveMaterialLabel()).trim(),
+        materialType: String(item.materialType ?? item.material_type ?? item.materialLabel ?? item.material_label ?? getAdditiveMaterialLabel()).trim().toUpperCase(),
         karigarName: String(item.karigarName ?? item.karigar_name ?? "").trim(),
         lotNo: String(item.lotNo ?? item.lot_no ?? "").trim()
       };
@@ -2318,7 +2354,7 @@
       const totalReturned = Number(data.totalReturned ?? data.total_returned ?? issues.reduce((sum, issue) => sum + issue.returnedWeight, 0));
       const pendingWeight = Number(data.pendingWeight ?? data.pending_weight ?? Math.max(totalGiven - totalReturned, 0));
       const usedAdditiveWeight = Number(data.usedAdditiveWeight ?? data.used_additive_weight ?? Math.max(totalGiven - totalReturned, 0));
-      const availableKdmStock = Number(data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0);
+      const availableKdmStock = Number(data.availableAdditiveStock ?? data.available_additive_stock ?? data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0);
       const projectedAllowedOutput = Number(data.projectedAllowedOutput ?? data.projected_allowed_output ?? 0);
 
       additiveIssueData = {
@@ -2352,7 +2388,7 @@
         totalGiven,
         totalReturned,
         pendingWeight: Math.max(totalGiven - totalReturned, 0),
-        availableKdmStock: Number(data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0),
+        availableKdmStock: Number(data.availableAdditiveStock ?? data.available_additive_stock ?? data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0),
         projectedAllowedOutput: Number(data.projectedAllowedOutput ?? data.projected_allowed_output ?? additiveIssueData.projectedAllowedOutput ?? 0),
         issues: nextIssues
       };
@@ -2367,6 +2403,7 @@
       const pendingEl = document.getElementById("additiveIssuePendingWeight");
       const stockEl = document.getElementById("availableKdmStockDisplay");
       const body = document.getElementById("additiveIssueListBody");
+      const label = getAdditiveMaterialLabel();
       const totalUsed = Math.max(Number(additiveIssueData.totalGiven || 0) - Number(additiveIssueData.totalReturned || 0), 0);
       const inputWeight = Number(document.getElementById("stepInputWeight")?.value || currentOpenProcessStep?.inputWeight || 0);
       const allowedOutput = Number(additiveIssueData.projectedAllowedOutput || 0) || (inputWeight + totalUsed);
@@ -2378,13 +2415,13 @@
       if (totalUsedEl) totalUsedEl.textContent = `${formatProcessWeight(totalUsed)}g`;
       if (pendingEl) pendingEl.textContent = `${formatProcessWeight(allowedOutput)}g`;
       if (help && currentOpenProcessStep?.id && additiveIssueData.issues.length) {
-        help.textContent = `Allowed output = ${formatProcessWeight(inputWeight)}g input + ${formatProcessWeight(totalUsed)}g used KDM = ${formatProcessWeight(allowedOutput)}g.`;
+        help.textContent = `Allowed output = ${formatProcessWeight(inputWeight)}g input + ${formatProcessWeight(totalUsed)}g used ${label} = ${formatProcessWeight(allowedOutput)}g.`;
       }
 
       if (!body) return;
 
       if (!additiveIssueData.issues.length) {
-        body.innerHTML = `<p class="additive-issue-note">${Number(additiveIssueData.availableKdmStock || 0) <= 0 ? "No KDM stock available." : "No KDM issued yet."}</p>`;
+        body.innerHTML = `<p class="additive-issue-note">${Number(additiveIssueData.availableKdmStock || 0) <= 0 ? `No ${label} stock available.` : `No ${label} issued yet.`}</p>`;
         return;
       }
 
@@ -2396,7 +2433,7 @@
             <span>Issued ${formatProcessWeight(issue.givenWeight)}g | Returned ${formatProcessWeight(issue.returnedWeight)}g | Used ${formatProcessWeight(usedWeight)}g</span>
             <div class="additive-return-control" style="margin-top:8px;">
               <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Returned Weight" ${canReturn ? "" : "disabled"} />
-              <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return KDM</button>
+              <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return ${escapeHtml(label)}</button>
               <span class="additive-status-badge">${escapeHtml(issue.status)}</span>
             </div>
           </div>
@@ -2417,6 +2454,8 @@
       try {
         const params = buildAuthParams();
         params.set("lotNo", cleanLotNo);
+        params.set("materialType", getActiveAdditiveMaterialType());
+        params.set("stepName", getActiveAdditiveStepName());
         addWorkCategoryParam(params);
         const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
           cache: "no-store"
@@ -2448,6 +2487,8 @@
       try {
         const params = buildAuthParams();
         params.set("lotNo", cleanLotNo);
+        params.set("materialType", getActiveAdditiveMaterialType());
+        params.set("stepName", getActiveAdditiveStepName());
         addWorkCategoryParam(params);
         const res = await fetch(`${API_BASE}/process/additive-issues?${params.toString()}`, {
           cache: "no-store"
@@ -2470,7 +2511,7 @@
       renderProcessGuide();
     }
 
-    async function openSolderingStepForKdmIssue({ lotNo, workCategory, karigar }) {
+    async function openAdditiveStepForIssue({ lotNo, workCategory, karigar }) {
       const processName = String(
         document.getElementById("stepProcessName")?.value ||
         processGuideData?.nextStep ||
@@ -2505,12 +2546,12 @@
           fillProcessStepFormFromOpenStep(openStep);
           return openStep;
         }
-        throw new Error(data?.message || "Soldering step open failed");
+        throw new Error(data?.message || "Process step open failed");
       }
 
       const openedStep = data?.step ? normalizeProcessStep(data.step) : null;
       if (!openedStep?.id) {
-        throw new Error("Soldering step open failed");
+        throw new Error("Process step open failed");
       }
 
       currentOpenProcessStep = openedStep;
@@ -2529,6 +2570,7 @@
       const karigar = String(karigarInput?.value || document.getElementById("stepKarigarName")?.value || currentOpenProcessStep?.karigarName || "").trim();
       const notes = String(notesInput?.value || "").trim();
       const workCategory = getActiveStepWorkCategory();
+      const materialType = getActiveAdditiveMaterialType();
 
       if (!lotNo) {
         showToast("Please select a lot before issuing KDM.", "error", "Missing Lot");
@@ -2538,12 +2580,12 @@
       givenInput?.setCustomValidity("");
       if (!givenWeight || givenWeight <= 0) {
         givenInput?.setCustomValidity("Given weight must be greater than zero");
-        showToast("Enter KDM/Solder given weight greater than zero.", "error", "Invalid Weight");
+        showToast(`Enter ${materialType} given weight greater than zero.`, "error", "Invalid Weight");
         return;
       }
 
       if (!karigar) {
-        showToast("Please enter karigar name before issuing KDM/Solder.", "error", "Missing Karigar");
+        showToast(`Please enter karigar name before issuing ${materialType}.`, "error", "Missing Karigar");
         return;
       }
 
@@ -2551,7 +2593,7 @@
         const wasAlreadyOpen = Boolean(currentOpenProcessStep?.id);
         const issueStep = currentOpenProcessStep?.id
           ? currentOpenProcessStep
-          : await openSolderingStepForKdmIssue({ lotNo, workCategory, karigar });
+          : await openAdditiveStepForIssue({ lotNo, workCategory, karigar });
 
         const res = await fetch(`${API_BASE}/process/steps/${issueStep.id}/additive-issue`, {
           method: "POST",
@@ -2563,7 +2605,7 @@
             workCategory,
             karigar,
             given_weight: givenWeight,
-            material_label: getAdditiveMaterialLabel(),
+            material_label: materialType,
             notes
           }))
         });
@@ -2573,7 +2615,7 @@
           throw new Error(data?.message || "KDM issue failed");
         }
 
-        showToast(wasAlreadyOpen ? (data?.message || "KDM/Solder issued successfully") : "Soldering step opened and KDM issued.", "success", "Issued");
+        showToast(wasAlreadyOpen ? (data?.message || `${materialType} issued successfully`) : `${issueStep.processName || "Process"} step opened and ${materialType} issued.`, "success", "Issued");
         applyAdditiveMutationResponse(data);
         if (givenInput) givenInput.value = "";
         if (notesInput) notesInput.value = "";
@@ -2581,7 +2623,7 @@
         loadLotAdditiveStatus(lotNo).catch((refreshError) => console.log("KDM status refresh error:", refreshError));
       } catch (error) {
         console.log("Additive issue save error:", error);
-        showToast(error.message || "KDM/Solder issue failed", "error", "Issue Failed");
+        showToast(error.message || `${materialType} issue failed`, "error", "Issue Failed");
       }
     }
 
@@ -2591,19 +2633,20 @@
       const input = document.getElementById(`additiveReturnWeight_${id}`);
       const rawReturnedWeight = input?.value;
       const returnedWeight = Number(rawReturnedWeight || 0);
+      const materialType = getActiveAdditiveMaterialType();
 
       if (!id || !issue) return;
 
       input?.setCustomValidity("");
       if (rawReturnedWeight === "" || rawReturnedWeight === null || rawReturnedWeight === undefined) {
         input?.setCustomValidity("Returned weight is required");
-        showToast("Enter returned KDM weight before saving return.", "error", "Missing Return Weight");
+        showToast(`Enter returned ${materialType} weight before saving return.`, "error", "Missing Return Weight");
         return;
       }
 
       if (!Number.isFinite(returnedWeight)) {
         input?.setCustomValidity("Returned weight must be a valid number");
-        showToast("Returned KDM weight must be a valid number.", "error", "Invalid Weight");
+        showToast(`Returned ${materialType} weight must be a valid number.`, "error", "Invalid Weight");
         return;
       }
 
@@ -2635,7 +2678,7 @@
           throw new Error(data?.message || "KDM return failed");
         }
 
-        showToast(data?.message || "KDM/Solder returned successfully", "success", "Returned");
+        showToast(data?.message || `${materialType} returned successfully`, "success", "Returned");
         applyAdditiveMutationResponse(data);
         const lotNo = issue.lotNo || document.getElementById("stepLotNo")?.value?.trim() || "";
         loadAdditiveIssues(lotNo).catch((refreshError) => console.log("KDM return refresh error:", refreshError));
@@ -2643,7 +2686,7 @@
         loadProcessSteps(lotNo).catch((refreshError) => console.log("Process step refresh error:", refreshError));
       } catch (error) {
         console.log("Additive issue return error:", error);
-        showToast(error.message || "KDM/Solder return failed", "error", "Return Failed");
+        showToast(error.message || `${materialType} return failed`, "error", "Return Failed");
       }
     }
 

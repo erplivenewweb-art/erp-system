@@ -995,6 +995,7 @@ function normalizeAdditiveIssueRow(row) {
     issueStockMovementId: row.issueStockMovementId ?? (row.issue_stock_movement_id === null || row.issue_stock_movement_id === undefined ? null : Number(row.issue_stock_movement_id)),
     returnStockMovementId: row.returnStockMovementId ?? (row.return_stock_movement_id === null || row.return_stock_movement_id === undefined ? null : Number(row.return_stock_movement_id)),
     materialLabel: String(row.material_label || ""),
+    materialType: normalizeAdditiveMaterialType(row.material_label),
     karigarName: String(row.karigar_name || ""),
     lotNo: String(row.lot_no || "")
   };
@@ -1184,9 +1185,31 @@ async function syncOutsideKarigarLedgerForStep(connection, step, access = {}) {
   return null;
 }
 
-async function findKdmStockItemForCompany(connection, companyId, { forUpdate = false } = {}) {
+function normalizeAdditiveMaterialType(value = "") {
+  const clean = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  if (clean.includes("PIN")) return "PIN";
+  if (clean.includes("KDM") || clean.includes("SOLDER")) return "KDM";
+  return "";
+}
+
+function getAdditiveMaterialForStep(stepName = "") {
+  const normalizedStepName = normalizeTemplateStepName(stepName);
+  if (["soldering", "solding", "solder", "kdm"].includes(normalizedStepName)) return "KDM";
+  if (normalizedStepName === "fitting") return "PIN";
+  return "";
+}
+
+function getAdditiveStockSource(materialType = "KDM") {
+  const material = normalizeAdditiveMaterialType(materialType) || "KDM";
+  return material === "PIN" ? "PROCESS_PIN" : "PROCESS_KDM";
+}
+
+async function findAdditiveStockItemForCompany(connection, companyId, materialType = "KDM", { forUpdate = false } = {}) {
   const cleanCompanyId = Number(companyId || 0);
   if (!cleanCompanyId) return null;
+  const material = normalizeAdditiveMaterialType(materialType) || "KDM";
+  const source = getAdditiveStockSource(material);
+  const likeMaterial = `%${material}%`;
 
   const [rows] = await connection.query(
     `
@@ -1196,34 +1219,37 @@ async function findKdmStockItemForCompany(connection, companyId, { forUpdate = f
       AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
       AND deleted_at IS NULL
       AND (
-        UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
-        OR UPPER(COALESCE(category, '')) = 'KDM'
-        OR UPPER(COALESCE(category, '')) LIKE '%KDM%'
-        OR UPPER(COALESCE(product_name, '')) = 'KDM'
-        OR UPPER(COALESCE(product_name, '')) LIKE '%KDM%'
+        UPPER(COALESCE(source, '')) = ?
+        OR UPPER(COALESCE(category, '')) = ?
+        OR UPPER(COALESCE(category, '')) LIKE ?
+        OR UPPER(COALESCE(product_name, '')) = ?
+        OR UPPER(COALESCE(product_name, '')) LIKE ?
       )
       AND (
         barcode IS NULL
         OR TRIM(COALESCE(barcode, '')) = ''
       )
     ORDER BY
-      CASE WHEN UPPER(COALESCE(source, '')) = 'PROCESS_KDM' THEN 0 ELSE 1 END,
-      CASE WHEN UPPER(COALESCE(category, '')) = 'KDM' THEN 0 ELSE 1 END,
-      CASE WHEN UPPER(COALESCE(product_name, '')) = 'KDM' THEN 0 ELSE 1 END,
+      CASE WHEN UPPER(COALESCE(source, '')) = ? THEN 0 ELSE 1 END,
+      CASE WHEN UPPER(COALESCE(category, '')) = ? THEN 0 ELSE 1 END,
+      CASE WHEN UPPER(COALESCE(product_name, '')) = ? THEN 0 ELSE 1 END,
       id DESC
     LIMIT 1
     ${forUpdate ? "FOR UPDATE" : ""}
     `,
-    [cleanCompanyId]
+    [cleanCompanyId, source, material, likeMaterial, material, likeMaterial, source, material, material]
   );
 
   return rows.length ? rows[0] : null;
 }
 
-async function getKdmStockItemById(connection, companyId, stockItemId, { forUpdate = false } = {}) {
+async function getAdditiveStockItemById(connection, companyId, stockItemId, materialType = "KDM", { forUpdate = false } = {}) {
   const cleanCompanyId = Number(companyId || 0);
   const cleanStockItemId = Number(stockItemId || 0);
   if (!cleanCompanyId || !cleanStockItemId) return null;
+  const material = normalizeAdditiveMaterialType(materialType) || "KDM";
+  const source = getAdditiveStockSource(material);
+  const likeMaterial = `%${material}%`;
 
   const [rows] = await connection.query(
     `
@@ -1234,11 +1260,11 @@ async function getKdmStockItemById(connection, companyId, stockItemId, { forUpda
       AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
       AND deleted_at IS NULL
       AND (
-        UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
-        OR UPPER(COALESCE(category, '')) = 'KDM'
-        OR UPPER(COALESCE(category, '')) LIKE '%KDM%'
-        OR UPPER(COALESCE(product_name, '')) = 'KDM'
-        OR UPPER(COALESCE(product_name, '')) LIKE '%KDM%'
+        UPPER(COALESCE(source, '')) = ?
+        OR UPPER(COALESCE(category, '')) = ?
+        OR UPPER(COALESCE(category, '')) LIKE ?
+        OR UPPER(COALESCE(product_name, '')) = ?
+        OR UPPER(COALESCE(product_name, '')) LIKE ?
       )
       AND (
         barcode IS NULL
@@ -1247,10 +1273,18 @@ async function getKdmStockItemById(connection, companyId, stockItemId, { forUpda
     LIMIT 1
     ${forUpdate ? "FOR UPDATE" : ""}
     `,
-    [cleanCompanyId, cleanStockItemId]
+    [cleanCompanyId, cleanStockItemId, source, material, likeMaterial, material, likeMaterial]
   );
 
   return rows.length ? rows[0] : null;
+}
+
+async function findKdmStockItemForCompany(connection, companyId, options = {}) {
+  return findAdditiveStockItemForCompany(connection, companyId, "KDM", options);
+}
+
+async function getKdmStockItemById(connection, companyId, stockItemId, options = {}) {
+  return getAdditiveStockItemById(connection, companyId, stockItemId, "KDM", options);
 }
 
 async function createAdditiveStockMovement(connection, {
@@ -3181,13 +3215,20 @@ const CATEGORY_PROCESS_TEMPLATES = {
   }
 };
 
-function buildProcessTemplateStepRow(companyId, templateId, stepName, index) {
+function buildProcessTemplateStepRow(companyId, templateId, stepName, index, workCategory = "REGULAR_SANKHA") {
   const normalizedStepName = String(stepName || "").trim().toLowerCase();
-  const usesAdditiveMaterial = ["soldering", "solding", "solder", "kdm"].includes(normalizedStepName) ? 1 : 0;
+  const normalizedCategory = normalizeWorkCategory(workCategory);
+  const materialType =
+    ["soldering", "solding", "solder", "kdm"].includes(normalizedStepName)
+      ? "KDM"
+      : normalizedCategory === "REGULAR_SANKHA" && normalizedStepName === "fitting"
+        ? "PIN"
+        : "";
+  const usesAdditiveMaterial = materialType ? 1 : 0;
 
   return [
     usesAdditiveMaterial,
-    usesAdditiveMaterial ? "Solder/KDM" : "",
+    materialType,
     1,
     companyId,
     templateId,
@@ -3251,7 +3292,7 @@ async function seedDefaultProcessTemplatesForCompanies() {
 
         const templateId = insertResult.insertId;
         const stepRows = templateConfig.steps.map((stepName, index) => {
-          return buildProcessTemplateStepRow(companyId, templateId, stepName, index);
+          return buildProcessTemplateStepRow(companyId, templateId, stepName, index, workCategory);
         });
 
         await connection.query(
@@ -3277,23 +3318,44 @@ async function seedDefaultProcessTemplatesForCompanies() {
   }
 }
 
-async function backfillSolderingAdditiveTemplateMetadata() {
+async function backfillAdditiveTemplateMetadata() {
   if (!(await tableExists("process_template_steps"))) {
     return;
   }
 
-  const [result] = await pool.query(
+  const [solderingResult] = await pool.query(
     `
-    UPDATE process_template_steps
-    SET uses_additive_material = 1,
-        additive_material_label = 'Solder/KDM',
-        additive_affects_output_weight = 1
+    UPDATE process_template_steps pts
+    JOIN process_templates pt
+      ON pt.id = pts.template_id
+     AND pt.company_id = pts.company_id
+    SET pts.uses_additive_material = 1,
+        pts.additive_material_label = 'KDM',
+        pts.additive_affects_output_weight = 1
     WHERE LOWER(TRIM(step_name)) IN ('soldering', 'solding', 'solder', 'kdm')
-      AND COALESCE(uses_additive_material, 0) = 0
+      AND COALESCE(pts.uses_additive_material, 0) = 0
     `
   );
 
-  console.log(`Solder/KDM additive template metadata backfilled: ${Number(result.affectedRows || 0)} row(s) updated`);
+  const [pinResult] = await pool.query(
+    `
+    UPDATE process_template_steps pts
+    JOIN process_templates pt
+      ON pt.id = pts.template_id
+     AND pt.company_id = pts.company_id
+    SET pts.uses_additive_material = 1,
+        pts.additive_material_label = 'PIN',
+        pts.additive_affects_output_weight = 1
+    WHERE pt.work_category = 'REGULAR_SANKHA'
+      AND LOWER(TRIM(pts.step_name)) = 'fitting'
+    `
+  );
+
+  console.log(`Additive template metadata backfilled: KDM ${Number(solderingResult.affectedRows || 0)} row(s), PIN ${Number(pinResult.affectedRows || 0)} row(s) updated`);
+}
+
+async function backfillSolderingAdditiveTemplateMetadata() {
+  await backfillAdditiveTemplateMetadata();
 }
 
 async function seedInvoiceSequencesFromSalesHistory() {
@@ -8870,6 +8932,11 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
 
     const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
     const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
+    const requestedMaterialType = normalizeAdditiveMaterialType(
+      req.query.materialType ||
+      req.query.material_type ||
+      getAdditiveMaterialForStep(req.query.stepName || req.query.step_name || "")
+    ) || "KDM";
     const params = [access.companyScope];
     const whereParts = ["pai.company_id = ?"];
 
@@ -8894,6 +8961,9 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
       }
     }
 
+    whereParts.push("UPPER(COALESCE(pai.material_label, '')) LIKE ?");
+    params.push(`%${requestedMaterialType}%`);
+
     const [rows] = await pool.query(
       `
       SELECT pai.*, ps.input_weight AS issue_step_input_weight
@@ -8911,15 +8981,19 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
     const totalGiven = issues.reduce((sum, issue) => sum + issue.givenWeight, 0);
     const totalReturned = issues.reduce((sum, issue) => sum + issue.returnedWeight, 0);
     const usedAdditiveWeight = Math.max(totalGiven - totalReturned, 0);
-    const kdmStockItem = await findKdmStockItemForCompany(pool, access.companyScope);
+    const additiveStockItem = await findAdditiveStockItemForCompany(pool, access.companyScope, requestedMaterialType);
+    const availableAdditiveStock = toNumber(additiveStockItem?.weight);
 
     return res.json({
       success: true,
       lotNo: lotNo || null,
+      materialType: requestedMaterialType,
+      materialLabel: requestedMaterialType,
       totalGiven,
       totalReturned,
       pendingWeight: usedAdditiveWeight,
-      availableKdmStock: toNumber(kdmStockItem?.weight),
+      availableAdditiveStock,
+      availableKdmStock: requestedMaterialType === "KDM" ? availableAdditiveStock : 0,
       usedAdditiveWeight,
       projectedAllowedOutput: toNumber(rows[0]?.issue_step_input_weight) + usedAdditiveWeight,
       issues
@@ -8952,11 +9026,11 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
     const workCategory = normalizeWorkCategory(req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
     const givenRaw = req.body.given_weight ?? req.body.givenWeight;
-    const parsedGiven = parseRequiredNumber(givenRaw, "KDM/Solder given weight");
+    const parsedGiven = parseRequiredNumber(givenRaw, "Additive material given weight");
     const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
     const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
     const karigarName = normalizeKarigarName(req.body.karigar || req.body.karigarName || req.body.karigar_name || "");
-    const materialLabel = String(req.body.materialLabel || req.body.material_label || req.body.additiveMaterialLabel || "Solder/KDM").trim() || "Solder/KDM";
+    const requestedMaterialLabel = String(req.body.materialLabel || req.body.material_label || req.body.additiveMaterialLabel || "").trim();
     const notes = String(req.body.notes || req.body.note || "").trim();
 
     if (!stepId) {
@@ -8976,7 +9050,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     if (!parsedGiven.ok || parsedGiven.value <= 0) {
       return res.status(400).json({
         success: false,
-        message: parsedGiven.ok ? "KDM/Solder given weight must be greater than zero" : parsedGiven.message
+        message: parsedGiven.ok ? "Additive material given weight must be greater than zero" : parsedGiven.message
       });
     }
 
@@ -9020,33 +9094,38 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Manual lots are not available for KDM/Solder issue yet"
+        message: "Manual lots are not available for additive material issue yet"
       });
     }
 
+    const materialType =
+      getAdditiveMaterialForStep(step.process_name || step.processName) ||
+      normalizeAdditiveMaterialType(requestedMaterialLabel) ||
+      "KDM";
+    const materialLabel = materialType;
     const finalKarigarId = karigarId ?? step.karigar_id ?? null;
     const finalKarigarName = karigarName || step.karigar_name || "";
-    const kdmStockItem = await findKdmStockItemForCompany(connection, access.companyScope, { forUpdate: true });
-    const availableKdmStockBefore = toNumber(kdmStockItem?.weight);
+    const additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, { forUpdate: true });
+    const availableAdditiveStockBefore = toNumber(additiveStockItem?.weight);
 
-    if (!kdmStockItem) {
+    if (!additiveStockItem) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Only 0.000g KDM available. " + `${parsedGiven.value.toFixed(3)}g shortage.`
+        message: `Only 0.000g ${materialType} available. ${parsedGiven.value.toFixed(3)}g shortage.`
       });
     }
 
-    if (availableKdmStockBefore + 0.0005 < parsedGiven.value) {
-      const shortage = parsedGiven.value - availableKdmStockBefore;
+    if (availableAdditiveStockBefore + 0.0005 < parsedGiven.value) {
+      const shortage = parsedGiven.value - availableAdditiveStockBefore;
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: `Only ${availableKdmStockBefore.toFixed(3)}g KDM available. ${shortage.toFixed(3)}g shortage.`
+        message: `Only ${availableAdditiveStockBefore.toFixed(3)}g ${materialType} available. ${shortage.toFixed(3)}g shortage.`
       });
     }
 
-    const availableKdmStockAfter = Number(format3(availableKdmStockBefore - parsedGiven.value));
+    const availableAdditiveStockAfter = Number(format3(availableAdditiveStockBefore - parsedGiven.value));
 
     const [insertResult] = await connection.query(
       `
@@ -9066,7 +9145,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         finalKarigarName,
         materialLabel,
         parsedGiven.value,
-        Number(kdmStockItem.id || 0),
+        Number(additiveStockItem.id || 0),
         access.actingUserId,
         notes
       ]
@@ -9080,20 +9159,20 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
       WHERE company_id = ?
         AND id = ?
       `,
-      [availableKdmStockAfter, access.companyScope, kdmStockItem.id]
+      [availableAdditiveStockAfter, access.companyScope, additiveStockItem.id]
     );
 
     const issueStockMovementId = await createAdditiveStockMovement(connection, {
       companyId: access.companyScope,
-      stockItemId: Number(kdmStockItem.id || 0),
+      stockItemId: Number(additiveStockItem.id || 0),
       processStepId: stepId,
       additiveIssueId: insertResult.insertId,
       movementType: "ISSUE",
       weight: parsedGiven.value,
-      beforeWeight: availableKdmStockBefore,
-      afterWeight: availableKdmStockAfter,
+      beforeWeight: availableAdditiveStockBefore,
+      afterWeight: availableAdditiveStockAfter,
       createdBy: access.actingUserId,
-      notes: `KDM issue for lot ${lotNo}`
+      notes: `${materialType} issue for lot ${lotNo}`
     });
 
     await connection.query(
@@ -9122,9 +9201,12 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
 
     return res.json({
       success: true,
-      message: "KDM/Solder issue saved",
+      message: `${materialType} issue saved`,
       issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null,
-      availableKdmStock: availableKdmStockAfter,
+      materialType,
+      materialLabel,
+      availableAdditiveStock: availableAdditiveStockAfter,
+      availableKdmStock: materialType === "KDM" ? availableAdditiveStockAfter : 0,
       usedAdditiveWeight: totals.additiveUsedWeight,
       projectedAllowedOutput: toNumber(step.input_weight) + totals.additiveUsedWeight
     });
@@ -9157,7 +9239,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
 
     const issueId = Number(req.params.id || 0);
     const returnedRaw = req.body.returned_weight ?? req.body.returnedWeight;
-    const parsedReturned = parseRequiredNumber(returnedRaw, "KDM/Solder returned weight");
+    const parsedReturned = parseRequiredNumber(returnedRaw, "Additive material returned weight");
     const notesProvided = req.body.notes !== undefined || req.body.note !== undefined;
     const notes = String(req.body.notes ?? req.body.note ?? "").trim();
 
@@ -9179,7 +9261,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     if (returnedWeight < 0) {
       return res.status(400).json({
         success: false,
-        message: "KDM/Solder returned weight cannot be negative"
+        message: "Additive material returned weight cannot be negative"
       });
     }
 
@@ -9202,11 +9284,12 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       await connection.rollback();
       return res.status(404).json({
         success: false,
-        message: "KDM/Solder issue not found"
+        message: "Additive material issue not found"
       });
     }
 
     const issue = normalizeAdditiveIssueRow(issueRows[0]);
+    const materialType = normalizeAdditiveMaterialType(issue.materialLabel) || "KDM";
     const [issueLotRows] = await connection.query(
       `
       SELECT pl.*, ps.input_weight AS issue_step_input_weight
@@ -9226,7 +9309,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Manual lots are not available for KDM/Solder return yet"
+        message: "Manual lots are not available for additive material return yet"
       });
     }
 
@@ -9234,7 +9317,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "KDM/Solder returned weight cannot be greater than given weight"
+        message: `${materialType} returned weight cannot be greater than given weight`
       });
     }
 
@@ -9258,35 +9341,35 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Total returned KDM/Solder cannot exceed total given KDM/Solder"
+        message: `Total returned ${materialType} cannot exceed total given ${materialType}`
       });
     }
 
-    let kdmStockItem = issue.stockItemId
-      ? await getKdmStockItemById(connection, access.companyScope, issue.stockItemId, { forUpdate: true })
+    let additiveStockItem = issue.stockItemId
+      ? await getAdditiveStockItemById(connection, access.companyScope, issue.stockItemId, materialType, { forUpdate: true })
       : null;
-    if (!kdmStockItem) {
-      kdmStockItem = await findKdmStockItemForCompany(connection, access.companyScope, { forUpdate: true });
+    if (!additiveStockItem) {
+      additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, { forUpdate: true });
     }
 
-    if (!kdmStockItem) {
+    if (!additiveStockItem) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "KDM stock item not found"
+        message: `${materialType} stock item not found`
       });
     }
 
     const previousReturnedWeight = toNumber(issue.returnedWeight);
     const returnDelta = returnedWeight - previousReturnedWeight;
-    const availableKdmStockBefore = toNumber(kdmStockItem.weight);
-    const availableKdmStockAfter = Number(format3(availableKdmStockBefore + returnDelta));
+    const availableAdditiveStockBefore = toNumber(additiveStockItem.weight);
+    const availableAdditiveStockAfter = Number(format3(availableAdditiveStockBefore + returnDelta));
 
-    if (availableKdmStockAfter < -0.0005) {
+    if (availableAdditiveStockAfter < -0.0005) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "KDM stock cannot go below zero"
+        message: `${materialType} stock cannot go below zero`
       });
     }
 
@@ -9300,20 +9383,20 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
         WHERE company_id = ?
           AND id = ?
         `,
-        [Math.max(availableKdmStockAfter, 0), access.companyScope, kdmStockItem.id]
+        [Math.max(availableAdditiveStockAfter, 0), access.companyScope, additiveStockItem.id]
       );
 
       returnStockMovementId = await createAdditiveStockMovement(connection, {
         companyId: access.companyScope,
-        stockItemId: Number(kdmStockItem.id || 0),
+        stockItemId: Number(additiveStockItem.id || 0),
         processStepId: issue.process_step_id,
         additiveIssueId: issueId,
         movementType: returnDelta >= 0 ? "RETURN" : "RETURN_ADJUSTMENT",
         weight: Math.abs(returnDelta),
-        beforeWeight: availableKdmStockBefore,
-        afterWeight: Math.max(availableKdmStockAfter, 0),
+        beforeWeight: availableAdditiveStockBefore,
+        afterWeight: Math.max(availableAdditiveStockAfter, 0),
         createdBy: access.actingUserId,
-        notes: `KDM return for lot ${issue.lotNo || ""}`
+        notes: `${materialType} return for lot ${issue.lotNo || ""}`
       });
     }
 
@@ -9336,7 +9419,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       [
         returnedWeight,
         usedWeight,
-        Number(kdmStockItem.id || 0),
+        Number(additiveStockItem.id || 0),
         returnStockMovementId,
         nextStatus,
         returnedWeight > 0 ? access.actingUserId : null,
@@ -9364,10 +9447,13 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
 
     return res.json({
       success: true,
-      message: "KDM/Solder return saved",
+      message: `${materialType} return saved`,
       issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null,
       totals,
-      availableKdmStock: Math.max(availableKdmStockAfter, 0),
+      materialType,
+      materialLabel: materialType,
+      availableAdditiveStock: Math.max(availableAdditiveStockAfter, 0),
+      availableKdmStock: materialType === "KDM" ? Math.max(availableAdditiveStockAfter, 0) : 0,
       usedAdditiveWeight: totals.additiveUsedWeight,
       projectedAllowedOutput: issueStepInputWeight + totals.additiveUsedWeight
     });
