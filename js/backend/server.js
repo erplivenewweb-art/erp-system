@@ -1287,6 +1287,19 @@ async function getKdmStockItemById(connection, companyId, stockItemId, options =
   return getAdditiveStockItemById(connection, companyId, stockItemId, "KDM", options);
 }
 
+function getSellableFinishedStockWhereSql(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return `
+    AND ${prefix}barcode IS NOT NULL
+    AND TRIM(COALESCE(${prefix}barcode, '')) <> ''
+    AND UPPER(COALESCE(${prefix}status, 'IN_STOCK')) <> 'DELETED'
+    AND UPPER(COALESCE(${prefix}source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+    AND UPPER(COALESCE(${prefix}category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+    AND UPPER(COALESCE(${prefix}product_name, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+    AND UPPER(COALESCE(${prefix}product_name, '')) NOT LIKE 'RECOVERY SILVER%'
+  `;
+}
+
 async function createAdditiveStockMovement(connection, {
   companyId,
   stockItemId,
@@ -6102,7 +6115,10 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
 
     const companyId = access.companyScope;
 
-    const stockWhere = companyId !== null ? "WHERE company_id = ?" : "";
+    const sellableStockFilter = getSellableFinishedStockWhereSql();
+    const stockWhere = companyId !== null
+      ? `WHERE company_id = ? ${sellableStockFilter}`
+      : `WHERE 1 = 1 ${sellableStockFilter}`;
     const stockParams = companyId !== null ? [companyId] : [];
 
     const salesWhere = companyId !== null ? "WHERE company_id = ?" : "";
@@ -6121,18 +6137,20 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       `
       SELECT COUNT(*) AS sold_items
       FROM stock
-      ${companyId !== null ? "WHERE company_id = ? AND status = 'SOLD'" : "WHERE status = 'SOLD'"}
+      ${stockWhere}
+        AND status = 'SOLD'
       `,
-      companyId !== null ? [companyId] : []
+      stockParams
     );
 
     const [inStockSummary] = await pool.query(
       `
       SELECT COUNT(*) AS in_stock_items
       FROM stock
-      ${companyId !== null ? "WHERE company_id = ? AND status = 'IN_STOCK'" : "WHERE status = 'IN_STOCK'"}
+      ${stockWhere}
+        AND status = 'IN_STOCK'
       `,
-      companyId !== null ? [companyId] : []
+      stockParams
     );
 
     const [salesSummary] = await pool.query(
@@ -6157,7 +6175,7 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
 
     const [recentStock] = await pool.query(
       `
-      SELECT barcode, product_name, lot_number, size, weight, status, company_id, created_at
+      SELECT barcode, product_name, category, source, lot_number, size, weight, status, company_id, created_at
       FROM stock
       ${stockWhere}
       ORDER BY id DESC
@@ -6215,6 +6233,7 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
       FROM stock
       WHERE created_at >= ?
         AND created_at < ?
+        ${getSellableFinishedStockWhereSql()}
         ${companyFilter}
       `,
       [reportDate, nextDate, ...companyParams]
@@ -6257,7 +6276,7 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
     const [lotRows] = await pool.query(
       `
       SELECT
-        SUM(CASE WHEN UPPER(COALESCE(status, 'OPEN')) = 'OPEN' THEN 1 ELSE 0 END) AS open_lots,
+        SUM(CASE WHEN UPPER(COALESCE(status, 'OPEN')) = 'COMPLETED' THEN 0 ELSE 1 END) AS open_lots,
         SUM(CASE WHEN UPPER(COALESCE(status, '')) = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_lots
       FROM process_lots
       WHERE 1 = 1
@@ -6268,14 +6287,14 @@ app.get("/api/smart-dashboard", authMiddleware, async (req, res) => {
 
     const [pendingRows] = await pool.query(
       `
-      SELECT COUNT(DISTINCT pending_lots.lot_no) AS pending_process_lots
+      SELECT COUNT(DISTINCT pending_lots.lot_key) AS pending_process_lots
       FROM (
-        SELECT lot_no
+        SELECT COALESCE(CONCAT('ID:', id), CONCAT('LOT:', work_category, ':', lot_no)) AS lot_key
         FROM process_lots
-        WHERE UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+        WHERE UPPER(COALESCE(status, 'OPEN')) <> 'COMPLETED'
           ${companyFilter}
         UNION
-        SELECT lot_no
+        SELECT COALESCE(CONCAT('ID:', process_lot_id), CONCAT('LOT:', lot_no)) AS lot_key
         FROM process_steps
         WHERE UPPER(COALESCE(status, '')) <> 'COMPLETED'
           ${companyFilter}

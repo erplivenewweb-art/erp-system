@@ -1474,6 +1474,34 @@
       return list.filter((item) => getItemCompanyId(item) === currentCompanyId);
     }
 
+    function getDashboardStockText(item, keys = []) {
+      for (const key of keys) {
+        const value = item?.[key];
+        if (value !== null && value !== undefined && String(value).trim() !== "") {
+          return String(value).trim();
+        }
+      }
+      return "";
+    }
+
+    function isDashboardInternalOrRecoveryStock(item) {
+      const source = getDashboardStockText(item, ["source", "stock_source"]).toUpperCase();
+      const category = getDashboardStockText(item, ["category", "work_category", "workCategory"]).toUpperCase();
+      const product = getDashboardStockText(item, ["product_name", "productName"]).toUpperCase();
+      return (
+        ["PROCESS_KDM", "PROCESS_PIN", "PROCESS_RECOVERY"].includes(source) ||
+        ["KDM", "PIN", "RECOVERY", "PROCESS_RECOVERY"].includes(category) ||
+        ["KDM", "PIN", "RECOVERY"].includes(product) ||
+        product.startsWith("RECOVERY SILVER")
+      );
+    }
+
+    function isDashboardFinishedProductStock(item) {
+      const barcode = getDashboardStockText(item, ["barcode"]);
+      const status = getDashboardStockText(item, ["status"]).toUpperCase();
+      return !!barcode && status !== "DELETED" && !isDashboardInternalOrRecoveryStock(item);
+    }
+
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
     function saveSidebarState(isCollapsed) {
@@ -2249,7 +2277,9 @@
       const tbody = document.getElementById("recentInventoryBody");
       tbody.innerHTML = "";
 
-      const recentStock = Array.isArray(dashboardSalesData?.recentStock) ? dashboardSalesData.recentStock : [];
+      const recentStock = Array.isArray(dashboardSalesData?.recentStock)
+        ? dashboardSalesData.recentStock.filter(isDashboardFinishedProductStock)
+        : [];
       const rows = [...(recentStock.length ? recentStock : dashboardStockData)]
         .filter(item => getStatusType(item) !== "DELETED")
         .sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))
@@ -2345,7 +2375,8 @@
 
         if (stockResult.status === "fulfilled" && stockResult.value.ok) {
           const stockData = await stockResult.value.json();
-          dashboardStockData = filterCompanyItems(Array.isArray(stockData) ? stockData : []);
+          dashboardStockData = filterCompanyItems(Array.isArray(stockData) ? stockData : [])
+            .filter(isDashboardFinishedProductStock);
         } else {
           dashboardStockData = [];
         }

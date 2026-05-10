@@ -1072,7 +1072,7 @@
         filteredInternalStockItems = [...internalStockItems];
         stockItems = allVisibleItems.filter(isFinishedProductStockItem);
         filteredStockItems = [...stockItems];
-        stockHasNextPage = stockItems.length === STOCK_PAGE_LIMIT;
+        stockHasNextPage = allVisibleItems.length === STOCK_PAGE_LIMIT;
 
         hideSearchSummary();
         hideLotSummary();
@@ -1197,7 +1197,7 @@
       const productSearch = normalizeText(document.getElementById("searchProduct")?.value);
       const statusFilter = document.getElementById("stockStatusFilter")?.value || "ALL";
 
-      filteredStockItems = stockItems.filter((item) => {
+      const matchesMainFilters = (item) => {
         const product = normalizeText(getItemProduct(item));
         const sku = normalizeText(item.sku);
         const barcode = normalizeText(item.barcode);
@@ -1213,7 +1213,10 @@
           (!productSearch || product.includes(productSearch)) &&
           (statusFilter === "ALL" || status === statusFilter)
         );
-      });
+      };
+
+      filteredStockItems = stockItems.filter(matchesMainFilters);
+      filteredInternalStockItems = internalStockItems.filter(matchesMainFilters);
 
       const searching = hasActiveSearch(statusFilter);
       isViewingLotItems = false;
@@ -1223,12 +1226,14 @@
         hideSearchSummary();
         hideLotSummary();
         renderLotWiseTable(stockItems, "Finished Product Stock");
+        renderInternalStockTable(internalStockItems);
         return;
       }
 
       renderSearchSummary();
       renderLotSummary(filteredStockItems);
       renderLotWiseTable(filteredStockItems, "Filtered Finished Product Stock");
+      renderInternalStockTable(filteredInternalStockItems);
     }
 
     function filterRecoveryStockTable() {
