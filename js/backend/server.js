@@ -844,7 +844,8 @@ function normalizeWorkCategory(value = "") {
 
 function getWorkCategoryDestination(workCategory) {
   const category = normalizeWorkCategory(workCategory);
-  if (category === "KDM" || category === "PIN") return "STOCK";
+  const directStockCategories = new Set(["KDM", "PIN"]);
+  if (directStockCategories.has(category)) return "STOCK";
   return "STICKER";
 }
 
@@ -2753,6 +2754,36 @@ const CATEGORY_PROCESS_TEMPLATES = {
     steps: [
       "Patta",
       "Cutting"
+    ]
+  },
+  PIN: {
+    name: "Default PIN Process",
+    steps: [
+      "Patta",
+      "Katai",
+      "Soldering",
+      "Acid Poda",
+      "GPC"
+    ]
+  },
+  JALI_SANKHA: {
+    name: "Default JALI SANKHA Process",
+    steps: [
+      "Khadi Issue",
+      "Jali Receive",
+      "Acid Poda",
+      "Cutting",
+      "GPC",
+      "Fitting"
+    ]
+  },
+  MANGALSUTRA: {
+    name: "Default MANGALSUTRA Process",
+    steps: [
+      "Outside Issue",
+      "Receive",
+      "Cutting",
+      "GPC"
     ]
   }
 };
