@@ -940,6 +940,167 @@ function normalizeProcessMaterialIssueRow(row) {
   };
 }
 
+function isOutsideKarigarCategory(workCategory) {
+  const category = normalizeWorkCategory(workCategory);
+  return category === "JALI_SANKHA" || category === "MANGALSUTRA";
+}
+
+function isOutsideIssueStep(stepName) {
+  const normalizedStepName = normalizeTemplateStepName(stepName);
+  return normalizedStepName === "khadi issue" || normalizedStepName === "outside issue";
+}
+
+function isOutsideReceiveStep(stepName) {
+  const normalizedStepName = normalizeTemplateStepName(stepName);
+  return normalizedStepName === "jali receive" || normalizedStepName === "receive";
+}
+
+function getOutsideLedgerStatus(issueWeight, receiveWeight) {
+  const issued = toNumber(issueWeight);
+  const received = toNumber(receiveWeight);
+  if (received <= 0) return "ISSUED";
+  if (received + 0.0005 < issued) return "PARTIAL_RECEIVED";
+  return "RECEIVED";
+}
+
+async function syncOutsideKarigarLedgerForStep(connection, step, access = {}) {
+  const processStep = normalizeProcessStepRow(step || {});
+  const companyId = Number(access.companyScope ?? processStep.company_id ?? processStep.companyId ?? 0);
+  if (!companyId || processStep.status !== "COMPLETED") return null;
+
+  const processLot = await getProcessLotById(connection, companyId, processStep.process_lot_id);
+  const workCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory);
+  if (!processLot || !isOutsideKarigarCategory(workCategory)) return null;
+
+  const stepName = processStep.process_name || processStep.processName || "";
+  const normalizedStepName = normalizeTemplateStepName(stepName);
+  const lotNo = normalizeProcessLotNo(processLot.lot_no || processLot.lotNo || processStep.lot_no);
+  const karigarName = normalizeKarigarName(processStep.karigar_name || processStep.karigarName || "");
+  const userId = Number(access.actingUserId || access.userId || processStep.created_by || 0) || null;
+  const isCategoryIssueStep =
+    (workCategory === "JALI_SANKHA" && normalizedStepName === "khadi issue") ||
+    (workCategory === "MANGALSUTRA" && normalizedStepName === "outside issue");
+  const isCategoryReceiveStep =
+    (workCategory === "JALI_SANKHA" && normalizedStepName === "jali receive") ||
+    (workCategory === "MANGALSUTRA" && normalizedStepName === "receive");
+
+  if (isOutsideIssueStep(stepName) && isCategoryIssueStep) {
+    const issueWeight = toNumber(processStep.output_weight) > 0
+      ? toNumber(processStep.output_weight)
+      : toNumber(processStep.input_weight);
+    if (issueWeight <= 0) return null;
+
+    const [existingRows] = await connection.query(
+      `
+      SELECT id
+      FROM outside_karigar_ledger
+      WHERE company_id = ?
+        AND issue_step_id = ?
+      LIMIT 1
+      `,
+      [companyId, processStep.id]
+    );
+
+    if (existingRows.length) return { ledgerId: Number(existingRows[0].id || 0), action: "ISSUE_EXISTS" };
+
+    const pendingWeight = Math.max(issueWeight, 0);
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO outside_karigar_ledger
+      (
+        company_id, process_lot_id, work_category, lot_no, issue_step_id,
+        receive_step_id, karigar_name, issue_weight, receive_weight, pending_weight,
+        issue_date, receive_date, status, notes, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, NOW(), NULL, 'ISSUED', NULL, ?)
+      `,
+      [
+        companyId,
+        Number(processLot.id || 0),
+        workCategory,
+        lotNo,
+        processStep.id,
+        karigarName,
+        Number(format3(issueWeight)),
+        Number(format3(pendingWeight)),
+        userId
+      ]
+    );
+
+    return { ledgerId: Number(insertResult.insertId || 0), action: "ISSUED" };
+  }
+
+  if (isOutsideReceiveStep(stepName) && isCategoryReceiveStep) {
+    const receiveWeight = toNumber(processStep.output_weight);
+    if (receiveWeight <= 0) return null;
+
+    const [existingReceiveRows] = await connection.query(
+      `
+      SELECT id
+      FROM outside_karigar_ledger
+      WHERE company_id = ?
+        AND receive_step_id = ?
+      LIMIT 1
+      `,
+      [companyId, processStep.id]
+    );
+
+    if (existingReceiveRows.length) {
+      return { ledgerId: Number(existingReceiveRows[0].id || 0), action: "RECEIVE_EXISTS" };
+    }
+
+    const [ledgerRows] = await connection.query(
+      `
+      SELECT *
+      FROM outside_karigar_ledger
+      WHERE company_id = ?
+        AND process_lot_id = ?
+        AND work_category = ?
+        AND lot_no = ?
+        AND COALESCE(pending_weight, 0) > 0
+        AND UPPER(COALESCE(status, 'ISSUED')) IN ('ISSUED', 'PARTIAL_RECEIVED')
+      ORDER BY id DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [companyId, Number(processLot.id || 0), workCategory, lotNo]
+    );
+
+    if (!ledgerRows.length) return null;
+
+    const ledger = ledgerRows[0];
+    const totalReceiveWeight = toNumber(ledger.receive_weight) + receiveWeight;
+    const pendingWeight = Math.max(toNumber(ledger.issue_weight) - totalReceiveWeight, 0);
+    const status = getOutsideLedgerStatus(ledger.issue_weight, totalReceiveWeight);
+
+    await connection.query(
+      `
+      UPDATE outside_karigar_ledger
+      SET receive_step_id = ?,
+          karigar_name = COALESCE(NULLIF(?, ''), karigar_name),
+          receive_weight = ?,
+          pending_weight = ?,
+          receive_date = NOW(),
+          status = ?,
+          updated_at = NOW()
+      WHERE id = ?
+      `,
+      [
+        processStep.id,
+        karigarName,
+        Number(format3(totalReceiveWeight)),
+        Number(format3(pendingWeight)),
+        status,
+        ledger.id
+      ]
+    );
+
+    return { ledgerId: Number(ledger.id || 0), action: status };
+  }
+
+  return null;
+}
+
 async function getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, { forUpdate = false } = {}) {
   const [issueRows] = await connection.query(
     `
@@ -3610,6 +3771,29 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS outside_karigar_ledger (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_lot_id INT DEFAULT NULL,
+      work_category VARCHAR(40) DEFAULT 'REGULAR_SANKHA',
+      lot_no VARCHAR(120) DEFAULT '',
+      issue_step_id INT DEFAULT NULL,
+      receive_step_id INT DEFAULT NULL,
+      karigar_name VARCHAR(255) DEFAULT '',
+      issue_weight DECIMAL(14,3) DEFAULT 0.000,
+      receive_weight DECIMAL(14,3) DEFAULT 0.000,
+      pending_weight DECIMAL(14,3) DEFAULT 0.000,
+      issue_date DATETIME DEFAULT NULL,
+      receive_date DATETIME DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'ISSUED',
+      notes TEXT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS karigar_work (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -4080,6 +4264,26 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_recovery_inputs", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("outside_karigar_ledger")) {
+    await addColumnIfMissing("outside_karigar_ledger", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "work_category", "VARCHAR(40) DEFAULT 'REGULAR_SANKHA'");
+    await addColumnIfMissing("outside_karigar_ledger", "lot_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("outside_karigar_ledger", "issue_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "receive_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "karigar_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("outside_karigar_ledger", "issue_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("outside_karigar_ledger", "receive_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("outside_karigar_ledger", "pending_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("outside_karigar_ledger", "issue_date", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "receive_date", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "status", "VARCHAR(30) DEFAULT 'ISSUED'");
+    await addColumnIfMissing("outside_karigar_ledger", "notes", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("outside_karigar_ledger", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("outside_karigar_ledger", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("karigar_work")) {
     await addColumnIfMissing("karigar_work", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("karigar_work", "karigar_name", "VARCHAR(255) NOT NULL");
@@ -4263,6 +4467,14 @@ async function ensureSchema() {
     await addIndexIfMissing("process_material_issues", "idx_material_issues_category_lot", "(company_id, work_category, lot_no)");
     await addIndexIfMissing("process_material_issues", "idx_material_issues_type_status", "(company_id, material_type, status)");
     await addIndexIfMissing("process_material_issues", "idx_material_issues_lot_type", "(company_id, lot_no, material_type)");
+  }
+
+  if (await tableExists("outside_karigar_ledger")) {
+    await addIndexIfMissing("outside_karigar_ledger", "idx_outside_karigar_category_lot", "(company_id, work_category, lot_no)");
+    await addIndexIfMissing("outside_karigar_ledger", "idx_outside_karigar_status", "(company_id, status)");
+    await addIndexIfMissing("outside_karigar_ledger", "idx_outside_karigar_name", "(company_id, karigar_name)");
+    await addIndexIfMissing("outside_karigar_ledger", "idx_outside_karigar_issue_step", "(issue_step_id)");
+    await addIndexIfMissing("outside_karigar_ledger", "idx_outside_karigar_receive_step", "(receive_step_id)");
   }
 
   if (await tableExists("process_templates")) {
@@ -8950,6 +9162,96 @@ app.get("/process/material-issues", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/process/outside-karigar-ledger", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const workCategoryRaw = req.query.workCategory || req.query.work_category || "";
+    const workCategory = String(workCategoryRaw || "").trim() ? normalizeWorkCategory(workCategoryRaw) : "";
+    const status = String(req.query.status || "").trim().toUpperCase();
+
+    if (workCategory && !isOutsideKarigarCategory(workCategory)) {
+      return res.json({
+        success: true,
+        ledger: []
+      });
+    }
+
+    const params = [access.companyScope];
+    const whereParts = [
+      "company_id = ?",
+      "work_category IN ('JALI_SANKHA', 'MANGALSUTRA')"
+    ];
+
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+
+    if (workCategory && isOutsideKarigarCategory(workCategory)) {
+      whereParts.push("work_category = ?");
+      params.push(workCategory);
+    }
+
+    if (status) {
+      whereParts.push("UPPER(COALESCE(status, '')) = ?");
+      params.push(status);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        lot_no,
+        work_category,
+        karigar_name,
+        issue_weight,
+        receive_weight,
+        pending_weight,
+        status,
+        issue_date,
+        receive_date
+      FROM outside_karigar_ledger
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY
+        COALESCE(issue_date, created_at) DESC,
+        id DESC
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      ledger: rows.map((row) => ({
+        lot_no: String(row.lot_no || ""),
+        work_category: normalizeWorkCategory(row.work_category),
+        karigar_name: String(row.karigar_name || ""),
+        issue_weight: toNumber(row.issue_weight),
+        receive_weight: toNumber(row.receive_weight),
+        pending_weight: toNumber(row.pending_weight),
+        status: String(row.status || "ISSUED").trim().toUpperCase(),
+        issue_date: row.issue_date || null,
+        receive_date: row.receive_date || null
+      }))
+    });
+  } catch (error) {
+    console.error("Get outside karigar ledger error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Outside karigar ledger fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.put("/process/material-issues/:id/return", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
@@ -9568,6 +9870,13 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       [insertResult.insertId]
     );
 
+    if (finalStatus === "COMPLETED" && savedRows.length) {
+      await syncOutsideKarigarLedgerForStep(connection, savedRows[0], {
+        companyScope: companyId,
+        actingUserId: userId
+      });
+    }
+
     await connection.commit();
 
     return res.json({
@@ -9857,6 +10166,13 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       `,
       [stepId]
     );
+
+    if (savedRows.length) {
+      await syncOutsideKarigarLedgerForStep(connection, savedRows[0], {
+        companyScope: access.companyScope,
+        actingUserId: access.actingUserId
+      });
+    }
 
     await connection.commit();
 
@@ -13477,6 +13793,30 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
         success: false,
         message: `Cannot complete this lot. Pending KDM/Solder return weight is ${pendingAdditiveWeight.toFixed(3)}g. Return all issued material before completing the lot.`
       });
+    }
+
+    if (isOutsideKarigarCategory(workCategory)) {
+      const [pendingOutsideRows] = await connection.query(
+        `
+        SELECT COALESCE(SUM(pending_weight), 0) AS pending_weight
+        FROM outside_karigar_ledger
+        WHERE company_id = ?
+          AND process_lot_id = ?
+          AND work_category = ?
+          AND COALESCE(pending_weight, 0) > 0
+          AND UPPER(COALESCE(status, 'ISSUED')) IN ('ISSUED', 'PARTIAL_RECEIVED')
+        `,
+        [access.companyScope, processLot.id, workCategory]
+      );
+      const pendingOutsideWeight = toNumber(pendingOutsideRows[0]?.pending_weight);
+
+      if (pendingOutsideWeight > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Cannot complete this lot. Outside karigar pending weight is ${pendingOutsideWeight.toFixed(3)}g. Receive pending work first.`
+        });
+      }
     }
 
     const templateContext = await getProcessTemplateStepsForLot(connection, access.companyScope, processLot);
