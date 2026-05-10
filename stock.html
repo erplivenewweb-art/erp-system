@@ -714,7 +714,7 @@
 
           <div class="sub-card" id="stockTableCard" style="margin-top:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-              <h3 id="stockTableTitle" style="margin:0;">Lot Wise Stock Table</h3>
+              <h3 id="stockTableTitle" style="margin:0;">Finished Product Stock</h3>
 
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button id="tableCloseBtn" class="back-btn" type="button" style="display:none;" onclick="closeLotView()">Close</button>
@@ -731,6 +731,29 @@
               <button type="button" id="stockPrevBtn" onclick="changeStockPage(-1)">Previous</button>
               <span id="stockPageInfo">Page 1</span>
               <button type="button" id="stockNextBtn" onclick="changeStockPage(1)">Next</button>
+            </div>
+          </div>
+
+          <div class="sub-card" id="internalStockCard" style="margin-top:16px;">
+            <h3>Internal Use Stock</h3>
+            <p style="color:#64748b; margin-top:4px;">KDM and PIN stock for process use only.</p>
+
+            <div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lot No</th>
+                    <th>Category</th>
+                    <th>Product Name</th>
+                    <th>Weight</th>
+                    <th>Qty</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>Destination</th>
+                  </tr>
+                </thead>
+                <tbody id="internalStockTableBody"></tbody>
+              </table>
             </div>
           </div>
 
@@ -789,6 +812,8 @@
 
     let stockItems = [];
     let filteredStockItems = [];
+    let internalStockItems = [];
+    let filteredInternalStockItems = [];
     let recoveryStockItems = [];
     let filteredRecoveryStockItems = [];
     let currentLotItems = [];
@@ -1043,23 +1068,29 @@
         const allVisibleItems = filterCompanyItems(Array.isArray(data) ? data : []);
         recoveryStockItems = allVisibleItems.filter(isProcessRecoveryStock);
         filteredRecoveryStockItems = [...recoveryStockItems];
-        stockItems = allVisibleItems.filter((item) => !isProcessRecoveryStock(item));
+        internalStockItems = allVisibleItems.filter(isInternalUseStockItem);
+        filteredInternalStockItems = [...internalStockItems];
+        stockItems = allVisibleItems.filter(isFinishedProductStockItem);
         filteredStockItems = [...stockItems];
         stockHasNextPage = stockItems.length === STOCK_PAGE_LIMIT;
 
         hideSearchSummary();
         hideLotSummary();
-        renderLotWiseTable(stockItems, "Lot Wise Stock Table");
+        renderLotWiseTable(stockItems, "Finished Product Stock");
+        renderInternalStockTable(filteredInternalStockItems);
         renderRecoveryStockTable(filteredRecoveryStockItems);
         updateStockPagination();
       } catch (error) {
         console.log("Stock load error:", error);
         stockItems = [];
         filteredStockItems = [];
+        internalStockItems = [];
+        filteredInternalStockItems = [];
         recoveryStockItems = [];
         filteredRecoveryStockItems = [];
         stockHasNextPage = false;
-        renderLotWiseTable([], "Lot Wise Stock Table");
+        renderLotWiseTable([], "Finished Product Stock");
+        renderInternalStockTable([]);
         renderRecoveryStockTable([]);
         updateStockPagination();
       }
@@ -1093,6 +1124,24 @@
       const source = getItemSource(item).toUpperCase();
       const category = getItemCategory(item).toUpperCase();
       return source === "PROCESS_PIN" || source === "PROCESS_KDM" || category === "PIN" || category === "KDM";
+    }
+
+    function isInternalUseStockItem(item) {
+      const source = getItemSource(item).toUpperCase();
+      const category = getItemCategory(item).toUpperCase();
+      const product = String(getItemProduct(item) || "").trim().toUpperCase();
+      return (
+        source === "PROCESS_PIN" ||
+        source === "PROCESS_KDM" ||
+        category === "PIN" ||
+        category === "KDM" ||
+        product === "PIN" ||
+        product === "KDM"
+      );
+    }
+
+    function isFinishedProductStockItem(item) {
+      return !isProcessRecoveryStock(item) && !isInternalUseStockItem(item);
     }
 
     function getDestinationBadge(type) {
@@ -1173,13 +1222,13 @@
       if (!searching) {
         hideSearchSummary();
         hideLotSummary();
-        renderLotWiseTable(stockItems, "Lot Wise Stock Table");
+        renderLotWiseTable(stockItems, "Finished Product Stock");
         return;
       }
 
       renderSearchSummary();
       renderLotSummary(filteredStockItems);
-      renderLotWiseTable(filteredStockItems, "Filtered Lot Wise Stock Table");
+      renderLotWiseTable(filteredStockItems, "Filtered Finished Product Stock");
     }
 
     function filterRecoveryStockTable() {
@@ -1370,7 +1419,7 @@
       if (closeBtn) closeBtn.style.display = "none";
       if (tableCloseBtn) tableCloseBtn.style.display = "none";
 
-      renderLotWiseTable(filteredStockItems, "Filtered Lot Wise Stock Table");
+      renderLotWiseTable(filteredStockItems, "Filtered Finished Product Stock");
     }
 
     function closeLotView() {
@@ -1396,7 +1445,7 @@
 
       hideSearchSummary();
       hideLotSummary();
-      renderLotWiseTable(stockItems, "Lot Wise Stock Table");
+      renderLotWiseTable(stockItems, "Finished Product Stock");
     }
 
     function hideRecoveryDetail() {
@@ -1439,6 +1488,31 @@
             <td>${escapeHtml(getReferenceStepId(item) || "-")}</td>
             <td>${escapeHtml(getCreatedDate(item) || "-")}</td>
             <td><button class="view-btn" type="button" onclick="viewRecoveryStock(${id})">View</button></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function renderInternalStockTable(items) {
+      const tbody = document.getElementById("internalStockTableBody");
+      if (!tbody) return;
+
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No internal use stock found</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map((item) => {
+        return `
+          <tr>
+            <td>${escapeHtml(getItemLot(item) || "-")}</td>
+            <td>${escapeHtml(getItemCategory(item) || "-")}</td>
+            <td>${escapeHtml(getItemProduct(item) || "-")}</td>
+            <td>${getItemWeight(item).toFixed(3)}</td>
+            <td>${Number(item.qty || 0)}</td>
+            <td>${getStatusBadge(getItemStatus(item))}</td>
+            <td>${escapeHtml(getItemSource(item) || "-")}</td>
+            <td>${getDestinationBadge("DIRECT_STOCK")}</td>
           </tr>
         `;
       }).join("");

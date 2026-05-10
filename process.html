@@ -2042,9 +2042,13 @@
         issueButton.textContent = "Issue KDM";
       }
       if (help) {
-        help.textContent = canIssue
-          ? "Issue KDM to soldering, then enter returned KDM when it comes back."
-          : "Save this Soldering step as OPEN before issuing KDM.";
+        if (!canIssue) {
+          help.textContent = "Save/Open the Soldering step before issuing KDM.";
+        } else if (Number(additiveIssueData.availableKdmStock || 0) <= 0 && !additiveIssueData.issues.length) {
+          help.textContent = "No KDM stock available.";
+        } else {
+          help.textContent = "Issue KDM to soldering, then enter returned KDM when it comes back.";
+        }
       }
 
       renderAdditiveIssueList();
@@ -2327,6 +2331,35 @@
       };
     }
 
+    function applyAdditiveMutationResponse(data = {}) {
+      const responseIssue = data.issue ? normalizeAdditiveIssue(data.issue) : null;
+      const nextIssues = [...additiveIssueData.issues];
+      if (responseIssue?.id) {
+        const existingIndex = nextIssues.findIndex((item) => item.id === responseIssue.id);
+        if (existingIndex >= 0) {
+          nextIssues[existingIndex] = responseIssue;
+        } else {
+          nextIssues.unshift(responseIssue);
+        }
+      }
+
+      const fallbackGiven = nextIssues.reduce((sum, issue) => sum + Number(issue.givenWeight || 0), 0);
+      const fallbackReturned = nextIssues.reduce((sum, issue) => sum + Number(issue.returnedWeight || 0), 0);
+      const totalGiven = Number(data.totalGiven ?? data.total_given ?? data.totals?.additiveGivenWeight ?? data.totals?.additive_given_weight ?? fallbackGiven);
+      const totalReturned = Number(data.totalReturned ?? data.total_returned ?? data.totals?.additiveReturnedWeight ?? data.totals?.additive_returned_weight ?? fallbackReturned);
+
+      additiveIssueData = {
+        totalGiven,
+        totalReturned,
+        pendingWeight: Math.max(totalGiven - totalReturned, 0),
+        availableKdmStock: Number(data.availableKdmStock ?? data.available_kdm_stock ?? additiveIssueData.availableKdmStock ?? 0),
+        projectedAllowedOutput: Number(data.projectedAllowedOutput ?? data.projected_allowed_output ?? additiveIssueData.projectedAllowedOutput ?? 0),
+        issues: nextIssues
+      };
+
+      renderAdditiveIssueList();
+    }
+
     function renderAdditiveIssueList() {
       const totalGivenEl = document.getElementById("additiveIssueTotalGiven");
       const totalReturnedEl = document.getElementById("additiveIssueTotalReturned");
@@ -2347,7 +2380,7 @@
       if (!body) return;
 
       if (!additiveIssueData.issues.length) {
-        body.innerHTML = `<p class="additive-issue-note">No KDM issued yet.</p>`;
+        body.innerHTML = `<p class="additive-issue-note">${Number(additiveIssueData.availableKdmStock || 0) <= 0 ? "No KDM stock available." : "No KDM issued yet."}</p>`;
         return;
       }
 
@@ -2484,10 +2517,11 @@
         }
 
         showToast(data?.message || "KDM/Solder issued successfully", "success", "Issued");
+        applyAdditiveMutationResponse(data);
         if (givenInput) givenInput.value = "";
         if (notesInput) notesInput.value = "";
-        await loadAdditiveIssues(lotNo);
-        await loadLotAdditiveStatus(lotNo);
+        loadAdditiveIssues(lotNo).catch((refreshError) => console.log("KDM issue refresh error:", refreshError));
+        loadLotAdditiveStatus(lotNo).catch((refreshError) => console.log("KDM status refresh error:", refreshError));
       } catch (error) {
         console.log("Additive issue save error:", error);
         showToast(error.message || "KDM/Solder issue failed", "error", "Issue Failed");
@@ -2532,9 +2566,11 @@
         }
 
         showToast(data?.message || "KDM/Solder returned successfully", "success", "Returned");
-        await loadAdditiveIssues();
-        await loadLotAdditiveStatus(issue.lotNo || document.getElementById("stepLotNo")?.value?.trim() || "");
-        await loadProcessSteps(document.getElementById("stepLotNo")?.value?.trim() || "");
+        applyAdditiveMutationResponse(data);
+        const lotNo = issue.lotNo || document.getElementById("stepLotNo")?.value?.trim() || "";
+        loadAdditiveIssues(lotNo).catch((refreshError) => console.log("KDM return refresh error:", refreshError));
+        loadLotAdditiveStatus(lotNo).catch((refreshError) => console.log("KDM status refresh error:", refreshError));
+        loadProcessSteps(lotNo).catch((refreshError) => console.log("Process step refresh error:", refreshError));
       } catch (error) {
         console.log("Additive issue return error:", error);
         showToast(error.message || "KDM/Solder return failed", "error", "Return Failed");

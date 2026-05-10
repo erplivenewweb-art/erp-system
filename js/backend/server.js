@@ -1121,7 +1121,9 @@ async function findKdmStockItemForCompany(connection, companyId, { forUpdate = f
       AND (
         UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
         OR UPPER(COALESCE(category, '')) = 'KDM'
+        OR UPPER(COALESCE(category, '')) LIKE '%KDM%'
         OR UPPER(COALESCE(product_name, '')) = 'KDM'
+        OR UPPER(COALESCE(product_name, '')) LIKE '%KDM%'
       )
       AND (
         barcode IS NULL
@@ -1129,6 +1131,8 @@ async function findKdmStockItemForCompany(connection, companyId, { forUpdate = f
       )
     ORDER BY
       CASE WHEN UPPER(COALESCE(source, '')) = 'PROCESS_KDM' THEN 0 ELSE 1 END,
+      CASE WHEN UPPER(COALESCE(category, '')) = 'KDM' THEN 0 ELSE 1 END,
+      CASE WHEN UPPER(COALESCE(product_name, '')) = 'KDM' THEN 0 ELSE 1 END,
       id DESC
     LIMIT 1
     ${forUpdate ? "FOR UPDATE" : ""}
@@ -1155,7 +1159,9 @@ async function getKdmStockItemById(connection, companyId, stockItemId, { forUpda
       AND (
         UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
         OR UPPER(COALESCE(category, '')) = 'KDM'
+        OR UPPER(COALESCE(category, '')) LIKE '%KDM%'
         OR UPPER(COALESCE(product_name, '')) = 'KDM'
+        OR UPPER(COALESCE(product_name, '')) LIKE '%KDM%'
       )
       AND (
         barcode IS NULL
@@ -2955,6 +2961,48 @@ async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
   }
 }
 
+async function warnIfSchemaPiecesMissing(tableName, columnNames = [], indexNames = []) {
+  if (!(await tableExists(tableName))) {
+    console.warn(`[SCHEMA WARNING] Table ${tableName} is missing. Startup will continue, but related features may not work until migrations run.`);
+    return;
+  }
+
+  for (const columnName of columnNames) {
+    if (!(await columnExists(tableName, columnName))) {
+      console.warn(`[SCHEMA WARNING] Column ${tableName}.${columnName} is missing. Startup will continue, but related features may not work until migrations run.`);
+    }
+  }
+
+  for (const indexName of indexNames) {
+    if (!(await indexExists(tableName, indexName))) {
+      console.warn(`[SCHEMA WARNING] Index ${tableName}.${indexName} is missing. Startup will continue, but related queries may be slower until migrations run.`);
+    }
+  }
+}
+
+async function warnForRecentSchemaSafety() {
+  await warnIfSchemaPiecesMissing(
+    "stock",
+    ["category", "source", "manual_lot_id", "reference_step_id", "deleted_at", "updated_at"],
+    ["idx_stock_recovery_unused"]
+  );
+  await warnIfSchemaPiecesMissing(
+    "process_lots",
+    ["work_category", "template_id", "completed_at", "completed_by", "is_manual_lot"],
+    ["idx_process_lots_category_lot"]
+  );
+  await warnIfSchemaPiecesMissing(
+    "process_step_additive_issues",
+    ["stock_item_id", "issue_stock_movement_id", "return_stock_movement_id"],
+    ["idx_additive_issues_stock_item", "idx_additive_issues_issue_movement", "idx_additive_issues_return_movement"]
+  );
+  await warnIfSchemaPiecesMissing(
+    "outside_karigar_ledger",
+    ["work_category", "pending_weight", "issue_step_id", "receive_step_id"],
+    ["idx_outside_karigar_category_lot", "idx_outside_karigar_status"]
+  );
+}
+
 async function dropIndexIfExists(tableName, indexName) {
   const exists = await indexExists(tableName, indexName);
   if (exists) {
@@ -4707,6 +4755,7 @@ async function ensureSchema() {
   await seedDefaultProcessTemplatesForCompanies();
   await backfillSolderingAdditiveTemplateMetadata();
   await seedInvoiceSequencesFromSalesHistory();
+  await warnForRecentSchemaSafety();
 
   console.log("Schema ensured ✅");
 }
