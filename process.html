@@ -2038,12 +2038,12 @@
       const help = document.getElementById("additiveIssueHelp");
       const canIssue = Boolean(currentOpenProcessStep?.id);
       if (issueButton) {
-        issueButton.disabled = !canIssue;
+        issueButton.disabled = false;
         issueButton.textContent = "Issue KDM";
       }
       if (help) {
         if (!canIssue) {
-          help.textContent = "Save/Open the Soldering step before issuing KDM.";
+          help.textContent = "Click Issue KDM to open the Soldering step and issue KDM together.";
         } else if (Number(additiveIssueData.availableKdmStock || 0) <= 0 && !additiveIssueData.issues.length) {
           help.textContent = "No KDM stock available.";
         } else {
@@ -2470,22 +2470,70 @@
       renderProcessGuide();
     }
 
+    async function openSolderingStepForKdmIssue({ lotNo, workCategory, karigar }) {
+      const processName = String(
+        document.getElementById("stepProcessName")?.value ||
+        processGuideData?.nextStep ||
+        "Soldering"
+      ).trim();
+      const inputQtyRaw = document.getElementById("stepInputQty")?.value;
+      const payload = {
+        lotNo,
+        workCategory,
+        processName,
+        karigarName: karigar,
+        status: "OPEN"
+      };
+
+      if (inputQtyRaw !== "" && inputQtyRaw !== null && inputQtyRaw !== undefined) {
+        payload.inputQty = Number(inputQtyRaw);
+      }
+
+      const res = await fetch(`${API_BASE}/process/steps`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(buildAuthPayload(payload))
+      });
+      const data = await res.json();
+
+      if (!res.ok || data?.success === false) {
+        const openStep = data?.openStep ? normalizeProcessStep(data.openStep) : null;
+        if (openStep?.id) {
+          currentOpenProcessStep = openStep;
+          fillProcessStepFormFromOpenStep(openStep);
+          return openStep;
+        }
+        throw new Error(data?.message || "Soldering step open failed");
+      }
+
+      const openedStep = data?.step ? normalizeProcessStep(data.step) : null;
+      if (!openedStep?.id) {
+        throw new Error("Soldering step open failed");
+      }
+
+      currentOpenProcessStep = openedStep;
+      fillProcessStepFormFromOpenStep(openedStep);
+      return openedStep;
+    }
+
     async function issueAdditiveMaterial() {
       if (!isAdditiveMaterialStepActive()) return;
-
-      if (!currentOpenProcessStep?.id) {
-        showToast("Save/Open the Soldering step before issuing KDM.", "error", "Open Step Required");
-        return;
-      }
 
       const givenInput = document.getElementById("additiveIssueGivenWeight");
       const karigarInput = document.getElementById("additiveIssueKarigarName");
       const notesInput = document.getElementById("additiveIssueNotes");
-      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || currentOpenProcessStep.lotNo || "";
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || currentOpenProcessStep?.lotNo || "";
       const givenWeight = Number(givenInput?.value || 0);
-      const karigar = String(karigarInput?.value || document.getElementById("stepKarigarName")?.value || currentOpenProcessStep.karigarName || "").trim();
+      const karigar = String(karigarInput?.value || document.getElementById("stepKarigarName")?.value || currentOpenProcessStep?.karigarName || "").trim();
       const notes = String(notesInput?.value || "").trim();
       const workCategory = getActiveStepWorkCategory();
+
+      if (!lotNo) {
+        showToast("Please select a lot before issuing KDM.", "error", "Missing Lot");
+        return;
+      }
 
       givenInput?.setCustomValidity("");
       if (!givenWeight || givenWeight <= 0) {
@@ -2500,7 +2548,12 @@
       }
 
       try {
-        const res = await fetch(`${API_BASE}/process/steps/${currentOpenProcessStep.id}/additive-issue`, {
+        const wasAlreadyOpen = Boolean(currentOpenProcessStep?.id);
+        const issueStep = currentOpenProcessStep?.id
+          ? currentOpenProcessStep
+          : await openSolderingStepForKdmIssue({ lotNo, workCategory, karigar });
+
+        const res = await fetch(`${API_BASE}/process/steps/${issueStep.id}/additive-issue`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -2520,7 +2573,7 @@
           throw new Error(data?.message || "KDM issue failed");
         }
 
-        showToast(data?.message || "KDM/Solder issued successfully", "success", "Issued");
+        showToast(wasAlreadyOpen ? (data?.message || "KDM/Solder issued successfully") : "Soldering step opened and KDM issued.", "success", "Issued");
         applyAdditiveMutationResponse(data);
         if (givenInput) givenInput.value = "";
         if (notesInput) notesInput.value = "";
