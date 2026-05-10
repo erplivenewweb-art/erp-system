@@ -911,6 +911,12 @@ function normalizeAdditiveIssueRow(row) {
     returnedWeight: toNumber(row.returned_weight),
     usedWeight: toNumber(row.used_weight),
     pendingWeight: Math.max(toNumber(row.given_weight) - toNumber(row.returned_weight), 0),
+    stock_item_id: row.stock_item_id === null || row.stock_item_id === undefined ? null : Number(row.stock_item_id),
+    issue_stock_movement_id: row.issue_stock_movement_id === null || row.issue_stock_movement_id === undefined ? null : Number(row.issue_stock_movement_id),
+    return_stock_movement_id: row.return_stock_movement_id === null || row.return_stock_movement_id === undefined ? null : Number(row.return_stock_movement_id),
+    stockItemId: row.stockItemId ?? (row.stock_item_id === null || row.stock_item_id === undefined ? null : Number(row.stock_item_id)),
+    issueStockMovementId: row.issueStockMovementId ?? (row.issue_stock_movement_id === null || row.issue_stock_movement_id === undefined ? null : Number(row.issue_stock_movement_id)),
+    returnStockMovementId: row.returnStockMovementId ?? (row.return_stock_movement_id === null || row.return_stock_movement_id === undefined ? null : Number(row.return_stock_movement_id)),
     materialLabel: String(row.material_label || ""),
     karigarName: String(row.karigar_name || ""),
     lotNo: String(row.lot_no || "")
@@ -1099,6 +1105,37 @@ async function syncOutsideKarigarLedgerForStep(connection, step, access = {}) {
   }
 
   return null;
+}
+
+async function findKdmStockItemForCompany(connection, companyId) {
+  const cleanCompanyId = Number(companyId || 0);
+  if (!cleanCompanyId) return null;
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM stock
+    WHERE company_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+      AND deleted_at IS NULL
+      AND (
+        UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
+        OR UPPER(COALESCE(category, '')) = 'KDM'
+        OR UPPER(COALESCE(product_name, '')) = 'KDM'
+      )
+      AND (
+        barcode IS NULL
+        OR TRIM(COALESCE(barcode, '')) = ''
+      )
+    ORDER BY
+      CASE WHEN UPPER(COALESCE(source, '')) = 'PROCESS_KDM' THEN 0 ELSE 1 END,
+      id DESC
+    LIMIT 1
+    `,
+    [cleanCompanyId]
+  );
+
+  return rows.length ? rows[0] : null;
 }
 
 async function getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, { forUpdate = false } = {}) {
@@ -3722,6 +3759,9 @@ async function ensureSchema() {
       given_weight DECIMAL(14,3) DEFAULT 0.000,
       returned_weight DECIMAL(14,3) DEFAULT 0.000,
       used_weight DECIMAL(14,3) DEFAULT 0.000,
+      stock_item_id INT DEFAULT NULL,
+      issue_stock_movement_id INT DEFAULT NULL,
+      return_stock_movement_id INT DEFAULT NULL,
       status VARCHAR(30) DEFAULT 'ISSUED',
       issued_by INT DEFAULT NULL,
       issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -4224,6 +4264,9 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_additive_issues", "given_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_step_additive_issues", "returned_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_step_additive_issues", "used_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_step_additive_issues", "stock_item_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "issue_stock_movement_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "return_stock_movement_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "status", "VARCHAR(30) DEFAULT 'ISSUED'");
     await addColumnIfMissing("process_step_additive_issues", "issued_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "issued_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
@@ -4461,6 +4504,9 @@ async function ensureSchema() {
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_step", "(company_id, process_step_id)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_lot", "(company_id, lot_no, status)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_karigar", "(company_id, karigar_id)");
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_stock_item", "(company_id, stock_item_id)");
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_issue_movement", "(issue_stock_movement_id)");
+    await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_return_movement", "(return_stock_movement_id)");
   }
 
   if (await tableExists("process_material_issues")) {
