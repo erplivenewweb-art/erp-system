@@ -538,6 +538,9 @@ const OTP_SESSION_EXPIRY_MINUTES = 15;
 const OTP_VERIFY_ATTEMPT_LIMIT = 5;
 const OTP_REQUEST_LIMIT_WINDOW_MINUTES = 15;
 const OTP_REQUEST_LIMIT_COUNT = 3;
+const SMTP_CONNECTION_TIMEOUT_MS = 8000;
+const SMTP_GREETING_TIMEOUT_MS = 8000;
+const SMTP_SOCKET_TIMEOUT_MS = 12000;
 
 let mailTransporter = null;
 let smtpReady = false;
@@ -585,6 +588,24 @@ function markSmtpUnavailable(message = EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE) {
   mailTransporter = null;
 }
 
+function assertSmtpAvailableForOtp() {
+  const config = getSmtpConfig();
+  if (!config.enabled || startupStatus.smtp === "disabled" || startupStatus.smtp === "failed") {
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+
+  if (!smtpReady && startupStatus.smtp !== "connected") {
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+
+  const missingSmtpEnv = getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS);
+  if (missingSmtpEnv.length) {
+    markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
+    startupStatus.smtp = "failed";
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+}
+
 function getMailTransporter() {
   const config = getSmtpConfig();
   if (!config.enabled || startupStatus.smtp === "disabled" || startupStatus.smtp === "failed") {
@@ -608,6 +629,9 @@ function getMailTransporter() {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     auth: {
       user: config.user,
       pass: config.pass
@@ -6575,6 +6599,8 @@ app.post("/otp/request", async (req, res) => {
         message: "OTP purpose is required"
       });
     }
+
+    assertSmtpAvailableForOtp();
 
     connection = await pool.getConnection();
     await cleanupOtpVerifications(connection);

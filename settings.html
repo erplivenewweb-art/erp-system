@@ -1104,6 +1104,8 @@
         return;
       }
 
+      const sendButton = document.getElementById("sendSettingsCodeBtn");
+      const originalText = sendButton ? sendButton.textContent : "";
       const enteredEmail = document.getElementById("ownerEmail").value.trim().toLowerCase();
 
       if (!enteredEmail) {
@@ -1111,12 +1113,21 @@
         return;
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       try {
+        if (sendButton) {
+          sendButton.disabled = true;
+          sendButton.textContent = "Sending...";
+        }
+
         const response = await fetch(`${API_BASE}/otp/request`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
+          signal: controller.signal,
           body: JSON.stringify({
             purpose: "SETTINGS_UNLOCK",
             email: enteredEmail,
@@ -1137,7 +1148,16 @@
         showToast(result.message || "A verification code has been sent to your registered email.", "success");
       } catch (error) {
         console.error("Settings OTP request error:", error);
-        showToast(error.message || "Failed to send verification code", "error");
+        const message = error?.name === "AbortError"
+          ? "OTP request timed out. Please check email setup."
+          : (error.message || "Failed to send verification code");
+        showToast(message, "error");
+      } finally {
+        clearTimeout(timeoutId);
+        if (sendButton) {
+          sendButton.disabled = false;
+          sendButton.textContent = originalText || "Send Code";
+        }
       }
     }
 
