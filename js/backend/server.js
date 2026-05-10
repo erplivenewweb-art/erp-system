@@ -1107,7 +1107,7 @@ async function syncOutsideKarigarLedgerForStep(connection, step, access = {}) {
   return null;
 }
 
-async function findKdmStockItemForCompany(connection, companyId) {
+async function findKdmStockItemForCompany(connection, companyId, { forUpdate = false } = {}) {
   const cleanCompanyId = Number(companyId || 0);
   if (!cleanCompanyId) return null;
 
@@ -1131,11 +1131,81 @@ async function findKdmStockItemForCompany(connection, companyId) {
       CASE WHEN UPPER(COALESCE(source, '')) = 'PROCESS_KDM' THEN 0 ELSE 1 END,
       id DESC
     LIMIT 1
+    ${forUpdate ? "FOR UPDATE" : ""}
     `,
     [cleanCompanyId]
   );
 
   return rows.length ? rows[0] : null;
+}
+
+async function getKdmStockItemById(connection, companyId, stockItemId, { forUpdate = false } = {}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanStockItemId = Number(stockItemId || 0);
+  if (!cleanCompanyId || !cleanStockItemId) return null;
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM stock
+    WHERE company_id = ?
+      AND id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+      AND deleted_at IS NULL
+      AND (
+        UPPER(COALESCE(source, '')) = 'PROCESS_KDM'
+        OR UPPER(COALESCE(category, '')) = 'KDM'
+        OR UPPER(COALESCE(product_name, '')) = 'KDM'
+      )
+      AND (
+        barcode IS NULL
+        OR TRIM(COALESCE(barcode, '')) = ''
+      )
+    LIMIT 1
+    ${forUpdate ? "FOR UPDATE" : ""}
+    `,
+    [cleanCompanyId, cleanStockItemId]
+  );
+
+  return rows.length ? rows[0] : null;
+}
+
+async function createAdditiveStockMovement(connection, {
+  companyId,
+  stockItemId,
+  processStepId,
+  additiveIssueId,
+  movementType,
+  weight,
+  beforeWeight,
+  afterWeight,
+  createdBy = null,
+  notes = ""
+}) {
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO process_additive_stock_movements
+    (
+      company_id, stock_item_id, process_step_id, additive_issue_id,
+      movement_type, weight, before_weight, after_weight, notes, created_by, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `,
+    [
+      companyId,
+      stockItemId,
+      processStepId,
+      additiveIssueId,
+      movementType,
+      Number(format3(weight)),
+      Number(format3(beforeWeight)),
+      Number(format3(afterWeight)),
+      notes,
+      createdBy
+    ]
+  );
+
+  return Number(insertResult.insertId || 0);
 }
 
 async function getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, { forUpdate = false } = {}) {
@@ -3774,6 +3844,23 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_additive_stock_movements (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      stock_item_id INT DEFAULT NULL,
+      process_step_id INT DEFAULT NULL,
+      additive_issue_id INT DEFAULT NULL,
+      movement_type VARCHAR(30) DEFAULT '',
+      weight DECIMAL(14,3) DEFAULT 0.000,
+      before_weight DECIMAL(14,3) DEFAULT 0.000,
+      after_weight DECIMAL(14,3) DEFAULT 0.000,
+      notes TEXT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS process_material_issues (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -4277,6 +4364,20 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_additive_issues", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_additive_stock_movements")) {
+    await addColumnIfMissing("process_additive_stock_movements", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "stock_item_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "process_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "additive_issue_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "movement_type", "VARCHAR(30) DEFAULT ''");
+    await addColumnIfMissing("process_additive_stock_movements", "weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_additive_stock_movements", "before_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_additive_stock_movements", "after_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_additive_stock_movements", "notes", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_additive_stock_movements", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("process_material_issues")) {
     await addColumnIfMissing("process_material_issues", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_material_issues", "lot_no", "VARCHAR(120) DEFAULT ''");
@@ -4507,6 +4608,12 @@ async function ensureSchema() {
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_stock_item", "(company_id, stock_item_id)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_issue_movement", "(issue_stock_movement_id)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_return_movement", "(return_stock_movement_id)");
+  }
+
+  if (await tableExists("process_additive_stock_movements")) {
+    await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_stock", "(company_id, stock_item_id)");
+    await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_step", "(company_id, process_step_id)");
+    await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_issue", "(additive_issue_id)");
   }
 
   if (await tableExists("process_material_issues")) {
@@ -8657,7 +8764,7 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
 
     const [rows] = await pool.query(
       `
-      SELECT pai.*
+      SELECT pai.*, ps.input_weight AS issue_step_input_weight
       FROM process_step_additive_issues pai
       LEFT JOIN process_steps ps
         ON ps.id = pai.process_step_id
@@ -8671,13 +8778,18 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
     const issues = rows.map(normalizeAdditiveIssueRow);
     const totalGiven = issues.reduce((sum, issue) => sum + issue.givenWeight, 0);
     const totalReturned = issues.reduce((sum, issue) => sum + issue.returnedWeight, 0);
+    const usedAdditiveWeight = Math.max(totalGiven - totalReturned, 0);
+    const kdmStockItem = await findKdmStockItemForCompany(pool, access.companyScope);
 
     return res.json({
       success: true,
       lotNo: lotNo || null,
       totalGiven,
       totalReturned,
-      pendingWeight: Math.max(totalGiven - totalReturned, 0),
+      pendingWeight: usedAdditiveWeight,
+      availableKdmStock: toNumber(kdmStockItem?.weight),
+      usedAdditiveWeight,
+      projectedAllowedOutput: toNumber(rows[0]?.issue_step_input_weight) + usedAdditiveWeight,
       issues
     });
   } catch (error) {
@@ -8782,16 +8894,37 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
 
     const finalKarigarId = karigarId ?? step.karigar_id ?? null;
     const finalKarigarName = karigarName || step.karigar_name || "";
+    const kdmStockItem = await findKdmStockItemForCompany(connection, access.companyScope, { forUpdate: true });
+    const availableKdmStockBefore = toNumber(kdmStockItem?.weight);
+
+    if (!kdmStockItem) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Only 0.000g KDM available. " + `${parsedGiven.value.toFixed(3)}g shortage.`
+      });
+    }
+
+    if (availableKdmStockBefore + 0.0005 < parsedGiven.value) {
+      const shortage = parsedGiven.value - availableKdmStockBefore;
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Only ${availableKdmStockBefore.toFixed(3)}g KDM available. ${shortage.toFixed(3)}g shortage.`
+      });
+    }
+
+    const availableKdmStockAfter = Number(format3(availableKdmStockBefore - parsedGiven.value));
 
     const [insertResult] = await connection.query(
       `
       INSERT INTO process_step_additive_issues
       (
         company_id, process_step_id, lot_no, karigar_id, karigar_name,
-        material_label, given_weight, returned_weight, used_weight, status,
+        material_label, given_weight, returned_weight, used_weight, stock_item_id, status,
         issued_by, issued_at, notes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, 0.000, 'ISSUED', ?, NOW(), ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, 0.000, ?, 'ISSUED', ?, NOW(), ?)
       `,
       [
         access.companyScope,
@@ -8801,10 +8934,47 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         finalKarigarName,
         materialLabel,
         parsedGiven.value,
+        Number(kdmStockItem.id || 0),
         access.actingUserId,
         notes
       ]
     );
+
+    await connection.query(
+      `
+      UPDATE stock
+      SET weight = ?,
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND id = ?
+      `,
+      [availableKdmStockAfter, access.companyScope, kdmStockItem.id]
+    );
+
+    const issueStockMovementId = await createAdditiveStockMovement(connection, {
+      companyId: access.companyScope,
+      stockItemId: Number(kdmStockItem.id || 0),
+      processStepId: stepId,
+      additiveIssueId: insertResult.insertId,
+      movementType: "ISSUE",
+      weight: parsedGiven.value,
+      beforeWeight: availableKdmStockBefore,
+      afterWeight: availableKdmStockAfter,
+      createdBy: access.actingUserId,
+      notes: `KDM issue for lot ${lotNo}`
+    });
+
+    await connection.query(
+      `
+      UPDATE process_step_additive_issues
+      SET issue_stock_movement_id = ?
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [issueStockMovementId, insertResult.insertId, access.companyScope]
+    );
+
+    const totals = await recalcProcessStepAdditiveTotals(connection, access.companyScope, stepId);
 
     const [savedRows] = await connection.query(
       `
@@ -8821,7 +8991,10 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     return res.json({
       success: true,
       message: "KDM/Solder issue saved",
-      issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null
+      issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null,
+      availableKdmStock: availableKdmStockAfter,
+      usedAdditiveWeight: totals.additiveUsedWeight,
+      projectedAllowedOutput: toNumber(step.input_weight) + totals.additiveUsedWeight
     });
   } catch (error) {
     if (connection) await connection.rollback();
@@ -8904,7 +9077,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     const issue = normalizeAdditiveIssueRow(issueRows[0]);
     const [issueLotRows] = await connection.query(
       `
-      SELECT pl.*
+      SELECT pl.*, ps.input_weight AS issue_step_input_weight
       FROM process_steps ps
       JOIN process_lots pl
         ON pl.id = ps.process_lot_id
@@ -8916,6 +9089,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       [access.companyScope, issue.process_step_id]
     );
     const processLot = issueLotRows.length ? normalizeProcessLotRow(issueLotRows[0]) : null;
+    const issueStepInputWeight = toNumber(issueLotRows[0]?.issue_step_input_weight);
     if (isManualProcessLot(processLot)) {
       await connection.rollback();
       return res.status(400).json({
@@ -8956,6 +9130,61 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       });
     }
 
+    let kdmStockItem = issue.stockItemId
+      ? await getKdmStockItemById(connection, access.companyScope, issue.stockItemId, { forUpdate: true })
+      : null;
+    if (!kdmStockItem) {
+      kdmStockItem = await findKdmStockItemForCompany(connection, access.companyScope, { forUpdate: true });
+    }
+
+    if (!kdmStockItem) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "KDM stock item not found"
+      });
+    }
+
+    const previousReturnedWeight = toNumber(issue.returnedWeight);
+    const returnDelta = returnedWeight - previousReturnedWeight;
+    const availableKdmStockBefore = toNumber(kdmStockItem.weight);
+    const availableKdmStockAfter = Number(format3(availableKdmStockBefore + returnDelta));
+
+    if (availableKdmStockAfter < -0.0005) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "KDM stock cannot go below zero"
+      });
+    }
+
+    let returnStockMovementId = issue.returnStockMovementId || null;
+    if (Math.abs(returnDelta) > 0.0005) {
+      await connection.query(
+        `
+        UPDATE stock
+        SET weight = ?,
+            updated_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [Math.max(availableKdmStockAfter, 0), access.companyScope, kdmStockItem.id]
+      );
+
+      returnStockMovementId = await createAdditiveStockMovement(connection, {
+        companyId: access.companyScope,
+        stockItemId: Number(kdmStockItem.id || 0),
+        processStepId: issue.process_step_id,
+        additiveIssueId: issueId,
+        movementType: returnDelta >= 0 ? "RETURN" : "RETURN_ADJUSTMENT",
+        weight: Math.abs(returnDelta),
+        beforeWeight: availableKdmStockBefore,
+        afterWeight: Math.max(availableKdmStockAfter, 0),
+        createdBy: access.actingUserId,
+        notes: `KDM return for lot ${issue.lotNo || ""}`
+      });
+    }
+
     const usedWeight = issue.givenWeight - returnedWeight;
     const nextStatus = returnedWeight > 0 ? "RETURNED" : "ISSUED";
     await connection.query(
@@ -8963,6 +9192,8 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       UPDATE process_step_additive_issues
       SET returned_weight = ?,
           used_weight = ?,
+          stock_item_id = COALESCE(stock_item_id, ?),
+          return_stock_movement_id = ?,
           status = ?,
           returned_by = ?,
           returned_at = ?,
@@ -8973,6 +9204,8 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       [
         returnedWeight,
         usedWeight,
+        Number(kdmStockItem.id || 0),
+        returnStockMovementId,
         nextStatus,
         returnedWeight > 0 ? access.actingUserId : null,
         returnedWeight > 0 ? new Date() : null,
@@ -9001,7 +9234,10 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
       success: true,
       message: "KDM/Solder return saved",
       issue: savedRows.length ? normalizeAdditiveIssueRow(savedRows[0]) : null,
-      totals
+      totals,
+      availableKdmStock: Math.max(availableKdmStockAfter, 0),
+      usedAdditiveWeight: totals.additiveUsedWeight,
+      projectedAllowedOutput: issueStepInputWeight + totals.additiveUsedWeight
     });
   } catch (error) {
     if (connection) await connection.rollback();
