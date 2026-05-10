@@ -2432,38 +2432,42 @@ async function findUserByEmail(email) {
   return rows.length ? rows[0] : null;
 }
 
-async function countRecentOtpRequests(connection, email, purpose) {
+async function countRecentOtpRequests(connection, email, purpose, userId = null, companyId = null) {
   const [rows] = await connection.query(
     `
     SELECT COUNT(*) AS total
     FROM otp_verifications
     WHERE LOWER(email) = LOWER(?)
       AND purpose = ?
+      AND user_id <=> ?
+      AND company_id <=> ?
       AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)
     `,
-    [email, purpose, OTP_REQUEST_LIMIT_WINDOW_MINUTES]
+    [email, purpose, userId, companyId, OTP_REQUEST_LIMIT_WINDOW_MINUTES]
   );
 
   return Number(rows[0]?.total || 0);
 }
 
-async function getLatestOtpRecord(connection, email, purpose) {
+async function getLatestOtpRecord(connection, email, purpose, userId = null, companyId = null) {
   const [rows] = await connection.query(
     `
     SELECT *
     FROM otp_verifications
     WHERE LOWER(email) = LOWER(?)
       AND purpose = ?
+      AND user_id <=> ?
+      AND company_id <=> ?
     ORDER BY id DESC
     LIMIT 1
     `,
-    [email, purpose]
+    [email, purpose, userId, companyId]
   );
 
   return rows[0] || null;
 }
 
-async function invalidateOtpPurposeForEmail(connection, email, purpose) {
+async function invalidateOtpPurposeForEmail(connection, email, purpose, userId = null, companyId = null) {
   await connection.query(
     `
     UPDATE otp_verifications
@@ -2471,9 +2475,11 @@ async function invalidateOtpPurposeForEmail(connection, email, purpose) {
         updated_at = NOW()
     WHERE LOWER(email) = LOWER(?)
       AND purpose = ?
+      AND user_id <=> ?
+      AND company_id <=> ?
       AND consumed_at IS NULL
     `,
-    [email, purpose]
+    [email, purpose, userId, companyId]
   );
 }
 
@@ -6538,6 +6544,7 @@ app.post("/otp/request", async (req, res) => {
   let auditEmail = "";
   let auditPurpose = "";
   let access = null;
+  let transactionStarted = false;
 
   try {
     const email = normalizeEmail(req.body.email);
@@ -6655,7 +6662,7 @@ app.post("/otp/request", async (req, res) => {
       actingUserId = targetUser.id ?? null;
     }
 
-    const recentCount = await countRecentOtpRequests(connection, email, purpose);
+    const recentCount = await countRecentOtpRequests(connection, email, purpose, actingUserId, targetCompanyId);
     if (recentCount >= OTP_REQUEST_LIMIT_COUNT) {
       await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "failed", "OTP request rate limit reached", {
         email,
@@ -6670,7 +6677,7 @@ app.post("/otp/request", async (req, res) => {
       });
     }
 
-    const latestOtp = await getLatestOtpRecord(connection, email, purpose);
+    const latestOtp = await getLatestOtpRecord(connection, email, purpose, actingUserId, targetCompanyId);
     if (
       latestOtp &&
       latestOtp.last_sent_at &&
@@ -6689,10 +6696,13 @@ app.post("/otp/request", async (req, res) => {
       });
     }
 
-    await invalidateOtpPurposeForEmail(connection, email, purpose);
-
     const otpCode = generateOtpCode();
     const otpHash = hashSecret(otpCode);
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    await invalidateOtpPurposeForEmail(connection, email, purpose, actingUserId, targetCompanyId);
 
     await connection.query(
       `
@@ -6720,6 +6730,9 @@ app.post("/otp/request", async (req, res) => {
       purpose
     });
 
+    await connection.commit();
+    transactionStarted = false;
+
     await logOtpActivitySafe(connection, req, access, "OTP_REQUEST", "success", "OTP request accepted", {
       email,
       purpose,
@@ -6735,6 +6748,13 @@ app.post("/otp/request", async (req, res) => {
           : "If the email is registered, a verification code has been sent."
     });
   } catch (error) {
+    if (transactionStarted && connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+      transactionStarted = false;
+    }
+
     await logOtpActivitySafe(connection || pool, req, access, "OTP_REQUEST", "failed", "OTP request failed", {
       email: auditEmail,
       purpose: auditPurpose,
@@ -6786,7 +6806,6 @@ app.post("/otp/verify", async (req, res) => {
     connection = await pool.getConnection();
     await cleanupOtpVerifications(connection);
 
-    let access = null;
     let expectedUserId = null;
     let expectedCompanyId = null;
 
@@ -6868,7 +6887,7 @@ app.post("/otp/verify", async (req, res) => {
       expectedCompanyId = passwordResetUser.company_id ?? null;
     }
 
-    const otpRow = await getLatestOtpRecord(connection, email, purpose);
+    const otpRow = await getLatestOtpRecord(connection, email, purpose, expectedUserId, expectedCompanyId);
 
     if (!otpRow || otpRow.consumed_at) {
       await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "failed", "OTP verify record invalid", {
@@ -7087,9 +7106,11 @@ app.post("/auth/reset-password", async (req, res) => {
       SET consumed_at = NOW(), updated_at = NOW()
       WHERE LOWER(email) = LOWER(?)
         AND purpose = ?
+        AND user_id <=> ?
+        AND company_id <=> ?
         AND consumed_at IS NULL
       `,
-      [email, OTP_PURPOSES.PASSWORD_RESET]
+      [email, OTP_PURPOSES.PASSWORD_RESET, user.id ?? null, user.company_id ?? null]
     );
 
     await connection.commit();
