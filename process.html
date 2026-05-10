@@ -964,7 +964,7 @@
 
                   <div class="additive-issue-grid">
                     <div class="additive-issue-metric">
-                      <span>KDM Given</span>
+                      <span>Issued KDM</span>
                       <strong id="additiveIssueTotalGiven">0.000g</strong>
                     </div>
                     <div class="additive-issue-metric">
@@ -2370,12 +2370,16 @@
       const totalUsed = Math.max(Number(additiveIssueData.totalGiven || 0) - Number(additiveIssueData.totalReturned || 0), 0);
       const inputWeight = Number(document.getElementById("stepInputWeight")?.value || currentOpenProcessStep?.inputWeight || 0);
       const allowedOutput = Number(additiveIssueData.projectedAllowedOutput || 0) || (inputWeight + totalUsed);
+      const help = document.getElementById("additiveIssueHelp");
 
       if (stockEl) stockEl.value = `${formatProcessWeight(additiveIssueData.availableKdmStock)}g`;
       if (totalGivenEl) totalGivenEl.textContent = `${formatProcessWeight(additiveIssueData.totalGiven)}g`;
       if (totalReturnedEl) totalReturnedEl.textContent = `${formatProcessWeight(additiveIssueData.totalReturned)}g`;
       if (totalUsedEl) totalUsedEl.textContent = `${formatProcessWeight(totalUsed)}g`;
       if (pendingEl) pendingEl.textContent = `${formatProcessWeight(allowedOutput)}g`;
+      if (help && currentOpenProcessStep?.id && additiveIssueData.issues.length) {
+        help.textContent = `Allowed output = ${formatProcessWeight(inputWeight)}g input + ${formatProcessWeight(totalUsed)}g used KDM = ${formatProcessWeight(allowedOutput)}g.`;
+      }
 
       if (!body) return;
 
@@ -2389,7 +2393,7 @@
         const usedWeight = Math.max(Number(issue.givenWeight || 0) - Number(issue.returnedWeight || 0), 0);
         return `
           <div class="ledger-metric" style="margin-top:8px;">
-            <span>Given ${formatProcessWeight(issue.givenWeight)}g | Returned ${formatProcessWeight(issue.returnedWeight)}g | Used ${formatProcessWeight(usedWeight)}g</span>
+            <span>Issued ${formatProcessWeight(issue.givenWeight)}g | Returned ${formatProcessWeight(issue.returnedWeight)}g | Used ${formatProcessWeight(usedWeight)}g</span>
             <div class="additive-return-control" style="margin-top:8px;">
               <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Returned Weight" ${canReturn ? "" : "disabled"} />
               <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return KDM</button>
@@ -2470,7 +2474,7 @@
       if (!isAdditiveMaterialStepActive()) return;
 
       if (!currentOpenProcessStep?.id) {
-        showToast("Save this Soldering/KDM process step as OPEN before issuing material.", "error", "Open Step Required");
+        showToast("Save/Open the Soldering step before issuing KDM.", "error", "Open Step Required");
         return;
       }
 
@@ -2532,11 +2536,24 @@
       const id = Number(issueId || 0);
       const issue = additiveIssueData.issues.find((item) => item.id === id);
       const input = document.getElementById(`additiveReturnWeight_${id}`);
-      const returnedWeight = Number(input?.value || 0);
+      const rawReturnedWeight = input?.value;
+      const returnedWeight = Number(rawReturnedWeight || 0);
 
       if (!id || !issue) return;
 
       input?.setCustomValidity("");
+      if (rawReturnedWeight === "" || rawReturnedWeight === null || rawReturnedWeight === undefined) {
+        input?.setCustomValidity("Returned weight is required");
+        showToast("Enter returned KDM weight before saving return.", "error", "Missing Return Weight");
+        return;
+      }
+
+      if (!Number.isFinite(returnedWeight)) {
+        input?.setCustomValidity("Returned weight must be a valid number");
+        showToast("Returned KDM weight must be a valid number.", "error", "Invalid Weight");
+        return;
+      }
+
       if (returnedWeight < 0) {
         input?.setCustomValidity("Return weight cannot be negative");
         showToast("Return weight cannot be negative.", "error", "Invalid Weight");

@@ -106,6 +106,16 @@ const MYSQL_ENV_KEYS = [
 const SMTP_ENV_KEYS = [
   "SMTP_HOST",
   "SMTP_PORT",
+  "SMTP_SECURE",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "SMTP_FROM",
+  "SMTP_ENABLED"
+];
+
+const SMTP_REQUIRED_ENV_KEYS = [
+  "SMTP_HOST",
+  "SMTP_PORT",
   "SMTP_USER",
   "SMTP_PASS",
   "SMTP_FROM"
@@ -113,6 +123,18 @@ const SMTP_ENV_KEYS = [
 
 function getMissingEnvKeys(keys) {
   return keys.filter((key) => !String(process.env[key] || "").trim());
+}
+
+function parseEnvBoolean(value, fallback = false) {
+  const clean = String(value ?? "").trim().toLowerCase();
+  if (!clean) return fallback;
+  if (["1", "true", "yes", "y", "on"].includes(clean)) return true;
+  if (["0", "false", "no", "n", "off"].includes(clean)) return false;
+  return fallback;
+}
+
+function isSmtpEnabled() {
+  return parseEnvBoolean(process.env.SMTP_ENABLED, true);
 }
 
 function isLocalRuntime() {
@@ -160,7 +182,7 @@ function getEnvWithLocalDefault(key, fallback = "") {
 
 function logEnvStatus() {
   const missingMysqlEnv = getMissingEnvKeys(MYSQL_ENV_KEYS);
-  const missingSmtpEnv = getMissingEnvKeys(SMTP_ENV_KEYS);
+  const missingSmtpEnv = isSmtpEnabled() ? getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS) : [];
   const missingSuperAdminPassword = !String(process.env.SUPERADMIN_PASSWORD || "").trim();
 
   if (missingMysqlEnv.length && canUseLocalDbDefaults()) {
@@ -219,9 +241,12 @@ function logDbStartupConfig() {
 }
 
 function logSmtpStartupConfig() {
+  const enabled = isSmtpEnabled();
   console.log("[STARTUP] SMTP CONFIG:", {
+    enabled,
     host: String(process.env.SMTP_HOST || "").trim() || "(missing)",
     port: Number(process.env.SMTP_PORT || 587),
+    secure: parseEnvBoolean(process.env.SMTP_SECURE, Number(process.env.SMTP_PORT || 587) === 465),
     user: String(process.env.SMTP_USER || "").trim() || "(missing)",
     from: String(process.env.SMTP_FROM || "").trim() || "(missing)"
   });
@@ -515,6 +540,10 @@ const OTP_REQUEST_LIMIT_WINDOW_MINUTES = 15;
 const OTP_REQUEST_LIMIT_COUNT = 3;
 
 let mailTransporter = null;
+let smtpReady = false;
+let smtpFailureMessage = "";
+
+const EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE = "Email service is not configured. Please contact admin.";
 
 function hashSecret(value) {
   return crypto.createHash("sha256").update(String(value || "")).digest("hex");
@@ -537,40 +566,88 @@ function normalizeOtpPurpose(value) {
   return Object.values(OTP_PURPOSES).includes(clean) ? clean : "";
 }
 
-function getMailTransporter() {
-  if (mailTransporter) return mailTransporter;
-
-  const host = String(process.env.SMTP_HOST || "").trim();
+function getSmtpConfig() {
   const port = Number(process.env.SMTP_PORT || 587);
-  const user = String(process.env.SMTP_USER || "").trim();
-  const pass = String(process.env.SMTP_PASS || "").trim();
-  const from = String(process.env.SMTP_FROM || "").trim();
+  return {
+    enabled: isSmtpEnabled(),
+    host: String(process.env.SMTP_HOST || "").trim(),
+    port,
+    secure: parseEnvBoolean(process.env.SMTP_SECURE, port === 465),
+    user: String(process.env.SMTP_USER || "").trim(),
+    pass: String(process.env.SMTP_PASS || "").trim(),
+    from: String(process.env.SMTP_FROM || "").trim()
+  };
+}
 
-  const missingSmtpEnv = getMissingEnvKeys(SMTP_ENV_KEYS);
-  if (missingSmtpEnv.length) {
-    throw new Error(
-      `SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`
-    );
+function markSmtpUnavailable(message = EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE) {
+  smtpReady = false;
+  smtpFailureMessage = message;
+  mailTransporter = null;
+}
+
+function getMailTransporter() {
+  const config = getSmtpConfig();
+  if (!config.enabled || startupStatus.smtp === "disabled" || startupStatus.smtp === "failed") {
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
 
+  if (!smtpReady && startupStatus.smtp !== "connected") {
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+
+  if (mailTransporter) return mailTransporter;
+
+  const missingSmtpEnv = getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS);
+  if (missingSmtpEnv.length) {
+    markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
+    throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
+  }
+
+  // Gmail requires an App Password. A normal Gmail password will be rejected with 535-5.7.8.
   mailTransporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465 ? true : false,
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
     auth: {
-      user,
-      pass
+      user: config.user,
+      pass: config.pass
     }
   });
 
-  mailTransporter._erpFromEmail = from;
+  mailTransporter._erpFromEmail = config.from;
 
   return mailTransporter;
 }
 
 async function testSmtpConnection() {
+  const config = getSmtpConfig();
+  if (!config.enabled) {
+    startupStatus.smtp = "disabled";
+    markSmtpUnavailable("SMTP disabled.");
+    console.log("SMTP disabled.");
+    return;
+  }
+
+  const missingSmtpEnv = getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS);
+  if (missingSmtpEnv.length) {
+    startupStatus.smtp = "failed";
+    markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
+    console.warn(`[STARTUP] SMTP not configured. Missing: ${missingSmtpEnv.join(", ")}`);
+    return;
+  }
+
+  smtpReady = true;
+  startupStatus.smtp = "pending";
   const transporter = getMailTransporter();
-  await transporter.verify();
+  try {
+    await transporter.verify();
+    smtpReady = true;
+  } catch (error) {
+    startupStatus.smtp = "failed";
+    markSmtpUnavailable(error?.message || "SMTP verification failed");
+    console.warn("[STARTUP] SMTP verification failed. Email features are disabled until SMTP settings are fixed.");
+    console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
+  }
 }
 
 async function sendOtpEmail({ email, toEmail, otp, otpCode, purpose }) {
@@ -6584,6 +6661,12 @@ app.post("/otp/request", async (req, res) => {
       error: error?.message || "Unknown error"
     });
     console.error("OTP request error:", error);
+    if (error?.message === EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE) {
+      return res.status(503).json({
+        success: false,
+        message: EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE
+      });
+    }
     return res.status(500).json({
       success: false,
       message: "OTP request failed",
@@ -17284,12 +17367,15 @@ async function runBackgroundStartupTasks() {
 
   try {
     await testSmtpConnection();
-    startupStatus.smtp = "connected";
-    console.log("[STARTUP] SMTP connected");
+    if (startupStatus.smtp === "pending") {
+      startupStatus.smtp = "connected";
+      console.log("[STARTUP] SMTP connected");
+    }
   } catch (error) {
     startupStatus.smtp = "failed";
-    console.error("[STARTUP] SMTP connection failed:", error);
-    console.error("[STARTUP] SMTP error message:", error?.message || error);
+    markSmtpUnavailable(error?.message || "SMTP connection failed");
+    console.warn("[STARTUP] SMTP connection failed. Email features are disabled until SMTP settings are fixed.");
+    console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
   }
 }
 
