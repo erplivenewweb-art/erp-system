@@ -1,4 +1,4 @@
-const API_BASE = window.location.origin;
+const API_BASE = window.ERP_API_BASE || window.location.origin;
 let lotData = JSON.parse(localStorage.getItem("lotData")) || [];
 let stockItems = JSON.parse(localStorage.getItem("stockItems")) || [];
 let invoiceItems = JSON.parse(localStorage.getItem("invoiceItems")) || [];

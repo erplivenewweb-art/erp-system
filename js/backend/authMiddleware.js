@@ -3,6 +3,11 @@
 const jwt = require("jsonwebtoken");
 
 const AUTH_COOKIE_NAME = "erp_auth_token";
+let authAccessValidator = null;
+
+function setAuthAccessValidator(validator) {
+  authAccessValidator = typeof validator === "function" ? validator : null;
+}
 
 function parseCookies(cookieHeader = "") {
   return String(cookieHeader || "")
@@ -64,6 +69,14 @@ function verifyToken(token) {
   return jwt.verify(String(token || "").trim(), getJwtSecret());
 }
 
+async function validateAuthenticatedRequest(req) {
+  if (!authAccessValidator || !req.user) {
+    return { ok: true };
+  }
+
+  return authAccessValidator(req);
+}
+
 function attachUserIfPresent(req, _res, next) {
   try {
     const token = getRequestToken(req);
@@ -79,7 +92,7 @@ function attachUserIfPresent(req, _res, next) {
   next();
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   try {
     const token = getRequestToken(req);
     if (!token) {
@@ -90,6 +103,14 @@ function authMiddleware(req, res, next) {
     }
 
     req.user = verifyToken(token);
+    const access = await validateAuthenticatedRequest(req);
+    if (!access?.ok) {
+      return res.status(access?.status || 403).json({
+        success: false,
+        message: access?.message || "Access denied"
+      });
+    }
+
     return next();
   } catch (_) {
     return res.status(401).json({
@@ -137,7 +158,7 @@ function checkRole(allowedRoles = []) {
   };
 }
 
-function requirePageAuth(req, res, next) {
+async function requirePageAuth(req, res, next) {
   try {
     const token = getRequestToken(req);
     if (!token) {
@@ -145,6 +166,11 @@ function requirePageAuth(req, res, next) {
     }
 
     req.user = verifyToken(token);
+    const access = await validateAuthenticatedRequest(req);
+    if (!access?.ok) {
+      return res.redirect("/login.html");
+    }
+
     return next();
   } catch (_) {
     return res.redirect("/login.html");
@@ -158,5 +184,6 @@ module.exports = {
   checkRole,
   normalizeRoleValue,
   requirePageAuth,
+  setAuthAccessValidator,
   signAuthToken
 };

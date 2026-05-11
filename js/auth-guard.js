@@ -34,6 +34,11 @@
     return overrideBase;
   }
 
+  function isLocalhostPage() {
+    const hostname = String(window.location.hostname || "").toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  }
+
   function getApiBase() {
     if (!ALLOWED_PROTOCOLS.has(window.location.protocol)) {
       return "";
@@ -42,6 +47,10 @@
     const overrideBase = getConfiguredBaseOverride();
     if (overrideBase) {
       return overrideBase;
+    }
+
+    if (isLocalhostPage()) {
+      return "http://localhost:8080";
     }
 
     return trimTrailingSlash(window.location.origin);

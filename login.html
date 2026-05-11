@@ -1034,7 +1034,12 @@
         );
       }
 
-      return new URL(String(pathname || "").replace(/^\//, ""), `${window.location.origin}/`).toString();
+      const hostname = String(window.location.hostname || "").toLowerCase();
+      const base = hostname === "localhost" || hostname === "127.0.0.1"
+        ? "http://localhost:8080"
+        : window.location.origin;
+
+      return new URL(String(pathname || "").replace(/^\//, ""), `${base}/`).toString();
     }
 
     async function loginUser() {

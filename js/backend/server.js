@@ -15,6 +15,7 @@ const {
   checkRole,
   normalizeRoleValue,
   requirePageAuth,
+  setAuthAccessValidator,
   signAuthToken
 } = require("./authMiddleware");
 const mysql = require("mysql2/promise");
@@ -50,8 +51,7 @@ const PROTECTED_PAGES = new Set([
 ]);
 
 const DEFAULT_ALLOWED_APP_ORIGINS = [
-  "http://localhost:8080",
-  "https://erp-system-production-ddae.up.railway.app"
+  "http://localhost:8080"
 ];
 const ALLOWED_APP_ORIGINS = new Set(
   [
@@ -73,7 +73,7 @@ function isAllowedCorsOrigin(origin = "") {
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
       return !isProductionRuntime();
     }
-    return url.protocol === "https:" && url.hostname.endsWith(".up.railway.app");
+    return false;
   } catch (_) {
     return false;
   }
@@ -2018,6 +2018,149 @@ function isSuperAdminUser(user) {
   );
 }
 
+function normalizeAccessValue(value = "", fallback = "") {
+  return String(value || fallback).trim().toUpperCase();
+}
+
+function parseAccessDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isFutureAccessDate(value) {
+  const date = parseAccessDate(value);
+  return Boolean(date && date.getTime() > Date.now());
+}
+
+function getTokenIssuedAtDate(tokenPayload = {}) {
+  const rawIssuedAt = Number(tokenPayload?.iat || 0);
+  if (!rawIssuedAt) return null;
+  const issuedAtMs = rawIssuedAt < 100000000000 ? rawIssuedAt * 1000 : rawIssuedAt;
+  const date = new Date(issuedAtMs);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function accessDenied(status, message) {
+  return { ok: false, status, message };
+}
+
+function getRequiredReason(req) {
+  const reason = String(req.body?.reason || "").trim();
+  if (!reason) {
+    return {
+      ok: false,
+      message: "Reason is required"
+    };
+  }
+
+  return {
+    ok: true,
+    reason: reason.slice(0, 500)
+  };
+}
+
+function getRequiredFutureDate(req, fieldName) {
+  const raw = String(req.body?.[fieldName] || "").trim();
+  const date = parseAccessDate(raw);
+
+  if (!date || date.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      message: `${fieldName} must be a future date/time`
+    };
+  }
+
+  return {
+    ok: true,
+    value: date
+  };
+}
+
+function validateAccessStateForUser(user, { enforceForceLogout = false, tokenPayload = null } = {}) {
+  if (!user) {
+    return accessDenied(401, "Authentication required");
+  }
+
+  const isSuperAdmin = isSuperAdminUser(user);
+  const userLoginStatus = normalizeAccessValue(user.login_status, "ENABLED");
+
+  if (user.deleted_at) {
+    return accessDenied(403, "Account access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (user.deactivated_at) {
+    return accessDenied(403, "Account access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (userLoginStatus === "DISABLED") {
+    return accessDenied(403, "Account access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (isFutureAccessDate(user.blocked_until)) {
+    return accessDenied(403, "Account login is blocked temporarily. Please contact SuperAdmin.");
+  }
+
+  if (enforceForceLogout) {
+    const forceLogoutAfter = parseAccessDate(user.force_logout_after);
+    const tokenIssuedAt = getTokenIssuedAtDate(tokenPayload);
+    if (forceLogoutAfter && tokenIssuedAt && forceLogoutAfter.getTime() > tokenIssuedAt.getTime()) {
+      return accessDenied(401, "Session expired. Please login again.");
+    }
+  }
+
+  if (isSuperAdmin) {
+    return { ok: true };
+  }
+
+  const companyAccessStatus = normalizeAccessValue(user.company_access_status, "ACTIVE");
+  const companyLoginStatus = normalizeAccessValue(user.company_login_status, "ENABLED");
+
+  if (user.company_deleted_at) {
+    return accessDenied(403, "Company access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (user.company_deactivated_at) {
+    return accessDenied(403, "Company access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (companyLoginStatus === "DISABLED") {
+    return accessDenied(403, "Company login is disabled. Please contact SuperAdmin.");
+  }
+
+  if (companyAccessStatus === "DEACTIVATED") {
+    return accessDenied(403, "Company access is disabled. Please contact SuperAdmin.");
+  }
+
+  if (companyAccessStatus === "SUSPENDED" && isFutureAccessDate(user.company_suspended_until)) {
+    return accessDenied(403, "Company access is suspended. Please contact SuperAdmin.");
+  }
+
+  return { ok: true };
+}
+
+async function validateActiveAuthenticatedRequest(req) {
+  const userId = Number(req.user?.userId || 0);
+  if (!userId) {
+    return accessDenied(401, "Authentication required");
+  }
+
+  const user = await findUserById(userId);
+  const access = validateAccessStateForUser(user, {
+    enforceForceLogout: true,
+    tokenPayload: req.user
+  });
+
+  if (!access.ok) {
+    return access;
+  }
+
+  req.accessUser = user;
+  return { ok: true };
+}
+
+setAuthAccessValidator(validateActiveAuthenticatedRequest);
+
 function isApprovedAdminUser(user) {
   if (!user) return false;
   return (
@@ -2560,7 +2703,13 @@ async function findUserByEmail(email) {
       c.company_name,
       c.owner_name AS company_owner_name,
       c.owner_email AS company_owner_email,
-      c.status AS company_status
+      c.status AS company_status,
+      c.access_status AS company_access_status,
+      c.login_status AS company_login_status,
+      c.suspended_until AS company_suspended_until,
+      c.deleted_at AS company_deleted_at,
+      c.deactivated_at AS company_deactivated_at,
+      c.access_reason AS company_access_reason
     FROM users u
     LEFT JOIN companies c ON c.id = u.company_id
     WHERE LOWER(u.email) = LOWER(?)
@@ -2570,6 +2719,63 @@ async function findUserByEmail(email) {
   );
 
   return rows.length ? rows[0] : null;
+}
+
+async function repairApprovedAdminCompanyLink(user) {
+  if (!user || isSuperAdminUser(user)) return user;
+
+  const role = normalizeRoleValue(user.role || "");
+  const status = String(user.status || "").trim().toLowerCase();
+  const email = normalizeEmail(user.email);
+  const hasCompanyId =
+    user.company_id !== null &&
+    user.company_id !== undefined &&
+    user.company_id !== "" &&
+    !Number.isNaN(Number(user.company_id));
+
+  if (hasCompanyId || role !== "OWNER" || status !== "approved" || !email) {
+    return user;
+  }
+
+  const [companyRows] = await pool.query(
+    `
+    SELECT id, company_name, status, access_status, login_status, suspended_until, deleted_at, deactivated_at, access_reason
+    FROM companies
+    WHERE LOWER(owner_email) = LOWER(?)
+    ORDER BY id DESC
+    LIMIT 1
+    `,
+    [email]
+  );
+
+  if (!companyRows.length) {
+    return user;
+  }
+
+  const company = companyRows[0];
+  const companyId = Number(company.id || 0);
+  if (!companyId) return user;
+
+  await pool.query(
+    `
+    UPDATE users
+    SET company_id = ?
+    WHERE id = ?
+      AND company_id IS NULL
+    `,
+    [companyId, user.id]
+  );
+
+  user.company_id = companyId;
+  user.company_name = company.company_name || user.company_name || "";
+  user.company_status = company.status || user.company_status || "";
+  user.company_access_status = company.access_status || user.company_access_status || "";
+  user.company_login_status = company.login_status || user.company_login_status || "";
+  user.company_suspended_until = company.suspended_until || user.company_suspended_until || null;
+  user.company_deleted_at = company.deleted_at || user.company_deleted_at || null;
+  user.company_deactivated_at = company.deactivated_at || user.company_deactivated_at || null;
+  user.company_access_reason = company.access_reason || user.company_access_reason || "";
+  return user;
 }
 
 async function countRecentOtpRequests(connection, email, purpose, userId = null, companyId = null) {
@@ -3155,6 +3361,172 @@ async function handleUserApprovalAction(req, res, { action = "approve", label = 
     success: true,
     message: `${label} rejected successfully`
   });
+}
+
+async function getCompanyAccessSnapshot(connection, companyId) {
+  const [rows] = await connection.query(
+    `
+    SELECT
+      id,
+      company_name,
+      owner_name,
+      owner_email,
+      status,
+      access_status,
+      login_status,
+      suspended_until,
+      deleted_at,
+      deactivated_at,
+      access_reason,
+      updated_by,
+      updated_at,
+      created_at
+    FROM companies
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [companyId]
+  );
+
+  return rows[0] || null;
+}
+
+async function getUserAccessSnapshot(connection, userId) {
+  const [rows] = await connection.query(
+    `
+    SELECT
+      id,
+      name,
+      mobile,
+      email,
+      role,
+      company_id,
+      status,
+      login_status,
+      blocked_until,
+      deleted_at,
+      deactivated_at,
+      force_logout_after,
+      access_reason,
+      updated_by,
+      updated_at,
+      created_at
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [userId]
+  );
+
+  return rows[0] || null;
+}
+
+async function runSuperAdminAccessMutation(req, res, {
+  entityType,
+  entityLabel,
+  actionType,
+  successMessage,
+  selectSnapshot,
+  mutate,
+  preventSelfTarget = false
+}) {
+  let connection;
+
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const targetId = Number(req.params.id || 0);
+    if (!targetId) {
+      return res.status(400).json({
+        success: false,
+        message: `${entityLabel} id is required`
+      });
+    }
+
+    if (preventSelfTarget && Number(access.actingUserId || 0) === targetId) {
+      return res.status(400).json({
+        success: false,
+        message: "SuperAdmin cannot disable, delete, or force logout themselves"
+      });
+    }
+
+    const reasonResult = getRequiredReason(req);
+    if (!reasonResult.ok) {
+      return res.status(400).json({
+        success: false,
+        message: reasonResult.message
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const before = await selectSnapshot(connection, targetId);
+    if (!before) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `${entityLabel} not found`
+      });
+    }
+
+    const mutationResult = await mutate(connection, {
+      targetId,
+      reason: reasonResult.reason,
+      access,
+      before
+    });
+
+    if (mutationResult?.ok === false) {
+      await connection.rollback();
+      return res.status(mutationResult.status || 400).json({
+        success: false,
+        message: mutationResult.message || "Access update failed"
+      });
+    }
+
+    const after = await selectSnapshot(connection, targetId);
+
+    await logActivitySafe(connection, req, access, {
+      companyId: entityType === "COMPANY" ? targetId : before.company_id ?? null,
+      userId: entityType === "USER" ? targetId : null,
+      actionType,
+      entityType,
+      entityId: String(targetId),
+      moduleName: "superadmin-access",
+      status: "success",
+      message: successMessage,
+      beforeData: before,
+      afterData: after,
+      metadata: {
+        reason: reasonResult.reason
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: successMessage,
+      [entityType === "COMPANY" ? "company" : "user"]: after
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error(`${actionType || "SuperAdmin access mutation"} error:`, error);
+    return res.status(500).json({
+      success: false,
+      message: "Access update failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
 }
 
 async function testDbConnection() {
@@ -4455,14 +4827,36 @@ async function ensureSchema() {
     await addColumnIfMissing("users", "role", "VARCHAR(50) DEFAULT ''");
     await addColumnIfMissing("users", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("users", "status", "VARCHAR(50) DEFAULT 'pending'");
+    await addColumnIfMissing("users", "login_status", "VARCHAR(30) DEFAULT 'ENABLED'");
+    await addColumnIfMissing("users", "blocked_until", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("users", "deleted_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("users", "deactivated_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("users", "force_logout_after", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("users", "access_reason", "VARCHAR(500) DEFAULT ''");
+    await addColumnIfMissing("users", "updated_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     await addColumnIfMissing("users", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addIndexIfMissing("users", "idx_users_company_login_status", "(company_id, login_status)");
+    await addIndexIfMissing("users", "idx_users_deleted_at", "(deleted_at)");
+    await addIndexIfMissing("users", "idx_users_force_logout_after", "(force_logout_after)");
   }
 
   if (await tableExists("companies")) {
     await addColumnIfMissing("companies", "owner_name", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("companies", "owner_email", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("companies", "status", "VARCHAR(50) DEFAULT 'active'");
+    await addColumnIfMissing("companies", "access_status", "VARCHAR(30) DEFAULT 'ACTIVE'");
+    await addColumnIfMissing("companies", "login_status", "VARCHAR(30) DEFAULT 'ENABLED'");
+    await addColumnIfMissing("companies", "suspended_until", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("companies", "deleted_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("companies", "deactivated_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("companies", "access_reason", "VARCHAR(500) DEFAULT ''");
+    await addColumnIfMissing("companies", "updated_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("companies", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     await addColumnIfMissing("companies", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addIndexIfMissing("companies", "idx_companies_access_status", "(access_status)");
+    await addIndexIfMissing("companies", "idx_companies_login_status", "(login_status)");
+    await addIndexIfMissing("companies", "idx_companies_deleted_at", "(deleted_at)");
   }
 
   if (await tableExists("company_signup_requests")) {
@@ -6061,7 +6455,13 @@ async function findUserById(userId) {
       c.company_name,
       c.owner_name AS company_owner_name,
       c.owner_email AS company_owner_email,
-      c.status AS company_status
+      c.status AS company_status,
+      c.access_status AS company_access_status,
+      c.login_status AS company_login_status,
+      c.suspended_until AS company_suspended_until,
+      c.deleted_at AS company_deleted_at,
+      c.deactivated_at AS company_deactivated_at,
+      c.access_reason AS company_access_reason
     FROM users u
     LEFT JOIN companies c ON c.id = u.company_id
     WHERE u.id = ?
@@ -15913,6 +16313,381 @@ app.put("/rejectStaffRequest/:id", authMiddleware, checkRole(["SUPERADMIN", "OWN
 });
 
 /* =========================
+   SUPERADMIN ACCESS CONTROL
+========================= */
+app.put("/superadmin/companies/:id/suspend", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "COMPANY",
+    entityLabel: "Company",
+    actionType: "COMPANY_SUSPEND",
+    successMessage: "Company access has been suspended",
+    selectSnapshot: getCompanyAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      const dateResult = getRequiredFutureDate(req, "suspendedUntil");
+      if (!dateResult.ok) return dateResult;
+
+      await connection.query(
+        `
+        UPDATE companies
+        SET access_status = 'SUSPENDED',
+            suspended_until = ?,
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [dateResult.value, reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/companies/:id/disable-login", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "COMPANY",
+    entityLabel: "Company",
+    actionType: "COMPANY_DISABLE_LOGIN",
+    successMessage: "Company login has been disabled",
+    selectSnapshot: getCompanyAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE companies
+        SET login_status = 'DISABLED',
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/companies/:id/deactivate", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "COMPANY",
+    entityLabel: "Company",
+    actionType: "COMPANY_DEACTIVATE",
+    successMessage: "Company access has been deactivated",
+    selectSnapshot: getCompanyAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE companies
+        SET access_status = 'DEACTIVATED',
+            deactivated_at = NOW(),
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/companies/:id/restore", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "COMPANY",
+    entityLabel: "Company",
+    actionType: "COMPANY_RESTORE",
+    successMessage: "Company access has been restored",
+    selectSnapshot: getCompanyAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE companies
+        SET access_status = 'ACTIVE',
+            login_status = 'ENABLED',
+            suspended_until = NULL,
+            deactivated_at = NULL,
+            deleted_at = NULL,
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.delete("/superadmin/companies/:id/soft-delete", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "COMPANY",
+    entityLabel: "Company",
+    actionType: "COMPANY_SOFT_DELETE",
+    successMessage: "Company has been soft deleted",
+    selectSnapshot: getCompanyAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE companies
+        SET deleted_at = NOW(),
+            access_status = 'SOFT_DELETED',
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/users/:id/block-login", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_BLOCK_LOGIN",
+    successMessage: "User login has been blocked temporarily",
+    selectSnapshot: getUserAccessSnapshot,
+    preventSelfTarget: true,
+    mutate: async (connection, { targetId, reason, access }) => {
+      const dateResult = getRequiredFutureDate(req, "blockedUntil");
+      if (!dateResult.ok) return dateResult;
+
+      await connection.query(
+        `
+        UPDATE users
+        SET login_status = 'BLOCKED',
+            blocked_until = ?,
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [dateResult.value, reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/users/:id/disable-login", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_DISABLE_LOGIN",
+    successMessage: "User login has been disabled",
+    selectSnapshot: getUserAccessSnapshot,
+    preventSelfTarget: true,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE users
+        SET login_status = 'DISABLED',
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/users/:id/deactivate", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_DEACTIVATE",
+    successMessage: "User access has been deactivated",
+    selectSnapshot: getUserAccessSnapshot,
+    preventSelfTarget: true,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE users
+        SET deactivated_at = NOW(),
+            login_status = 'DISABLED',
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.put("/superadmin/users/:id/restore", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_RESTORE",
+    successMessage: "User access has been restored",
+    selectSnapshot: getUserAccessSnapshot,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE users
+        SET login_status = 'ENABLED',
+            blocked_until = NULL,
+            deactivated_at = NULL,
+            deleted_at = NULL,
+            force_logout_after = NULL,
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.post("/superadmin/users/:id/force-logout", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_FORCE_LOGOUT",
+    successMessage: "User sessions have been forced to logout",
+    selectSnapshot: getUserAccessSnapshot,
+    preventSelfTarget: true,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE users
+        SET force_logout_after = NOW(),
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.delete("/superadmin/users/:id/soft-delete", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  return runSuperAdminAccessMutation(req, res, {
+    entityType: "USER",
+    entityLabel: "User",
+    actionType: "USER_SOFT_DELETE",
+    successMessage: "User has been soft deleted",
+    selectSnapshot: getUserAccessSnapshot,
+    preventSelfTarget: true,
+    mutate: async (connection, { targetId, reason, access }) => {
+      await connection.query(
+        `
+        UPDATE users
+        SET deleted_at = NOW(),
+            login_status = 'DISABLED',
+            access_reason = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ?
+        `,
+        [reason, access.actingUserId, targetId]
+      );
+      return { ok: true };
+    }
+  });
+});
+
+app.get("/superadmin/audit-log", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const filters = [];
+    const params = [];
+    const companyId = Number(req.query.companyId || 0);
+    const userId = Number(req.query.userId || 0);
+    const actionType = String(req.query.actionType || "").trim();
+    const fromDate = parseAccessDate(req.query.from);
+    const toDate = parseAccessDate(req.query.to);
+
+    if (companyId) {
+      filters.push("company_id = ?");
+      params.push(companyId);
+    }
+
+    if (userId) {
+      filters.push("user_id = ?");
+      params.push(userId);
+    }
+
+    if (actionType) {
+      filters.push("action_type = ?");
+      params.push(actionType);
+    }
+
+    if (fromDate) {
+      filters.push("created_at >= ?");
+      params.push(fromDate);
+    }
+
+    if (toDate) {
+      filters.push("created_at <= ?");
+      params.push(toDate);
+    }
+
+    const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        company_id,
+        user_id,
+        actor_role,
+        action_type,
+        entity_type,
+        entity_id,
+        module_name,
+        route,
+        method,
+        status,
+        message,
+        before_data,
+        after_data,
+        metadata,
+        request_id,
+        ip_address,
+        user_agent,
+        created_at
+      FROM audit_log
+      ${whereClause}
+      ORDER BY id DESC
+      LIMIT 300
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      logs: rows
+    });
+  } catch (error) {
+    console.error("SuperAdmin audit log error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Audit log fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+/* =========================
    LOGIN
 ========================= */
 app.post("/login", loginRateLimiter, async (req, res) => {
@@ -16000,6 +16775,31 @@ app.post("/login", loginRateLimiter, async (req, res) => {
         }
       });
       return res.status(200).json({ success: false, message: "Pending approval" });
+    }
+
+    await repairApprovedAdminCompanyLink(user);
+
+    const loginAccess = validateAccessStateForUser(user);
+    if (!loginAccess.ok) {
+      await logActivitySafe(pool, req, null, {
+        companyId: user.company_id ?? null,
+        userId: user.id ?? null,
+        actorRole: user.role || "",
+        actionType: "LOGIN",
+        entityType: "AUTH",
+        entityId: String(user.id || ""),
+        moduleName: "auth",
+        status: "denied",
+        message: loginAccess.message || "Login blocked by access control",
+        metadata: {
+          email: maskDebugIdentifier(email),
+          reason: "ACCESS_CONTROL_BLOCK"
+        }
+      });
+      return res.status(loginAccess.status || 403).json({
+        success: false,
+        message: loginAccess.message || "Access denied"
+      });
     }
 
     if (!String(user.role || "").trim()) {

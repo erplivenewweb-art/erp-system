@@ -242,6 +242,154 @@
       color: #fff;
     }
 
+    .control-btn {
+      background: #f8fafc;
+      color: #1f2937;
+      border: 1px solid #dbe3ec;
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .control-btn.danger {
+      background: #fff1f2;
+      color: #9f1239;
+      border-color: #fecdd3;
+    }
+
+    .control-btn.warn {
+      background: #fff7ed;
+      color: #9a3412;
+      border-color: #fed7aa;
+    }
+
+    .control-btn.ok {
+      background: #ecfdf5;
+      color: #166534;
+      border-color: #a7f3d0;
+    }
+
+    .access-meta {
+      display: grid;
+      gap: 5px;
+      margin-top: 8px;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .access-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 8000;
+      background: rgba(15, 23, 42, 0.48);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-backdrop.show {
+      display: flex;
+    }
+
+    .access-modal,
+    .audit-modal {
+      width: min(560px, calc(100vw - 28px));
+      max-height: min(760px, calc(100vh - 28px));
+      overflow: auto;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+      padding: 18px;
+    }
+
+    .access-modal h3,
+    .audit-modal h3 {
+      margin: 0 0 12px;
+      color: #111827;
+      font-size: 20px;
+    }
+
+    .modal-field {
+      display: grid;
+      gap: 6px;
+      margin-top: 12px;
+    }
+
+    .modal-field label {
+      color: #334155;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .modal-field textarea,
+    .modal-field input {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .modal-field textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .audit-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .audit-entry {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f8fafc;
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: #334155;
+    }
+
+    .audit-entry strong {
+      color: #0f172a;
+    }
+
+    .audit-snapshot {
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      color: #475569;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px;
+      max-height: 130px;
+      overflow: auto;
+    }
+
     .refresh-btn {
       background: #e2e8f0;
       color: #0f172a;
@@ -492,6 +640,35 @@
     </main>
   </div>
 
+  <div class="modal-backdrop" id="accessActionModal" aria-hidden="true">
+    <div class="access-modal" role="dialog" aria-modal="true" aria-labelledby="accessActionTitle">
+      <h3 id="accessActionTitle">Confirm Access Action</h3>
+      <p id="accessActionTarget" class="small-note"></p>
+      <div class="modal-field" id="accessDateField">
+        <label id="accessDateLabel" for="accessActionDate">Until</label>
+        <input type="datetime-local" id="accessActionDate" />
+      </div>
+      <div class="modal-field">
+        <label for="accessActionReason">Reason</label>
+        <textarea id="accessActionReason" placeholder="Enter reason for audit history"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="control-btn" type="button" onclick="closeAccessActionModal()">Cancel</button>
+        <button class="approve-btn" type="button" id="accessActionConfirmBtn" onclick="confirmAccessAction()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="auditModal" aria-hidden="true">
+    <div class="audit-modal" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+      <h3 id="auditModalTitle">Audit History</h3>
+      <div id="auditModalBody" class="audit-list"></div>
+      <div class="modal-actions">
+        <button class="control-btn" type="button" onclick="closeAuditModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.ERP_API_BASE;
 
@@ -502,6 +679,7 @@
     let loggedInUser = null;
     let isSuperAdminUser = false;
     let currentCompanyId = null;
+    let pendingAccessAction = null;
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
 
@@ -601,6 +779,129 @@
         minute: "2-digit"
       });
     }
+
+    function formatAccessDate(value) {
+      if (!value) return "-";
+      return formatDateTime(value);
+    }
+
+    function getStatusPill(value, fallback = "-") {
+      const text = safeText(value || fallback) || "-";
+      const normalized = text.toLowerCase();
+      const className =
+        normalized.includes("active") || normalized.includes("enabled") || normalized.includes("approved")
+          ? "status-approved"
+          : normalized.includes("pending") || normalized.includes("suspend") || normalized.includes("block")
+          ? "status-pending"
+          : "status-rejected";
+
+      return `<span class="status-pill ${className}">${text}</span>`;
+    }
+
+    function readJsonField(value) {
+      if (!value) return null;
+      if (typeof value === "object") return value;
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return value;
+      }
+    }
+
+    function summarizeSnapshot(value) {
+      const data = readJsonField(value);
+      if (!data) return "-";
+      if (typeof data !== "object") return String(data);
+
+      const keep = [
+        "id",
+        "company_name",
+        "name",
+        "email",
+        "role",
+        "status",
+        "access_status",
+        "login_status",
+        "suspended_until",
+        "blocked_until",
+        "deleted_at",
+        "deactivated_at",
+        "force_logout_after",
+        "access_reason"
+      ];
+      const slim = {};
+      keep.forEach((key) => {
+        if (data[key] !== undefined && data[key] !== null && data[key] !== "") {
+          slim[key] = data[key];
+        }
+      });
+      return JSON.stringify(slim, null, 2);
+    }
+
+    const COMPANY_ACCESS_ACTIONS = {
+      suspend: {
+        label: "Suspend Company",
+        method: "PUT",
+        path: (id) => `/superadmin/companies/${id}/suspend`,
+        dateField: "suspendedUntil",
+        dateLabel: "Suspend until"
+      },
+      disableLogin: {
+        label: "Disable Company Login",
+        method: "PUT",
+        path: (id) => `/superadmin/companies/${id}/disable-login`
+      },
+      deactivate: {
+        label: "Deactivate Company",
+        method: "PUT",
+        path: (id) => `/superadmin/companies/${id}/deactivate`
+      },
+      restore: {
+        label: "Restore Company",
+        method: "PUT",
+        path: (id) => `/superadmin/companies/${id}/restore`
+      },
+      softDelete: {
+        label: "Soft Delete Company",
+        method: "DELETE",
+        path: (id) => `/superadmin/companies/${id}/soft-delete`
+      }
+    };
+
+    const USER_ACCESS_ACTIONS = {
+      blockLogin: {
+        label: "Block User Login",
+        method: "PUT",
+        path: (id) => `/superadmin/users/${id}/block-login`,
+        dateField: "blockedUntil",
+        dateLabel: "Block until"
+      },
+      disableLogin: {
+        label: "Disable User Login",
+        method: "PUT",
+        path: (id) => `/superadmin/users/${id}/disable-login`
+      },
+      deactivate: {
+        label: "Deactivate User",
+        method: "PUT",
+        path: (id) => `/superadmin/users/${id}/deactivate`
+      },
+      restore: {
+        label: "Restore User",
+        method: "PUT",
+        path: (id) => `/superadmin/users/${id}/restore`
+      },
+      forceLogout: {
+        label: "Force User Logout",
+        method: "POST",
+        path: (id) => `/superadmin/users/${id}/force-logout`
+      },
+      softDelete: {
+        label: "Soft Delete User",
+        method: "DELETE",
+        path: (id) => `/superadmin/users/${id}/soft-delete`
+      }
+    };
 
     function getUserSearchText() {
       return String(document.getElementById("approvalSearch")?.value || "").trim().toLowerCase();
@@ -1035,6 +1336,149 @@
       }
     }
 
+    function openAccessActionModal(entityType, id, actionKey) {
+      if (!isSuperAdminUser) return;
+
+      const actions = entityType === "company" ? COMPANY_ACCESS_ACTIONS : USER_ACCESS_ACTIONS;
+      const action = actions[actionKey];
+      if (!action) return;
+
+      const target =
+        entityType === "company"
+          ? approvedCompaniesData.find((company) => Number(company.id) === Number(id))
+          : approvedUsersData.find((user) => Number(user.id) === Number(id));
+
+      pendingAccessAction = {
+        entityType,
+        id,
+        action
+      };
+
+      document.getElementById("accessActionTitle").textContent = action.label;
+      document.getElementById("accessActionTarget").textContent =
+        entityType === "company"
+          ? `Company: ${safeText(target?.company_name || id)}`
+          : `User: ${safeText(target?.name || target?.email || id)}`;
+      document.getElementById("accessActionReason").value = "";
+      document.getElementById("accessActionDate").value = "";
+
+      const dateField = document.getElementById("accessDateField");
+      if (action.dateField) {
+        dateField.style.display = "";
+        document.getElementById("accessDateLabel").textContent = action.dateLabel || "Until";
+      } else {
+        dateField.style.display = "none";
+      }
+
+      document.getElementById("accessActionModal").classList.add("show");
+    }
+
+    function closeAccessActionModal() {
+      pendingAccessAction = null;
+      document.getElementById("accessActionModal").classList.remove("show");
+    }
+
+    async function confirmAccessAction() {
+      if (!pendingAccessAction || !isSuperAdminUser) return;
+
+      const reason = document.getElementById("accessActionReason").value.trim();
+      if (!reason) {
+        showToast("Reason is required.", "error");
+        return;
+      }
+
+      const { id, action } = pendingAccessAction;
+      const payload = { reason };
+      if (action.dateField) {
+        const dateValue = document.getElementById("accessActionDate").value;
+        if (!dateValue) {
+          showToast("Please choose a date and time.", "error");
+          return;
+        }
+        payload[action.dateField] = new Date(dateValue).toISOString();
+      }
+
+      const button = document.getElementById("accessActionConfirmBtn");
+      const originalText = button.textContent;
+
+      try {
+        button.disabled = true;
+        button.textContent = "Working...";
+
+        const res = await fetch(`${API_BASE}${action.path(id)}`, {
+          method: action.method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "Access action failed");
+        }
+
+        showToast(data.message || "Access updated", "success");
+        closeAccessActionModal();
+        await loadApprovalData();
+      } catch (error) {
+        console.log("Access action error:", error);
+        showToast(error.message || "Access action failed", "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    async function openAuditModal(entityType, id) {
+      if (!isSuperAdminUser) return;
+
+      const params = new URLSearchParams();
+      if (entityType === "company") {
+        params.set("companyId", String(id));
+      } else {
+        params.set("userId", String(id));
+      }
+
+      const modal = document.getElementById("auditModal");
+      const body = document.getElementById("auditModalBody");
+      body.innerHTML = `<div class="empty-box">Loading audit history...</div>`;
+      modal.classList.add("show");
+
+      try {
+        const res = await fetch(`${API_BASE}/superadmin/audit-log?${params.toString()}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "Audit history failed");
+        }
+
+        const logs = Array.isArray(data.logs) ? data.logs : [];
+        if (!logs.length) {
+          body.innerHTML = `<div class="empty-box">No audit history found</div>`;
+          return;
+        }
+
+        body.innerHTML = logs.map((log) => {
+          const metadata = readJsonField(log.metadata) || {};
+          return `
+            <div class="audit-entry">
+              <strong>${safeText(log.action_type || "-")}</strong>
+              <span>${formatDateTime(log.created_at)} | Actor: ${safeText(log.actor_role || "-")}</span>
+              <span>Target: ${safeText(log.entity_type || "-")} #${safeText(log.entity_id || "-")}</span>
+              <span>Reason: ${safeText(metadata.reason || log.message || "-")}</span>
+              <div class="audit-snapshot">Before:\n${summarizeSnapshot(log.before_data)}</div>
+              <div class="audit-snapshot">After:\n${summarizeSnapshot(log.after_data)}</div>
+            </div>
+          `;
+        }).join("");
+      } catch (error) {
+        console.log("Audit load error:", error);
+        body.innerHTML = `<div class="empty-box">${safeText(error.message || "Audit history failed")}</div>`;
+      }
+    }
+
+    function closeAuditModal() {
+      document.getElementById("auditModal").classList.remove("show");
+    }
+
     function updateSummary() {
       const pendingCompanyCountEl = document.getElementById("pendingCompanyCount");
       const approvedCompanyCountEl = document.getElementById("approvedCompanyCount");
@@ -1069,15 +1513,30 @@
         return;
       }
 
-      approvedCompaniesData.slice(0, 5).forEach((company) => {
+      approvedCompaniesData.forEach((company) => {
         box.innerHTML += `
           <div class="approved-company-item">
             <strong>${safeText(company.company_name || "-")}</strong>
             <p>
               Owner: ${safeText(company.owner_name || "-")}<br>
               Email: ${safeText(company.owner_email || "-")}<br>
-              Status: ${safeText(company.status || "-")}
+              Status: ${getStatusPill(company.status || "-")}<br>
+              Access: ${getStatusPill(company.access_status || "ACTIVE")}<br>
+              Login: ${getStatusPill(company.login_status || "ENABLED")}
             </p>
+            <div class="access-meta">
+              <span>Suspended until: ${formatAccessDate(company.suspended_until)}</span>
+              <span>Deactivated: ${formatAccessDate(company.deactivated_at)}</span>
+              <span>Deleted: ${formatAccessDate(company.deleted_at)}</span>
+            </div>
+            <div class="access-actions">
+              <button class="control-btn warn" type="button" onclick="openAccessActionModal('company', '${company.id}', 'suspend')">Suspend</button>
+              <button class="control-btn warn" type="button" onclick="openAccessActionModal('company', '${company.id}', 'disableLogin')">Disable Login</button>
+              <button class="control-btn danger" type="button" onclick="openAccessActionModal('company', '${company.id}', 'deactivate')">Deactivate</button>
+              <button class="control-btn ok" type="button" onclick="openAccessActionModal('company', '${company.id}', 'restore')">Restore</button>
+              <button class="control-btn danger" type="button" onclick="openAccessActionModal('company', '${company.id}', 'softDelete')">Soft Delete</button>
+              <button class="control-btn" type="button" onclick="openAuditModal('company', '${company.id}')">View Audit</button>
+            </div>
           </div>
         `;
       });
@@ -1098,9 +1557,29 @@
         return;
       }
 
-      approvedUsersData.slice(0, 5).forEach((user) => {
+      approvedUsersData.forEach((user) => {
         const companyLine = isSuperAdminUser
           ? `Company: ${safeText(user.company_name || user.company_id || "-")}<br>`
+          : "";
+        const accessControls = isSuperAdminUser
+          ? `
+            <div class="access-meta">
+              <span>Login: ${getStatusPill(user.login_status || "ENABLED")}</span>
+              <span>Blocked until: ${formatAccessDate(user.blocked_until)}</span>
+              <span>Deactivated: ${formatAccessDate(user.deactivated_at)}</span>
+              <span>Deleted: ${formatAccessDate(user.deleted_at)}</span>
+              <span>Force logout after: ${formatAccessDate(user.force_logout_after)}</span>
+            </div>
+            <div class="access-actions">
+              <button class="control-btn warn" type="button" onclick="openAccessActionModal('user', '${user.id}', 'blockLogin')">Block Login</button>
+              <button class="control-btn warn" type="button" onclick="openAccessActionModal('user', '${user.id}', 'disableLogin')">Disable Login</button>
+              <button class="control-btn danger" type="button" onclick="openAccessActionModal('user', '${user.id}', 'deactivate')">Deactivate</button>
+              <button class="control-btn ok" type="button" onclick="openAccessActionModal('user', '${user.id}', 'restore')">Restore</button>
+              <button class="control-btn warn" type="button" onclick="openAccessActionModal('user', '${user.id}', 'forceLogout')">Force Logout</button>
+              <button class="control-btn danger" type="button" onclick="openAccessActionModal('user', '${user.id}', 'softDelete')">Soft Delete</button>
+              <button class="control-btn" type="button" onclick="openAuditModal('user', '${user.id}')">View Audit</button>
+            </div>
+          `
           : "";
 
         box.innerHTML += `
@@ -1112,6 +1591,7 @@
               ${companyLine}
               Status: ${safeText(user.status || "-")}
             </p>
+            ${accessControls}
           </div>
         `;
       });
