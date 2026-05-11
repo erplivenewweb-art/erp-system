@@ -1,5 +1,7 @@
 const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env") });
+const fs = require("fs");
+const LOCAL_ENV_FILE = path.resolve(__dirname, "..", "..", ".env");
+require("dotenv").config({ path: LOCAL_ENV_FILE });
 
 const express = require("express");
 const cors = require("cors");
@@ -136,6 +138,33 @@ function getMissingEnvKeys(keys) {
   return keys.filter((key) => !String(process.env[key] || "").trim());
 }
 
+function getDuplicateLocalEnvKeys(keys) {
+  const keySet = new Set(keys);
+  const counts = {};
+
+  try {
+    const content = fs.readFileSync(LOCAL_ENV_FILE, "utf8");
+    content.split(/\r?\n/).forEach((line) => {
+      const cleanLine = String(line || "").trim();
+      if (!cleanLine || cleanLine.startsWith("#")) return;
+
+      const separatorIndex = cleanLine.indexOf("=");
+      if (separatorIndex <= 0) return;
+
+      const key = cleanLine.slice(0, separatorIndex).trim();
+      if (!keySet.has(key)) return;
+
+      counts[key] = (counts[key] || 0) + 1;
+    });
+  } catch (_) {
+    return [];
+  }
+
+  return Object.entries(counts)
+    .filter(([, count]) => count > 1)
+    .map(([key]) => key);
+}
+
 function isSmtpPlaceholderValue(value) {
   return SMTP_PLACEHOLDER_VALUES.has(String(value || "").trim().toLowerCase());
 }
@@ -243,6 +272,7 @@ function logEnvStatus() {
   const missingMysqlEnv = getMissingEnvKeys(MYSQL_ENV_KEYS);
   const missingSmtpEnv = isSmtpEnabled() ? getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS) : [];
   const missingSuperAdminPassword = !String(process.env.SUPERADMIN_PASSWORD || "").trim();
+  const duplicateSuperAdminKeys = getDuplicateLocalEnvKeys(["SUPERADMIN_PASSWORD"]);
 
   if (missingMysqlEnv.length && canUseLocalDbDefaults()) {
     console.warn(
@@ -261,6 +291,12 @@ function logEnvStatus() {
   } else if (missingSuperAdminPassword) {
     console.warn(
       "[CONFIG] SUPERADMIN_PASSWORD is missing. Startup will fail safely until it is set."
+    );
+  }
+
+  if (duplicateSuperAdminKeys.length) {
+    console.warn(
+      "[CONFIG] Duplicate SUPERADMIN_PASSWORD entries found in local .env. Dotenv uses the last value; remove duplicates to avoid login confusion."
     );
   }
 
@@ -6079,7 +6115,8 @@ async function ensureSuperAdminExists() {
 
     const superAdminPassword = configuredSuperAdminPassword;
     const superAdminPasswordHash = await hashPassword(superAdminPassword);
-    console.log("[STARTUP] SUPERADMIN_PASSWORD detected. Syncing SuperAdmin account.");
+    console.log("[STARTUP] SUPERADMIN_PASSWORD detected.");
+    console.log("[STARTUP] SuperAdmin syncing.");
 
     const [rows] = await pool.query(
       `SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
@@ -6095,7 +6132,7 @@ async function ensureSuperAdminExists() {
         `,
         [superAdminPasswordHash, superAdminEmail]
       );
-      console.log("SuperAdmin synced ✅");
+      console.log("[STARTUP] SuperAdmin synced.");
       return;
     }
 
@@ -6116,7 +6153,7 @@ async function ensureSuperAdminExists() {
       ]
     );
 
-    console.log("Default SuperAdmin created ✅");
+    console.log("[STARTUP] SuperAdmin synced.");
   } catch (error) {
     console.error("SuperAdmin create error:", error);
   }
