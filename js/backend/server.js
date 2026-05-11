@@ -51,7 +51,7 @@ const PROTECTED_PAGES = new Set([
 
 const DEFAULT_ALLOWED_APP_ORIGINS = [
   "http://localhost:8080",
-  "https://erp-system-production-e223.up.railway.app"
+  "https://erp-system-production-ddae.up.railway.app"
 ];
 const ALLOWED_APP_ORIGINS = new Set(
   [
