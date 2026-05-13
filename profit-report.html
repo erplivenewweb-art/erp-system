@@ -526,6 +526,7 @@
 
     window.addEventListener("load", async function () {
       requireLogin();
+      requirePageAccess("profit-report");
       filterSidebarMenuByRole();
       applySidebarState();
       bindSidebarToggle();

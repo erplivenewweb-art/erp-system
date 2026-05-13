@@ -4,6 +4,8 @@
 
 const ERP_PAGE_PERMISSION_MAP = {
   dashboard: ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "production-dashboard": ["SUPERADMIN", "OWNER", "STAFF"],
+  "sales-dashboard": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "admin-approval": ["SUPERADMIN", "OWNER"],
   sticker: ["SUPERADMIN", "OWNER", "STAFF"],
   stock: ["SUPERADMIN", "OWNER", "STAFF"],
@@ -18,11 +20,27 @@ const ERP_PAGE_PERMISSION_MAP = {
   "expense-manager": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   transaction: ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "profit-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "branch-transfer": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-receive": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-transfer-history": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-shortage-report": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-analytics": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "transfer-ageing-report": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "shortage-analytics": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "stock-movement-ledger": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-reconciliation": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-audit-dashboard": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-snapshots": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-reconciliation-runs": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-exception-queue": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   settings: ["SUPERADMIN", "OWNER"]
 };
 
 const ERP_MENU_PAGE_BY_HREF = {
   "dashboard.html": "dashboard",
+  "production-dashboard.html": "production-dashboard",
+  "sales-dashboard.html": "sales-dashboard",
   "admin-approval.html": "admin-approval",
   "sticker.html": "sticker",
   "stock.html": "stock",
@@ -37,14 +55,73 @@ const ERP_MENU_PAGE_BY_HREF = {
   "expense-manager.html": "expense-manager",
   "transaction.html": "transaction",
   "transaction-reports.html": "transaction-reports",
+  "profit-report.html": "profit-report",
+  "branch-transfer.html": "branch-transfer",
+  "branch-receive.html": "branch-receive",
+  "branch-transfer-history.html": "branch-transfer-history",
+  "branch-shortage-report.html": "branch-shortage-report",
+  "branch-analytics.html": "branch-analytics",
+  "transfer-ageing-report.html": "transfer-ageing-report",
+  "shortage-analytics.html": "shortage-analytics",
+  "stock-movement-ledger.html": "stock-movement-ledger",
+  "branch-reconciliation.html": "branch-reconciliation",
+  "branch-audit-dashboard.html": "branch-audit-dashboard",
+  "branch-snapshots.html": "branch-snapshots",
+  "branch-reconciliation-runs.html": "branch-reconciliation-runs",
+  "branch-exception-queue.html": "branch-exception-queue",
   "settings.html": "settings"
 };
 
 const ERP_AUTH_TOKEN_STORAGE_KEY = "erpAuthToken";
 const ERP_SELECTED_COMPANY_STORAGE_KEY = "selectedCompanyId";
+const ERP_NAVIGATION_MODE_STORAGE_KEY = "erpNavigationMode";
 const ERP_ALL_COMPANIES_VALUE = "__ALL__";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction"]);
+const ERP_NAVIGATION_MODES = {
+  production: {
+    label: "Production",
+    defaultHref: "production-dashboard.html"
+  },
+  sales: {
+    label: "Store",
+    defaultHref: "sales-dashboard.html"
+  }
+};
+const ERP_NAVIGATION_ITEMS = [
+  { mode: "production", pageKey: "production-dashboard", href: "production-dashboard.html", label: "Production Dashboard", icon: "fas fa-chart-pie" },
+  { mode: "production", pageKey: "process", href: "process.html", label: "Process", icon: "fas fa-screwdriver-wrench" },
+  { mode: "production", pageKey: "sticker", href: "sticker.html", label: "Sticker", icon: "fas fa-barcode" },
+  { mode: "production", pageKey: "material-stock", href: "material-stock.html", label: "Material Stock", icon: "fas fa-box-open" },
+  { mode: "production", pageKey: "staff-management", href: "staff-management.html", label: "Staff Management", icon: "fas fa-users" },
+  { mode: "production", pageKey: "expense-manager", href: "expense-manager.html", label: "Expense Manager", icon: "fas fa-wallet" },
+  { mode: "production", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear" },
+  { mode: "production", pageKey: "admin-approval", href: "admin-approval.html", label: "Admin Approval", icon: "fas fa-user-check" },
+  { mode: "sales", pageKey: "sales-dashboard", href: "sales-dashboard.html", label: "Store Dashboard", icon: "fas fa-store" },
+  { mode: "sales", pageKey: "stock", href: "stock.html", label: "Stock", icon: "fas fa-boxes-stacked" },
+  { mode: "sales", pageKey: "billing", href: "billing.html", label: "Billing", icon: "fas fa-money-bill-wave" },
+  { mode: "sales", pageKey: "invoice", href: "invoice.html", label: "Invoice", icon: "fas fa-file-invoice" },
+  { mode: "sales", pageKey: "return", href: "return.html", label: "Return", icon: "fas fa-rotate-left" },
+  { mode: "sales", pageKey: "sales-history", href: "sales-history.html", label: "Sales History", icon: "fas fa-clock-rotate-left" },
+  { mode: "sales", pageKey: "daily-report", href: "daily-report.html", label: "Daily Report", icon: "fas fa-chart-line" },
+  { mode: "sales", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left" },
+  { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines" },
+  { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins" },
+  { mode: "sales", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box" },
+  { mode: "sales", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode" },
+  { mode: "sales", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route" },
+  { mode: "sales", pageKey: "branch-shortage-report", href: "branch-shortage-report.html", label: "Shortage Report", icon: "fas fa-triangle-exclamation" },
+  { mode: "sales", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple" },
+  { mode: "sales", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half" },
+  { mode: "sales", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation" },
+  { mode: "sales", pageKey: "stock-movement-ledger", href: "stock-movement-ledger.html", label: "Movement Ledger", icon: "fas fa-timeline" },
+  { mode: "sales", pageKey: "branch-reconciliation", href: "branch-reconciliation.html", label: "Reconciliation", icon: "fas fa-scale-balanced" },
+  { mode: "sales", pageKey: "branch-audit-dashboard", href: "branch-audit-dashboard.html", label: "Audit Dashboard", icon: "fas fa-shield-halved" },
+  { mode: "sales", pageKey: "branch-snapshots", href: "branch-snapshots.html", label: "Stock Snapshots", icon: "fas fa-camera-retro" },
+  { mode: "sales", pageKey: "branch-reconciliation-runs", href: "branch-reconciliation-runs.html", label: "Audit Runs", icon: "fas fa-clipboard-check" },
+  { mode: "sales", pageKey: "branch-exception-queue", href: "branch-exception-queue.html", label: "Exception Queue", icon: "fas fa-list-check" },
+  { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear" }
+];
 
 function getLoggedInUser() {
   if (typeof window.getErpLoggedInUser === "function") {
@@ -160,6 +237,77 @@ function isSuperAdmin(user = null) {
 function isAdminUser(user = null) {
   const targetUser = user || getLoggedInUser();
   return getNormalizedRole(targetUser) === "owner";
+}
+
+function getAllowedNavigationModes(user = getLoggedInUser()) {
+  if (!user) return ["production", "sales"];
+  if (isSuperAdmin(user) || isAdminUser(user)) return ["production", "sales"];
+
+  const normalizedRole = getNormalizedRole(user);
+  const rawRole = String(user?.role || "").trim().toLowerCase();
+
+  if (normalizedRole === "accounts") {
+    return ["production", "sales"];
+  }
+
+  if (["billing", "invoice"].includes(rawRole)) {
+    return ["sales"];
+  }
+
+  if (["process", "sticker"].includes(rawRole)) {
+    return ["production"];
+  }
+
+  if (rawRole === "stock") {
+    return ["sales"];
+  }
+
+  return ["production", "sales"];
+}
+
+function getPageNavigationMode(pageKey = getCurrentPageKey()) {
+  const item = ERP_NAVIGATION_ITEMS.find((entry) => entry.pageKey === pageKey);
+  return item?.mode || "";
+}
+
+function getStoredNavigationMode() {
+  const mode = String(localStorage.getItem(ERP_NAVIGATION_MODE_STORAGE_KEY) || "").trim();
+  return ERP_NAVIGATION_MODES[mode] ? mode : "";
+}
+
+function setNavigationMode(mode) {
+  if (!ERP_NAVIGATION_MODES[mode]) return "";
+  localStorage.setItem(ERP_NAVIGATION_MODE_STORAGE_KEY, mode);
+  return mode;
+}
+
+function getCurrentNavigationMode(user = getLoggedInUser()) {
+  const allowedModes = getAllowedNavigationModes(user);
+  const pageMode = getPageNavigationMode();
+  if (pageMode && allowedModes.includes(pageMode)) {
+    setNavigationMode(pageMode);
+    return pageMode;
+  }
+
+  const storedMode = getStoredNavigationMode();
+  if (storedMode && allowedModes.includes(storedMode)) return storedMode;
+
+  const fallback = allowedModes[0] || "production";
+  setNavigationMode(fallback);
+  return fallback;
+}
+
+function switchErpNavigationMode(mode) {
+  if (!ERP_NAVIGATION_MODES[mode]) return;
+  setNavigationMode(mode);
+
+  const currentPageMode = getPageNavigationMode();
+  if (currentPageMode !== mode) {
+    window.location.href = ERP_NAVIGATION_MODES[mode].defaultHref;
+    return;
+  }
+
+  filterSidebarMenuByRole();
 }
 
 function getSelectedCompanyId() {
@@ -531,20 +679,168 @@ function requirePageAccess(pageKey) {
   return false;
 }
 
+function injectNavigationModeStyles() {
+  if (document.getElementById("erpNavigationModeStyles")) return;
+  const style = document.createElement("style");
+  style.id = "erpNavigationModeStyles";
+  style.textContent = `
+    body.erp-mode-production {
+      --erp-mode-accent: #c58b2b;
+      --erp-mode-accent-dark: #6f4f16;
+      --erp-mode-soft: #fffaf1;
+      --erp-mode-border: #eadfca;
+      --erp-mode-ink: #2f2a21;
+    }
+    body.erp-mode-sales {
+      --erp-mode-accent: #b8901f;
+      --erp-mode-accent-dark: #2b2a27;
+      --erp-mode-soft: #fffdf8;
+      --erp-mode-border: #decfb8;
+      --erp-mode-ink: #2b2a27;
+    }
+    body.erp-mode-production .topbar,
+    body.erp-mode-sales .topbar {
+      border-bottom: 1px solid var(--erp-mode-border);
+    }
+    body.erp-mode-production .topbar {
+      background: linear-gradient(180deg, #fffdf8 0%, #ffffff 100%);
+    }
+    body.erp-mode-sales .topbar {
+      background: linear-gradient(180deg, #fffaf1 0%, #ffffff 100%);
+    }
+    body.erp-mode-production .title p,
+    body.erp-mode-sales .title p {
+      color: var(--erp-mode-accent-dark);
+      font-weight: 700;
+    }
+    body.erp-mode-production .menu a.active,
+    body.erp-mode-sales .menu a.active {
+      background: rgba(255, 255, 255, 0.16);
+      border-left: 4px solid var(--erp-mode-accent);
+    }
+    body.erp-mode-production .menu a:hover,
+    body.erp-mode-sales .menu a:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .sidebar .erp-mode-switch {
+      display: none !important;
+    }
+    .erp-mode-switch {
+      display: inline-grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--erp-mode-border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: 0 8px 22px rgba(46, 42, 36, 0.08);
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .erp-mode-btn {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #5f5a50;
+      min-height: 34px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 900;
+      padding: 0 13px;
+      white-space: nowrap;
+    }
+    .erp-mode-btn.active {
+      background: linear-gradient(180deg, #e8bd73 0%, #c58b2b 100%);
+      color: #fff;
+      box-shadow: 0 7px 16px rgba(197, 139, 43, 0.24);
+    }
+    body.erp-mode-sales .erp-mode-btn.active {
+      background: linear-gradient(180deg, #f4dfaa 0%, #a98735 100%);
+      color: #211f1a;
+    }
+    @media (max-width: 780px) {
+      .erp-mode-switch {
+        order: 10;
+        width: 100%;
+      }
+      .erp-mode-btn {
+        min-height: 38px;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function renderNavigationModeSwitch(mode, allowedModes) {
+  document.querySelectorAll(".sidebar .erp-mode-switch").forEach((switcher) => switcher.remove());
+
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) return;
+
+  let switcher = topbar.querySelector(".erp-mode-switch");
+  if (!switcher) {
+    switcher = document.createElement("div");
+    switcher.className = "erp-mode-switch";
+    const topRight = topbar.querySelector(".top-right");
+    if (topRight && topRight.parentElement === topbar) {
+      topbar.insertBefore(switcher, topRight);
+    } else {
+      topbar.appendChild(switcher);
+    }
+  }
+
+  if (allowedModes.length <= 1) {
+    switcher.style.display = "none";
+    return;
+  }
+
+  switcher.style.display = "";
+  switcher.innerHTML = allowedModes.map((itemMode) => `
+    <button class="erp-mode-btn ${itemMode === mode ? "active" : ""}" type="button" onclick="switchErpNavigationMode('${itemMode}')">
+      ${itemMode === "production" ? "Production" : "Store"}
+    </button>
+  `).join("");
+}
+
+function updateSidebarModeLabel(mode) {
+  const brandText = document.querySelector(".sidebar .brand p");
+  if (!brandText) return;
+  brandText.textContent = mode === "sales" ? "Store Mode" : "Production Mode";
+}
+
+function renderModeAwareMenu(menu, user, mode, allowedModes) {
+  const currentPage = getCurrentPageKey();
+  const items = ERP_NAVIGATION_ITEMS.filter((item) =>
+    item.mode === mode && allowedModes.includes(item.mode) && canAccessPage(item.pageKey, user)
+  );
+
+  menu.innerHTML = items.map((item) => `
+    <li>
+      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""}">
+        <i class="${item.icon}"></i> ${item.label}
+      </a>
+    </li>
+  `).join("");
+}
+
 function filterSidebarMenuByRole() {
   const user = getLoggedInUser();
   const menuLinks = document.querySelectorAll(".menu a");
   const roleAwareElements = document.querySelectorAll("[data-page-key]");
+  const menus = document.querySelectorAll(".menu");
+  const allowedModes = getAllowedNavigationModes(user);
+  const mode = getCurrentNavigationMode(user);
 
-  if (menuLinks.length) {
-    menuLinks.forEach((link) => {
-      const href = String(link.getAttribute("href") || "").trim().toLowerCase();
-      const pageKey = ERP_MENU_PAGE_BY_HREF[href];
-      const listItem = link.closest("li");
+  document.body.classList.toggle("erp-mode-production", mode === "production");
+  document.body.classList.toggle("erp-mode-sales", mode === "sales");
+  document.body.dataset.erpNavigationMode = mode;
+  injectNavigationModeStyles();
+  renderNavigationModeSwitch(mode, allowedModes);
+  updateSidebarModeLabel(mode);
 
-      if (!listItem || !pageKey) return;
-
-      listItem.style.display = !user || canAccessPage(pageKey, user) ? "" : "none";
+  if (menus.length) {
+    menus.forEach((menu) => {
+      renderModeAwareMenu(menu, user, mode, allowedModes);
     });
   }
 

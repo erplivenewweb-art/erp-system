@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Reconciliation</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .panel{background:#fff;border:1px solid #eadfce;border-radius:16px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06);margin-bottom:18px}
+    .filters{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;align-items:end}
+    .field label{display:block;font-size:11px;font-weight:900;color:#64748b;text-transform:uppercase;margin-bottom:6px}
+    .field input,.field select{width:100%;border:1px solid #e3d7c7;border-radius:12px;padding:11px 12px;background:#fffdf8}
+    .btn{border:0;border-radius:12px;padding:11px 14px;cursor:pointer;font-weight:900;display:inline-flex;align-items:center;gap:8px}
+    .primary{background:linear-gradient(180deg,#d9ae67,#bb8134);color:#fff}
+    .dark{background:#172033;color:#fff}
+    .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .metric{background:#fffaf2;border:1px solid #eadfce;border-radius:12px;padding:14px}
+    .metric span{display:block;font-size:11px;color:#64748b;font-weight:900;text-transform:uppercase}
+    .metric strong{display:block;margin-top:4px;font-size:24px}
+    .data-table{width:100%;border-collapse:collapse}
+    .data-table th,.data-table td{padding:12px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px}
+    .data-table th{background:#f8fafc;color:#475569;font-size:11px;text-transform:uppercase}
+    .table-wrap{overflow-x:auto;border:1px solid #edf2f7;border-radius:14px}
+    .ok{color:#166534;font-weight:900}.bad{color:#b42318;font-weight:900}.muted{color:#64748b;font-size:13px}
+    @media print{.sidebar,.topbar,.filters-panel{display:none}.main{margin:0}.panel{box-shadow:none;border-color:#ddd}}
+    @media(max-width:980px){.filters,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:560px){.filters,.metric-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>Store Mode</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Branch Reconciliation</h1><p>Opening, inward, outward, sales, returns, closing, and mismatch view</p></div></div>
+        <div class="top-right"><button type="button" onclick="window.print()">Print</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+      <section class="page active">
+        <div class="panel filters-panel">
+          <div class="filters">
+            <div class="field"><label>Branch</label><select id="branchId"><option value="">All accessible branches</option></select></div>
+            <div class="field"><label>From</label><input type="date" id="fromDate"></div>
+            <div class="field"><label>To</label><input type="date" id="toDate"></div>
+            <button class="btn primary" type="button" onclick="loadReport(true)"><i class="fas fa-rotate"></i> Refresh</button>
+            <button class="btn dark" type="button" onclick="exportCsv()"><i class="fas fa-file-export"></i> Export CSV</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="metric-grid">
+            <div class="metric"><span>Opening Stock</span><strong id="openingStock">0</strong></div>
+            <div class="metric"><span>Closing Stock</span><strong id="closingStock">0</strong></div>
+            <div class="metric"><span>Closing Weight</span><strong id="closingWeight">0.000 g</strong></div>
+            <div class="metric"><span>Mismatch</span><strong id="mismatch">0</strong></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3><i class="fas fa-scale-balanced"></i> Reconciliation Report</h3>
+          <div class="table-wrap">
+            <table class="data-table" id="reportTable">
+              <thead><tr><th>Metric</th><th>Qty</th><th>Notes</th></tr></thead>
+              <tbody id="rows"><tr><td colspan="3">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <p class="muted" id="reportNote"></p>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="js/auth.js"></script>
+  <script>
+    let latestReport = null;
+    const wt = (n) => `${Number(n || 0).toFixed(3)} g`;
+    function notify(message,type="info"){window.showToast?showToast(message,type):alert(message)}
+    function api(path){return fetch(path,{credentials:"include",cache:"no-store"}).then(r=>r.json().then(d=>{if(!r.ok||d.success===false)throw new Error(d.message||"Request failed");return d;}))}
+    async function loadBranches(){
+      try{
+        const data=await api("/branches");
+        const branches=data.branches||[];
+        branchId.innerHTML='<option value="">All accessible branches</option>'+branches.map(b=>`<option value="${b.id}">${b.branch_name} (${b.branch_code})</option>`).join("");
+      }catch(e){}
+    }
+    function queryString(){
+      const p=new URLSearchParams();
+      if(branchId.value)p.set("branchId",branchId.value);
+      if(fromDate.value)p.set("fromDate",fromDate.value);
+      if(toDate.value)p.set("toDate",toDate.value);
+      return p.toString();
+    }
+    async function loadReport(silent=false){
+      try{
+        latestReport=await api(`/branch-analytics/reconciliation?${queryString()}`);
+        openingStock.textContent=latestReport.opening_stock||0;
+        closingStock.textContent=latestReport.closing_stock||0;
+        closingWeight.textContent=wt(latestReport.closing_weight);
+        const mismatchValue=Number(latestReport.mismatch||0);
+        mismatch.textContent=mismatchValue;
+        mismatch.className=mismatchValue===0?"ok":"bad";
+        const data=[
+          ["Opening stock",latestReport.opening_stock,"Derived from closing stock and period movements"],
+          ["Inward transfer",latestReport.inward_transfer,"Items moved into selected branch scope"],
+          ["Outward transfer",latestReport.outward_transfer,"Items moved out from selected branch scope"],
+          ["Sold",latestReport.sold,"Sales items matched by barcode"],
+          ["Damaged",latestReport.damaged,"Current stock marked damaged"],
+          ["Returned",latestReport.returned,"Return history matched by barcode"],
+          ["Closing stock",latestReport.closing_stock,wt(latestReport.closing_weight)],
+          ["Mismatch",latestReport.mismatch,mismatchValue===0?"Balanced":"Needs review"]
+        ];
+        rows.innerHTML=data.map(r=>`<tr><td>${r[0]}</td><td>${r[1]??0}</td><td>${r[2]||""}</td></tr>`).join("");
+        reportNote.textContent=latestReport.note||"";
+        if(silent)notify("Reconciliation refreshed","success");
+      }catch(e){notify(e.message,"error")}
+    }
+    function exportCsv(){
+      if(!latestReport){notify("Load the report first","error");return}
+      const lines=[["Metric","Qty","Notes"],...Array.from(rows.querySelectorAll("tr")).map(tr=>Array.from(tr.children).map(td=>td.textContent.trim()))];
+      const csv=lines.map(line=>line.map(value=>`"${String(value).replace(/"/g,'""')}"`).join(",")).join("\n");
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;
+      a.download="branch-reconciliation.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    function toggleSidebar(){sidebar?.classList.toggle("collapsed")}
+    function logoutUser(){if(window.clearAuthSession)clearAuthSession();location.href="login.html"}
+    addEventListener("DOMContentLoaded",()=>{loadBranches();loadReport();});
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>

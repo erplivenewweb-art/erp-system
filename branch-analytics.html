@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Analytics</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .panel{background:#fff;border:1px solid #eadfce;border-radius:16px;padding:18px;box-shadow:0 10px 24px rgba(15,23,42,.06);margin-bottom:18px}.panel h3{margin:0 0 12px;color:#2f2a21;display:flex;gap:10px;align-items:center}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metric{background:#fffaf2;border:1px solid #eadfce;border-radius:12px;padding:14px}.metric span{display:block;color:#64748b;font-size:11px;font-weight:900;text-transform:uppercase}.metric strong{display:block;margin-top:4px;font-size:23px}.data-table{width:100%;border-collapse:collapse}.data-table th,.data-table td{padding:12px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px}.data-table th{background:#f8fafc;color:#475569;font-size:11px;text-transform:uppercase}.table-wrap{overflow-x:auto;border:1px solid #edf2f7;border-radius:14px}.alert-row td{background:#fff7ed}.danger-row td{background:#fff1f1}@media(max-width:900px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.metric-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout"><aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>Store Mode</p></div><ul class="menu"></ul></div></aside><main class="main">
+    <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Branch Analytics</h1><p>Owner-level branch stock, sales, in-transit, and shortage view</p></div></div><div class="top-right"><button onclick="loadOverview(true)">Refresh</button><button onclick="logoutUser()">Logout</button></div></div>
+    <section class="page active">
+      <div class="panel"><div class="metric-grid">
+        <div class="metric"><span>Branches</span><strong id="totalBranches">0</strong></div>
+        <div class="metric"><span>Stock Qty</span><strong id="totalStockQty">0</strong></div>
+        <div class="metric"><span>Stock Weight</span><strong id="totalStockWeight">0.000 g</strong></div>
+        <div class="metric"><span>Sales</span><strong id="totalSales">Rs 0.00</strong></div>
+        <div class="metric"><span>In Transit</span><strong id="totalTransit">0</strong></div>
+        <div class="metric"><span>Transit Weight</span><strong id="totalTransitWeight">0.000 g</strong></div>
+        <div class="metric"><span>Shortage</span><strong id="totalShortage">0</strong></div>
+        <div class="metric"><span>Stock Value</span><strong id="totalValue">Rs 0.00</strong></div>
+      </div></div>
+      <div class="panel"><h3><i class="fas fa-code-branch"></i> Branch Comparison</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>Branch</th><th>Stock Qty</th><th>Weight</th><th>Sales</th><th>Sold Qty</th><th>In Transit</th><th>Shortage</th></tr></thead><tbody id="branchRows"><tr><td colspan="7">Loading...</td></tr></tbody></table></div></div>
+      <div class="panel"><h3><i class="fas fa-bell"></i> Alerts</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>Branch</th><th>Alert</th><th>Qty</th></tr></thead><tbody id="alertRows"><tr><td colspan="3">Loading...</td></tr></tbody></table></div></div>
+    </section>
+  </main></div>
+  <script src="js/auth.js"></script>
+  <script>
+    const money=n=>`Rs ${Number(n||0).toFixed(2)}`, wt=n=>`${Number(n||0).toFixed(3)} g`;
+    function api(p){return fetch(p,{credentials:"include",cache:"no-store"}).then(r=>r.json().then(d=>{if(!r.ok||d.success===false)throw new Error(d.message||"Request failed");return d;}));}
+    function toast(m,t="info"){window.showToast?showToast(m,t):alert(m)}
+    async function loadOverview(silent=false){try{const d=await api("/branch-analytics/overview");totalBranches.textContent=d.total_branches||0;totalStockQty.textContent=d.total_stock_qty||0;totalStockWeight.textContent=wt(d.total_stock_weight);totalSales.textContent=money(d.total_branch_sales);totalTransit.textContent=d.total_in_transit_qty||0;totalTransitWeight.textContent=wt(d.total_in_transit_weight);totalShortage.textContent=d.total_shortage_qty||0;totalValue.textContent=money(d.total_stock_value);const rows=d.branch_summaries||[];branchRows.innerHTML=rows.length?rows.map(r=>`<tr class="${r.shortage_qty?'danger-row':r.in_transit_qty?'alert-row':''}"><td><strong>${r.branch_name}</strong><br>${r.branch_code}</td><td>${r.stock_qty}</td><td>${wt(r.stock_weight)}</td><td>${money(r.sales_amount)}</td><td>${r.sold_qty}</td><td>${r.in_transit_qty}</td><td>${r.shortage_qty}</td></tr>`).join(""):`<tr><td colspan="7">No branch data</td></tr>`;const alerts=[];rows.forEach(r=>{if(r.in_transit_qty)alerts.push([r.branch_name,"In-transit stock",r.in_transit_qty]);if(r.shortage_qty)alerts.push([r.branch_name,"Shortage / mismatch",r.shortage_qty]);});alertRows.innerHTML=alerts.length?alerts.map(a=>`<tr><td>${a[0]}</td><td>${a[1]}</td><td>${a[2]}</td></tr>`).join(""):`<tr><td colspan="3">No alerts</td></tr>`;if(silent)toast("Branch analytics refreshed","success")}catch(e){toast(e.message,"error")}}
+    function toggleSidebar(){sidebar?.classList.toggle("collapsed")}function logoutUser(){if(window.clearAuthSession)clearAuthSession();location.href="login.html"}addEventListener("DOMContentLoaded",loadOverview);
+  </script>
+  <script src="js/toast.js"></script><script src="js/help-guide.js"></script>
+</body>
+</html>

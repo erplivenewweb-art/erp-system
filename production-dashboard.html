@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Production Dashboard</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
+  <style>
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .mode-hero {
+      margin-bottom: 24px;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 18px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .mode-hero strong {
+      display: block;
+      color: #2f2a21;
+      font-size: 20px;
+    }
+    .mode-hero span {
+      color: #6f604c;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .mode-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 12px;
+      background: #2f2a21;
+      color: #fff;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .metric-card,
+    .panel {
+      position: relative;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow:
+        0 2px 8px rgba(15, 23, 42, 0.05),
+        0 10px 24px rgba(15, 23, 42, 0.04);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+    .metric-card::after,
+    .panel::after {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 3px;
+      background: linear-gradient(90deg, #c99d51 0%, #f1d99a 52%, #b88932 100%);
+      opacity: 0.88;
+      pointer-events: none;
+    }
+    .metric-card {
+      min-height: 130px;
+    }
+    .metric-card:hover,
+    .panel:hover {
+      transform: translateY(-1px);
+      border-color: rgba(201, 157, 81, 0.28);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    }
+    .metric-topline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 0;
+    }
+    .metric-icon,
+    .section-heading-icon {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #fffaf0 0%, #f8f4ec 58%, #f2e6cc 100%);
+      border: 1px solid rgba(201, 157, 81, 0.18);
+      color: #7c5a1d;
+      font-size: 25px;
+      line-height: 1;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.75),
+        0 8px 18px rgba(124, 90, 29, 0.08);
+      flex-shrink: 0;
+    }
+    .metric-icon::before,
+    .section-heading-icon::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: 14px;
+      background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 58%);
+      pointer-events: none;
+    }
+    .section-heading-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      font-size: 22px;
+    }
+    .section-heading-icon::before {
+      border-radius: 12px;
+    }
+    .metric-title {
+      min-width: 0;
+      flex: 1;
+    }
+    .metric-card h4 {
+      margin: 0;
+      color: #4b5563;
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .metric-card strong {
+      display: block;
+      margin-top: 6px;
+      color: #111827;
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+    .panel {
+      margin-bottom: 24px;
+    }
+    .panel h3 {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 6px;
+      color: #2f2a21;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .subtext {
+      margin: 0 0 12px;
+      color: #64748b;
+      font-size: 13px;
+    }
+    .chart-wrap {
+      height: 280px;
+      position: relative;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .dashboard-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .dashboard-table th,
+    .dashboard-table td {
+      border-bottom: 1px solid #f1f5f9;
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 14px;
+    }
+    .dashboard-table th {
+      background: #f8fafc;
+      color: #475569;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .status-line {
+      margin-bottom: 14px;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    @media (max-width: 900px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand">
+          <a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings" aria-label="Open settings">
+            <i class="fas fa-gear"></i>
+          </a>
+          <h2>ERP PANEL</h2>
+          <p>Production Mode</p>
+        </div>
+        <ul class="menu"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left">
+          <button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+          <div class="title">
+            <h1 id="pageTitle">Production Dashboard</h1>
+            <p>Manufacturing, process, material, and loss metrics</p>
+          </div>
+        </div>
+        <div class="top-right">
+          <input type="date" id="dashboardDate" onchange="loadProductionDashboard(true)" />
+          <button type="button" onclick="loadProductionDashboard(true)">Refresh</button>
+          <button type="button" onclick="logoutUser()">Logout</button>
+        </div>
+      </div>
+
+      <section class="page active">
+        <div class="mode-hero">
+          <div>
+            <strong>Production / Manufacturer</strong>
+            <span>Lots, process work, karigar performance, material recovery, and sticker readiness</span>
+          </div>
+          <div class="mode-chip"><i class="fas fa-industry"></i> Factory Floor</div>
+        </div>
+
+        <div class="status-line" id="dashboardStatus">Loading production dashboard...</div>
+
+        <div class="dashboard-grid">
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">📂</span><div class="metric-title"><h4>Open Lots</h4></div></div><strong id="openLots">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">✅</span><div class="metric-title"><h4>Completed Lots</h4></div></div><strong id="completedLots">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⏳</span><div class="metric-title"><h4>Pending Process Lots</h4></div></div><strong id="pendingProcessLots">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🏷️</span><div class="metric-title"><h4>Ready for Sticker</h4></div></div><strong id="readyForSticker">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">♻️</span><div class="metric-title"><h4>Total Recovery</h4></div></div><strong id="totalRecovery">0.000 g</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⚖️</span><div class="metric-title"><h4>Pending KDM/PIN</h4></div></div><strong id="pendingKdm">0.000 g</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🏭</span><div class="metric-title"><h4>Today Production Weight</h4></div></div><strong id="productionWeight">0.000 g</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">📦</span><div class="metric-title"><h4>Today Production Qty</h4></div></div><strong id="productionQty">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">📉</span><div class="metric-title"><h4>Today Process Loss Weight</h4></div></div><strong id="processLossWeight">0.000 g</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">➖</span><div class="metric-title"><h4>Today Process Loss Qty</h4></div></div><strong id="processLossQty">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🏆</span><div class="metric-title"><h4>Best Karigar</h4></div></div><strong id="bestKarigar">-</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⚠️</span><div class="metric-title"><h4>Worst Karigar</h4></div></div><strong id="worstKarigar">-</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🚨</span><div class="metric-title"><h4>High Loss Alerts</h4></div></div><strong id="highLossCount">0</strong></div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="section-heading-icon">📈</span> Process Loss Trend</h3>
+          <p class="subtext">Selected date process loss weight</p>
+          <div class="chart-wrap"><canvas id="processLossChart"></canvas></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h3><span class="section-heading-icon">🏷️</span> Ready for Sticker</h3>
+            <p class="subtext">Completed lots ready for sticker work</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Lot No</th><th>Final Weight</th><th>Completed Date</th><th>Status</th></tr></thead>
+              <tbody id="readyRows"><tr><td colspan="4">No detailed lot data found</td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3><span class="section-heading-icon">👤</span> Karigar Performance</h3>
+            <p class="subtext">Top karigars by process loss</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Karigar</th><th>Steps</th><th>Loss Weight</th><th>Loss %</th></tr></thead>
+              <tbody id="karigarRows"><tr><td colspan="4">No karigar loss data found</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="section-heading-icon">🚨</span> High Loss Alerts</h3>
+          <p class="subtext">Completed process steps where loss is above 5%</p>
+          <table class="dashboard-table">
+            <thead><tr><th>Lot</th><th>Process</th><th>Karigar</th><th>Input</th><th>Output</th><th>Loss</th><th>Loss %</th></tr></thead>
+            <tbody id="lossRows"><tr><td colspan="7">No high loss alert found</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    const API_BASE = window.ERP_API_BASE;
+    let processLossChart = null;
+
+    function saveSidebarState(isCollapsed) {
+      localStorage.setItem("erpSidebarCollapsed", isCollapsed ? "true" : "false");
+    }
+
+    function applySidebarState() {
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      sidebar.classList.toggle("collapsed", localStorage.getItem("erpSidebarCollapsed") === "true");
+    }
+
+    function toggleSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      sidebar.classList.toggle("collapsed");
+      saveSidebarState(sidebar.classList.contains("collapsed"));
+    }
+
+    function getTodayDateValue() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    function safeText(value) {
+      return String(value ?? "").trim();
+    }
+
+    function formatWeight(value) {
+      return `${Number(value || 0).toFixed(3)} g`;
+    }
+
+    function formatQty(value) {
+      return Number(value || 0).toFixed(3).replace(/\.000$/, "");
+    }
+
+    function formatPercent(value) {
+      return `${Number(value || 0).toFixed(2)}%`;
+    }
+
+    function formatDate(value) {
+      const clean = safeText(value);
+      return clean.includes("T") ? clean.slice(0, 10) : clean || "-";
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function getDashboardParams() {
+      const params = new URLSearchParams();
+      const date = document.getElementById("dashboardDate")?.value || getTodayDateValue();
+      const userId = typeof getCurrentUserId === "function" ? getCurrentUserId() : null;
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : null;
+      params.set("date", date);
+      if (userId !== null) params.set("actingUserId", String(userId));
+      if (companyId !== null) params.set("companyId", String(companyId));
+      return params;
+    }
+
+    function getReadyRows(data) {
+      if (Array.isArray(data.readyForStickerLotRows)) return data.readyForStickerLotRows;
+      if (Array.isArray(data.readyForStickerLotsData)) return data.readyForStickerLotsData;
+      if (Array.isArray(data.readyForStickerLotsList)) return data.readyForStickerLotsList;
+      return [];
+    }
+
+    function renderProcessLossChart(data) {
+      const canvas = document.getElementById("processLossChart");
+      if (!canvas || typeof Chart === "undefined") return;
+      if (processLossChart) processLossChart.destroy();
+      processLossChart = new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: [safeText(data.date || document.getElementById("dashboardDate").value)],
+          datasets: [{
+            label: "Process Loss (g)",
+            data: [Number(data.todayProcessLossWeight || 0)],
+            borderColor: "#b45309",
+            backgroundColor: "rgba(245, 158, 11, 0.16)",
+            fill: true,
+            tension: 0.35
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+      });
+    }
+
+    function renderTables(data) {
+      const readyRows = getReadyRows(data);
+      document.getElementById("readyRows").innerHTML = readyRows.length
+        ? readyRows.slice(0, 8).map((row) => `
+          <tr>
+            <td>${safeText(row.lotNo ?? row.lot_no ?? row.lot ?? "-")}</td>
+            <td>${formatWeight(row.finalWeight ?? row.final_weight ?? row.weight ?? 0)}</td>
+            <td>${formatDate(row.completedDate ?? row.completedAt ?? row.completed_at ?? row.updated_at)}</td>
+            <td>READY</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="4">No detailed lot data found</td></tr>`;
+
+      const karigars = Array.isArray(data.karigarLossSummary) ? data.karigarLossSummary : [];
+      document.getElementById("karigarRows").innerHTML = karigars.length
+        ? karigars.slice(0, 8).map((row) => `
+          <tr>
+            <td>${safeText(row.name ?? row.karigarName ?? row.karigar_name ?? "-")}</td>
+            <td>${Number(row.steps ?? row.stepCount ?? row.step_count ?? 0)}</td>
+            <td>${formatWeight(row.lossWeight ?? row.totalLossWeight ?? row.total_loss_weight ?? 0)}</td>
+            <td>${formatPercent(row.lossPercent ?? row.loss_percent ?? 0)}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="4">No karigar loss data found</td></tr>`;
+
+      const alerts = Array.isArray(data.highLossAlerts) ? data.highLossAlerts : [];
+      document.getElementById("lossRows").innerHTML = alerts.length
+        ? alerts.slice(0, 12).map((row) => `
+          <tr>
+            <td>${safeText(row.lotNo || "-")}</td>
+            <td>${safeText(row.processName || "-")}</td>
+            <td>${safeText(row.karigarName || "-")}</td>
+            <td>${formatWeight(row.inputWeight)}</td>
+            <td>${formatWeight(row.outputWeight)}</td>
+            <td>${formatWeight(row.lossWeight)}</td>
+            <td>${formatPercent(row.lossPercent)}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="7">No high loss alert found</td></tr>`;
+    }
+
+    function renderProductionDashboard(data) {
+      const lots = data.lotStatusCounts || {};
+      setText("openLots", Number(lots.open ?? data.openLots ?? 0));
+      setText("completedLots", Number(lots.completed ?? data.completedLots ?? 0));
+      setText("pendingProcessLots", Number(data.pendingProcessLots || 0));
+      setText("readyForSticker", Number(data.readyForStickerLots || 0));
+      setText("totalRecovery", formatWeight(data.totalRecoveryWeight));
+      setText("pendingKdm", formatWeight(data.pendingKdmWeight));
+      setText("productionWeight", formatWeight(data.todayProductionWeight));
+      setText("productionQty", formatQty(data.todayProductionQty));
+      setText("processLossWeight", formatWeight(data.todayProcessLossWeight));
+      setText("processLossQty", formatQty(data.todayProcessLossQty));
+      setText("bestKarigar", safeText(data.bestKarigar?.name || "-") || "-");
+      setText("worstKarigar", safeText(data.worstKarigar?.name || "-") || "-");
+      setText("highLossCount", Array.isArray(data.highLossAlerts) ? data.highLossAlerts.length : 0);
+      renderTables(data);
+      renderProcessLossChart(data);
+    }
+
+    async function loadProductionDashboard(showToastOnSuccess = false) {
+      const status = document.getElementById("dashboardStatus");
+      try {
+        status.textContent = "Loading production dashboard...";
+        const res = await fetch(`${API_BASE}/api/smart-dashboard?${getDashboardParams().toString()}`, { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || data?.success === false) throw new Error(data?.message || "Production dashboard load failed");
+        renderProductionDashboard(data);
+        status.textContent = "";
+        if (showToastOnSuccess) showToast("Production dashboard refreshed", "success");
+      } catch (error) {
+        status.textContent = error.message || "Production dashboard load failed";
+        showToast(status.textContent, "error");
+      }
+    }
+
+    function logoutUser() {
+      if (typeof clearAuthSession === "function") clearAuthSession();
+      window.location.href = "login.html";
+    }
+
+    window.addEventListener("load", async function () {
+      requireLogin();
+      requirePageAccess("production-dashboard");
+      filterSidebarMenuByRole();
+      applySidebarState();
+      document.getElementById("dashboardDate").value = getTodayDateValue();
+      await loadProductionDashboard(false);
+    });
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>

@@ -667,6 +667,13 @@
                   <option value="DAMAGED_RETURN">DAMAGED_RETURN</option>
                 </select>
               </div>
+
+              <div class="input-box" id="stockBranchFilterBox">
+                <label for="stockBranchFilter">Branch Filter</label>
+                <select id="stockBranchFilter" onchange="stockCurrentPage = 1; loadStockData();">
+                  <option value="">All allowed branches</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -816,6 +823,8 @@
     let filteredInternalStockItems = [];
     let recoveryStockItems = [];
     let filteredRecoveryStockItems = [];
+    let stockBranches = [];
+    let stockBranchContext = null;
     let currentLotItems = [];
     let isViewingLotItems = false;
     let stockCurrentPage = 1;
@@ -1050,7 +1059,42 @@
         params.set("companyId", String(companyId));
       }
 
+      const branchId = document.getElementById("stockBranchFilter")?.value || "";
+      if (branchId) {
+        params.set("branchId", branchId);
+      }
+
       return params;
+    }
+
+    async function loadStockBranchFilter() {
+      const select = document.getElementById("stockBranchFilter");
+      if (!select) return;
+
+      try {
+        const [contextRes, branchesRes] = await Promise.all([
+          fetch(`${API_BASE}/branch-context`, { cache: "no-store" }),
+          fetch(`${API_BASE}/branches`, { cache: "no-store" })
+        ]);
+        const contextData = await contextRes.json();
+        const branchesData = await branchesRes.json();
+        stockBranchContext = contextData.context || null;
+        stockBranches = Array.isArray(branchesData.branches) ? branchesData.branches : [];
+
+        const lockedBranchId = stockBranchContext?.userBranchId || null;
+        if (stockBranchContext?.isBranchLocked && lockedBranchId) {
+          const branch = stockBranches.find((item) => Number(item.id) === Number(lockedBranchId));
+          select.innerHTML = `<option value="${lockedBranchId}">${branch?.branch_name || "Assigned Branch"}</option>`;
+          select.value = String(lockedBranchId);
+          select.disabled = true;
+          return;
+        }
+
+        select.disabled = false;
+        select.innerHTML = `<option value="">All allowed branches</option>${stockBranches.map((branch) => `<option value="${branch.id}">${escapeHtml(branch.branch_name || "")} (${escapeHtml(branch.branch_code || "")})</option>`).join("")}`;
+      } catch (error) {
+        console.log("Branch filter load error:", error);
+      }
     }
 
     async function loadStockData() {
@@ -1642,6 +1686,8 @@
           <th>Weight</th>
           <th>Lot Number</th>
           <th>Destination</th>
+          <th>Branch</th>
+          <th>Stock State</th>
           <th>Status</th>
           <th>Action</th>
         </tr>
@@ -1650,7 +1696,7 @@
       tbody.innerHTML = "";
 
       if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;">No item data found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;">No item data found</td></tr>`;
         return;
       }
 
@@ -1680,6 +1726,8 @@
             <td>${getItemWeight(item).toFixed(3)}</td>
             <td>${escapeHtml(getItemLot(item))}</td>
             <td>${getDestinationBadge(getItemDestinationType(item))}</td>
+            <td><span class="destination-badge direct-stock">${escapeHtml(item.branch_name || "Main Branch")}</span></td>
+            <td>${getStatusBadge(String(item.effective_stock_state || item.stock_state || status || "").toUpperCase())}</td>
             <td>${getStatusBadge(status)}</td>
             <td>${actionHtml}</td>
           </tr>
@@ -1740,6 +1788,7 @@
       renderProfileBox();
       renderCompanyInfo();
       renderPageTitle();
+      await loadStockBranchFilter();
       await loadStockData();
     }
 

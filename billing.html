@@ -512,6 +512,22 @@
           </div>
 
           <div class="sub-card" style="margin-top:16px;">
+            <h3>Branch Billing</h3>
+            <div class="form-grid">
+              <div class="input-box">
+                <label>Billing Branch</label>
+                <select id="billingBranchSelect" onchange="handleBillingBranchChange()">
+                  <option value="">All allowed branches</option>
+                </select>
+              </div>
+              <div class="input-box">
+                <label>Current Branch</label>
+                <input type="text" id="billingBranchLabel" value="Loading branch..." readonly />
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-card" style="margin-top:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
               <h3>Billing Summary</h3>
               <button type="button" id="staffSaleToggleBtn" class="secondary-btn" onclick="toggleStaffSaleMode()">Staff Sale</button>
@@ -848,6 +864,8 @@
     let qrInstance = null;
     let autoProcessing = false;
     let currentInvoiceDraftId = null;
+    let billingBranchContext = null;
+    let billingBranches = [];
     const salesModeMargins = {
       OWNER: 0,
       STAFF: 0
@@ -897,6 +915,58 @@
     function getCurrentCompanyName() {
       const user = getLoggedInUser();
       return String(user?.company_name || user?.companyName || "").trim();
+    }
+
+    function getSelectedBillingBranchId() {
+      const raw = document.getElementById("billingBranchSelect")?.value || "";
+      return raw ? Number(raw) : null;
+    }
+
+    async function loadBillingBranchFilter() {
+      const select = document.getElementById("billingBranchSelect");
+      const label = document.getElementById("billingBranchLabel");
+      if (!select) return;
+
+      try {
+        const [contextRes, branchesRes] = await Promise.all([
+          fetch(`${API_BASE}/branch-context`, { cache: "no-store" }),
+          fetch(`${API_BASE}/branches`, { cache: "no-store" })
+        ]);
+        const contextData = await contextRes.json();
+        const branchesData = await branchesRes.json();
+        billingBranchContext = contextData.context || null;
+        billingBranches = Array.isArray(branchesData.branches) ? branchesData.branches : [];
+        const lockedBranchId = billingBranchContext?.userBranchId || null;
+
+        if (billingBranchContext?.isBranchLocked && lockedBranchId) {
+          const branch = billingBranches.find((item) => Number(item.id) === Number(lockedBranchId));
+          select.innerHTML = `<option value="${lockedBranchId}">${branch?.branch_name || "Assigned Branch"}</option>`;
+          select.value = String(lockedBranchId);
+          select.disabled = true;
+        } else {
+          select.disabled = false;
+          select.innerHTML = `<option value="">All allowed branches</option>${billingBranches.map((branch) => `<option value="${branch.id}">${branch.branch_name || ""} (${branch.branch_code || ""})</option>`).join("")}`;
+        }
+
+        handleBillingBranchChange();
+      } catch (error) {
+        console.log("Billing branch load error:", error);
+        if (label) label.value = "Branch information unavailable";
+      }
+    }
+
+    function handleBillingBranchChange() {
+      const label = document.getElementById("billingBranchLabel");
+      const branchId = getSelectedBillingBranchId();
+      if (!label) return;
+      const branch = billingBranches.find((item) => Number(item.id) === Number(branchId));
+      if (branch) {
+        label.value = `${branch.branch_name || "Branch"} (${branch.branch_code || ""})`;
+      } else if (billingBranchContext?.isBranchLocked) {
+        label.value = "Assigned branch";
+      } else {
+        label.value = "All allowed branches";
+      }
     }
 
     function isSuperAdmin() {
@@ -2172,6 +2242,8 @@
             metalPayable: record.metalPayable,
             metalNote: record.metalNote,
             invoiceDraftId: record.invoiceDraftId,
+            branchId: getSelectedBillingBranchId(),
+            branch_id: getSelectedBillingBranchId(),
             items: payloadItems,
             company_id: record.company_id,
             companyId: record.company_id,
@@ -2862,6 +2934,7 @@
         salesModeEl.dataset.previousMode = salesModeEl.value || "OWNER";
       }
       setBillingSummaryAdvancedVisible(false);
+      await loadBillingBranchFilter();
 
       const savedBillingItems = JSON.parse(localStorage.getItem(companyScopedKey("billingItems")) || "[]");
       billingItems = Array.isArray(savedBillingItems) ? aggregateBillingItems(savedBillingItems) : [];

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Transfer History</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .panel { background:#fff; border:1px solid #eadfce; border-radius:16px; padding:18px; box-shadow:0 10px 24px rgba(15,23,42,.06); margin-bottom:18px; }
+    .panel h3 { margin:0 0 12px; color:#2f2a21; display:flex; gap:10px; align-items:center; }
+    .filters { display:grid; grid-template-columns: repeat(6, minmax(150px, 1fr)); gap:12px; align-items:end; }
+    .field label { display:block; font-size:11px; font-weight:900; color:#64748b; text-transform:uppercase; margin-bottom:6px; }
+    .field input, .field select { width:100%; border:1px solid #e3d7c7; border-radius:12px; padding:11px 12px; background:#fffdf8; }
+    .btn { border:0; border-radius:12px; padding:11px 14px; cursor:pointer; font-weight:900; display:inline-flex; align-items:center; gap:8px; }
+    .btn.primary { background:linear-gradient(180deg,#d9ae67,#bb8134); color:#fff; }
+    .btn.dark { background:#172033; color:#fff; }
+    .data-table { width:100%; border-collapse:collapse; }
+    .data-table th, .data-table td { padding:12px; border-bottom:1px solid #f1f5f9; text-align:left; font-size:14px; }
+    .data-table th { background:#f8fafc; color:#475569; font-size:11px; text-transform:uppercase; }
+    .table-wrap { overflow-x:auto; border:1px solid #edf2f7; border-radius:14px; }
+    .status-badge { display:inline-flex; border-radius:999px; padding:7px 10px; font-size:12px; font-weight:900; background:#eef2ff; color:#3730a3; }
+    .status-badge.created { background:#fff7e7; color:#92400e; }
+    .status-badge.in_transit, .status-badge.partially_received { background:#eff6ff; color:#1d4ed8; }
+    .status-badge.received { background:#ecfbf3; color:#166534; }
+    .status-badge.shortage, .status-badge.cancelled { background:#fff1f1; color:#b42318; }
+    .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.48); display:none; align-items:center; justify-content:center; z-index:1000; padding:18px; }
+    .modal-backdrop.open { display:flex; }
+    .modal { width:min(980px, 100%); max-height:90vh; overflow:auto; background:#fff; border-radius:16px; border:1px solid #eadfce; box-shadow:0 24px 60px rgba(15,23,42,.18); padding:18px; }
+    .modal-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+    .muted { color:#64748b; font-size:13px; }
+    @media (max-width:1100px) { .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width:680px) { .filters { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>Store Mode</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Transfer History</h1><p>Search challans, statuses, branches, and transfer details</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadHistory(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+      <section class="page active">
+        <div class="panel">
+          <h3><i class="fas fa-filter"></i> Filters</h3>
+          <div class="filters">
+            <div class="field"><label>Status</label><select id="statusFilter"><option value="">All</option><option>CREATED</option><option>IN_TRANSIT</option><option>PARTIALLY_RECEIVED</option><option>RECEIVED</option><option>SHORTAGE</option><option>CANCELLED</option></select></div>
+            <div class="field"><label>From Date</label><input type="date" id="fromDate"></div>
+            <div class="field"><label>To Date</label><input type="date" id="toDate"></div>
+            <div class="field"><label>Branch</label><select id="branchFilter"><option value="">All branches</option></select></div>
+            <div class="field"><label>Search</label><input id="searchFilter" placeholder="Transfer no or challan"></div>
+            <button class="btn primary" type="button" onclick="loadHistory(true)"><i class="fas fa-magnifying-glass"></i> Apply</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h3><i class="fas fa-route"></i> Transfers</h3>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Transfer</th><th>Challan</th><th>Source</th><th>Destination</th><th>Status</th><th>Items</th><th>Date</th><th>Action</th></tr></thead><tbody id="historyRows"><tr><td colspan="8">Loading transfer history...</td></tr></tbody></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="detailModal" class="modal-backdrop" onclick="closeModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3 id="modalTitle">Transfer Detail</h3><button class="btn dark" type="button" onclick="closeModal()">Close</button></div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+  <script src="js/auth.js"></script>
+  <script>
+    let branches = [];
+    let transfers = [];
+
+    function notify(message, type = "info") { if (window.showToast) showToast(message, type); else alert(message); }
+    function api(path, options = {}) { return fetch(path, { credentials:"include", ...options, headers:{ "Content-Type":"application/json", ...(options.headers || {}) } }); }
+    async function readJson(response) { const data = await response.json().catch(() => ({})); if (!response.ok || data.success === false) throw new Error(data.message || "Request failed"); return data; }
+    function statusBadge(status) { const clean = String(status || "").toUpperCase(); return `<span class="status-badge ${clean.toLowerCase()}">${clean || "-"}</span>`; }
+    function formatDate(value) { return value ? new Date(value).toLocaleString() : "-"; }
+    function weight(value) { return `${Number(value || 0).toFixed(3)} g`; }
+
+    async function loadBranches() {
+      const data = await readJson(await api("/branches"));
+      branches = data.branches || [];
+      document.getElementById("branchFilter").innerHTML = `<option value="">All branches</option>${branches.map((branch) => `<option value="${branch.id}">${branch.branch_name} (${branch.branch_code})</option>`).join("")}`;
+    }
+
+    async function loadHistory(silent = false) {
+      try {
+        if (!branches.length) await loadBranches();
+        const params = new URLSearchParams({ limit: "500" });
+        const status = document.getElementById("statusFilter").value;
+        const branchId = document.getElementById("branchFilter").value;
+        if (status) params.set("status", status);
+        if (branchId) params.set("toBranchId", branchId);
+        const data = await readJson(await api(`/branch-transfers?${params.toString()}`));
+        transfers = filterClientRows(data.transfers || []);
+        renderRows();
+        if (silent) notify("Transfer history refreshed", "success");
+      } catch (error) {
+        notify(error.message || "Transfer history load failed", "error");
+      }
+    }
+
+    function filterClientRows(rows) {
+      const search = document.getElementById("searchFilter").value.trim().toUpperCase();
+      const from = document.getElementById("fromDate").value;
+      const to = document.getElementById("toDate").value;
+      return rows.filter((row) => {
+        const haystack = `${row.transfer_no || ""} ${row.challan_no || ""}`.toUpperCase();
+        const created = String(row.created_at || "").slice(0, 10);
+        if (search && !haystack.includes(search)) return false;
+        if (from && created < from) return false;
+        if (to && created > to) return false;
+        return true;
+      });
+    }
+
+    function renderRows() {
+      document.getElementById("historyRows").innerHTML = transfers.length ? transfers.map((transfer) => `
+        <tr>
+          <td><strong>${transfer.transfer_no || "-"}</strong></td>
+          <td>${transfer.challan_no || "-"}</td>
+          <td>${transfer.from_branch_name || "-"}</td>
+          <td>${transfer.to_branch_name || "-"}</td>
+          <td>${statusBadge(transfer.status)}</td>
+          <td>${transfer.active_items || transfer.total_items || 0}</td>
+          <td>${formatDate(transfer.created_at)}</td>
+          <td><button class="btn dark" type="button" onclick="viewDetail(${transfer.id})"><i class="fas fa-eye"></i> View</button></td>
+        </tr>
+      `).join("") : `<tr><td colspan="8">No transfer history found</td></tr>`;
+    }
+
+    async function viewDetail(id) {
+      const data = await readJson(await api(`/branch-transfers/${id}`));
+      document.getElementById("modalTitle").textContent = data.transfer.transfer_no || "Transfer Detail";
+      document.getElementById("modalBody").innerHTML = `
+        <div class="panel" style="box-shadow:none;">
+          <div class="muted">${data.transfer.from_branch_name || "-"} to ${data.transfer.to_branch_name || "-"} | ${data.transfer.challan_no || "No challan"}</div>
+          <div style="margin-top:10px;">${statusBadge(data.transfer.status)}</div>
+        </div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Barcode</th><th>Product</th><th>Lot</th><th>Weight</th><th>Status</th></tr></thead><tbody>
+          ${(data.items || []).map((item) => `<tr><td><strong>${item.barcode || ""}</strong></td><td>${item.product_name || "-"}</td><td>${item.lot_number || "-"}</td><td>${weight(item.weight)}</td><td>${statusBadge(item.item_status)}</td></tr>`).join("") || `<tr><td colspan="5">No items found</td></tr>`}
+        </tbody></table></div>
+      `;
+      document.getElementById("detailModal").classList.add("open");
+    }
+
+    function closeModal(event) { if (event && event.target.id !== "detailModal") return; document.getElementById("detailModal").classList.remove("open"); }
+    function toggleSidebar() { document.getElementById("sidebar")?.classList.toggle("collapsed"); }
+    function logoutUser() { if (typeof clearAuthSession === "function") clearAuthSession(); window.location.href = "login.html"; }
+    document.addEventListener("DOMContentLoaded", loadHistory);
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>

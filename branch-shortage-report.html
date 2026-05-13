@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Shortage Report</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .panel { background:#fff; border:1px solid #eadfce; border-radius:16px; padding:18px; box-shadow:0 10px 24px rgba(15,23,42,.06); margin-bottom:18px; }
+    .panel h3 { margin:0 0 12px; color:#2f2a21; display:flex; gap:10px; align-items:center; }
+    .filters { display:grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap:12px; align-items:end; }
+    .field label { display:block; font-size:11px; font-weight:900; color:#64748b; text-transform:uppercase; margin-bottom:6px; }
+    .field input, .field select { width:100%; border:1px solid #e3d7c7; border-radius:12px; padding:11px 12px; background:#fffdf8; }
+    .btn { border:0; border-radius:12px; padding:11px 14px; cursor:pointer; font-weight:900; display:inline-flex; align-items:center; gap:8px; }
+    .btn.primary { background:linear-gradient(180deg,#d9ae67,#bb8134); color:#fff; }
+    .btn.dark { background:#172033; color:#fff; }
+    .summary-grid { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:12px; }
+    .metric { background:#fffaf2; border:1px solid #eadfce; border-radius:12px; padding:14px; }
+    .metric span { display:block; color:#64748b; font-size:11px; font-weight:900; text-transform:uppercase; }
+    .metric strong { display:block; margin-top:4px; font-size:24px; }
+    .data-table { width:100%; border-collapse:collapse; }
+    .data-table th, .data-table td { padding:12px; border-bottom:1px solid #f1f5f9; text-align:left; font-size:14px; vertical-align:top; }
+    .data-table th { background:#f8fafc; color:#475569; font-size:11px; text-transform:uppercase; }
+    .table-wrap { overflow-x:auto; border:1px solid #edf2f7; border-radius:14px; }
+    .status-badge { display:inline-flex; border-radius:999px; padding:7px 10px; font-size:12px; font-weight:900; background:#fff1f1; color:#b42318; }
+    .barcode-list { display:flex; flex-wrap:wrap; gap:6px; max-width:520px; }
+    .barcode-pill { border:1px solid #fecaca; background:#fff1f1; color:#991b1b; border-radius:999px; padding:5px 8px; font-size:12px; font-weight:800; }
+    .muted { color:#64748b; font-size:13px; }
+    @media (max-width: 1100px) { .filters, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 680px) { .filters, .summary-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>Store Mode</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Shortage Report</h1><p>Track transfer shortages and missing barcode lists</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadShortages(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+      <section class="page active">
+        <div class="panel">
+          <h3><i class="fas fa-filter"></i> Filters</h3>
+          <div class="filters">
+            <div class="field"><label>From Date</label><input type="date" id="fromDate"></div>
+            <div class="field"><label>To Date</label><input type="date" id="toDate"></div>
+            <div class="field"><label>Branch</label><select id="branchFilter"><option value="">All branches</option></select></div>
+            <div class="field"><label>Search</label><input id="searchFilter" placeholder="Transfer no, challan, barcode"></div>
+            <button class="btn primary" type="button" onclick="loadShortages(true)"><i class="fas fa-magnifying-glass"></i> Apply</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="summary-grid">
+            <div class="metric"><span>Mismatch Transfers</span><strong id="transferCount">0</strong></div>
+            <div class="metric"><span>Missing Items</span><strong id="missingCount">0</strong></div>
+            <div class="metric"><span>Source Branches</span><strong id="sourceCount">0</strong></div>
+            <div class="metric"><span>Destination Branches</span><strong id="destinationCount">0</strong></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3><i class="fas fa-triangle-exclamation"></i> Shortage Transfers</h3>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Transfer</th><th>Source</th><th>Destination</th><th>Status</th><th>Missing</th><th>Barcode List</th><th>Date</th></tr></thead><tbody id="shortageRows"><tr><td colspan="7">Loading shortage report...</td></tr></tbody></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="js/auth.js"></script>
+  <script>
+    let branches = [];
+    let shortageRows = [];
+
+    function notify(message, type = "info") { if (window.showToast) showToast(message, type); else alert(message); }
+    function api(path, options = {}) { return fetch(path, { credentials:"include", ...options, headers:{ "Content-Type":"application/json", ...(options.headers || {}) } }); }
+    async function readJson(response) { const data = await response.json().catch(() => ({})); if (!response.ok || data.success === false) throw new Error(data.message || "Request failed"); return data; }
+    function formatDate(value) { return value ? new Date(value).toLocaleString() : "-"; }
+    function statusBadge(status) { return `<span class="status-badge">${String(status || "-").toUpperCase()}</span>`; }
+
+    async function loadBranches() {
+      const data = await readJson(await api("/branches"));
+      branches = data.branches || [];
+      document.getElementById("branchFilter").innerHTML = `<option value="">All branches</option>${branches.map((branch) => `<option value="${branch.id}">${branch.branch_name} (${branch.branch_code})</option>`).join("")}`;
+    }
+
+    async function loadShortages(silent = false) {
+      try {
+        if (!branches.length) await loadBranches();
+        const data = await readJson(await api("/branch-transfers?status=SHORTAGE&limit=500"));
+        const rows = [];
+        for (const transfer of data.transfers || []) {
+          const detail = await readJson(await api(`/branch-transfers/${transfer.id}`));
+          const shortageItems = (detail.items || []).filter((item) => String(item.item_status || "").toUpperCase() === "SHORTAGE");
+          rows.push({ transfer: detail.transfer, shortageItems });
+        }
+        shortageRows = filterRows(rows);
+        renderShortages();
+        if (silent) notify("Shortage report refreshed", "success");
+      } catch (error) {
+        notify(error.message || "Shortage report load failed", "error");
+      }
+    }
+
+    function filterRows(rows) {
+      const branchId = Number(document.getElementById("branchFilter").value || 0);
+      const search = document.getElementById("searchFilter").value.trim().toUpperCase();
+      const from = document.getElementById("fromDate").value;
+      const to = document.getElementById("toDate").value;
+      return rows.filter(({ transfer, shortageItems }) => {
+        const created = String(transfer.created_at || "").slice(0, 10);
+        const barcodes = shortageItems.map((item) => item.barcode || "").join(" ");
+        const haystack = `${transfer.transfer_no || ""} ${transfer.challan_no || ""} ${barcodes}`.toUpperCase();
+        if (branchId && Number(transfer.from_branch_id) !== branchId && Number(transfer.to_branch_id) !== branchId) return false;
+        if (from && created < from) return false;
+        if (to && created > to) return false;
+        if (search && !haystack.includes(search)) return false;
+        return true;
+      });
+    }
+
+    function renderShortages() {
+      const totalMissing = shortageRows.reduce((sum, row) => sum + row.shortageItems.length, 0);
+      document.getElementById("transferCount").textContent = shortageRows.length;
+      document.getElementById("missingCount").textContent = totalMissing;
+      document.getElementById("sourceCount").textContent = new Set(shortageRows.map((row) => row.transfer.from_branch_id)).size;
+      document.getElementById("destinationCount").textContent = new Set(shortageRows.map((row) => row.transfer.to_branch_id)).size;
+      document.getElementById("shortageRows").innerHTML = shortageRows.length ? shortageRows.map(({ transfer, shortageItems }) => `
+        <tr>
+          <td><strong>${transfer.transfer_no || "-"}</strong><div class="muted">${transfer.challan_no || "No challan"}</div></td>
+          <td>${transfer.from_branch_name || "-"}</td>
+          <td>${transfer.to_branch_name || "-"}</td>
+          <td>${statusBadge(transfer.status)}</td>
+          <td><strong>${shortageItems.length}</strong></td>
+          <td><div class="barcode-list">${shortageItems.map((item) => `<span class="barcode-pill">${item.barcode || "-"}</span>`).join("") || `<span class="muted">No shortage barcode rows</span>`}</div></td>
+          <td>${formatDate(transfer.updated_at || transfer.created_at)}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="7">No shortage transfers found</td></tr>`;
+    }
+
+    function toggleSidebar() { document.getElementById("sidebar")?.classList.toggle("collapsed"); }
+    function logoutUser() { if (typeof clearAuthSession === "function") clearAuthSession(); window.location.href = "login.html"; }
+    document.addEventListener("DOMContentLoaded", loadShortages);
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>

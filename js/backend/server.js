@@ -47,11 +47,47 @@ const PROTECTED_PAGES = new Set([
   "transaction-reports.html",
   "return.html",
   "admin-approval.html",
-  "sales-history.html"
+  "sales-history.html",
+  "branch-transfer.html",
+  "branch-receive.html",
+  "branch-transfer-history.html",
+  "branch-shortage-report.html",
+  "branch-analytics.html",
+  "transfer-ageing-report.html",
+  "shortage-analytics.html",
+  "stock-movement-ledger.html",
+  "branch-reconciliation.html",
+  "branch-audit-dashboard.html",
+  "branch-snapshots.html",
+  "branch-reconciliation-runs.html",
+  "branch-exception-queue.html"
 ]);
 
 const DEFAULT_ALLOWED_APP_ORIGINS = [
   "http://localhost:8080"
+];
+const SUPERADMIN_OPERATIONAL_READ_ONLY_MESSAGE =
+  "SuperAdmin support mode is read-only for ERP operational data.";
+const OPERATIONAL_MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const OPERATIONAL_MUTATION_PATHS = [
+  "/addsticker",
+  "/deletesticker/",
+  "/expenses",
+  "/invoice-drafts/",
+  "/materialstock/",
+  "/process/",
+  "/returnitem/",
+  "/restoresticker/",
+  "/savebilling",
+  "/saveinvoice",
+  "/savereturn",
+  "/sales-history/",
+  "/branches",
+  "/branch-transfers",
+  "/branch-audit",
+  "/transaction/parties",
+  "/transaction/transactions",
+  "/updatesticker/"
 ];
 const ALLOWED_APP_ORIGINS = new Set(
   [
@@ -97,6 +133,29 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUserIfPresent);
 
+function isOperationalMutationPath(pathname = "") {
+  const cleanPath = String(pathname || "").trim().toLowerCase();
+  return OPERATIONAL_MUTATION_PATHS.some((path) => cleanPath === path || cleanPath.startsWith(path));
+}
+
+function enforceSuperAdminOperationalReadOnly(req, res, next) {
+  const method = String(req.method || "").trim().toUpperCase();
+  if (
+    OPERATIONAL_MUTATION_METHODS.has(method) &&
+    isOperationalMutationPath(req.path) &&
+    isSuperAdminUser(req.user)
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: SUPERADMIN_OPERATIONAL_READ_ONLY_MESSAGE
+    });
+  }
+
+  return next();
+}
+
+app.use(enforceSuperAdminOperationalReadOnly);
+
 const MYSQL_ENV_KEYS = [
   "MYSQLHOST",
   "MYSQLUSER",
@@ -112,7 +171,8 @@ const SMTP_ENV_KEYS = [
   "SMTP_USER",
   "SMTP_PASS",
   "SMTP_FROM",
-  "SMTP_ENABLED"
+  "SMTP_ENABLED",
+  "SMTP_DEBUG"
 ];
 
 const SMTP_REQUIRED_ENV_KEYS = [
@@ -223,6 +283,10 @@ function parseEnvBoolean(value, fallback = false) {
 
 function isSmtpEnabled() {
   return parseEnvBoolean(process.env.SMTP_ENABLED, true);
+}
+
+function isSmtpDebugEnabled() {
+  return parseEnvBoolean(process.env.SMTP_DEBUG, false);
 }
 
 function isLocalRuntime() {
@@ -337,6 +401,13 @@ function logDbStartupConfig() {
 
 function logSmtpStartupConfig() {
   const enabled = isSmtpEnabled();
+  if (!isSmtpDebugEnabled()) {
+    if (!enabled) {
+      console.log("[STARTUP] SMTP disabled for local development.");
+    }
+    return;
+  }
+
   console.log("[STARTUP] SMTP SAFE DEBUG:", {
     enabled,
     host: String(process.env.SMTP_HOST || "").trim() || "(missing)",
@@ -756,7 +827,6 @@ async function testSmtpConnection() {
   if (!config.enabled) {
     startupStatus.smtp = "disabled";
     markSmtpUnavailable("SMTP disabled.");
-    console.log("SMTP disabled.");
     return;
   }
 
@@ -1427,16 +1497,24 @@ async function getKdmStockItemById(connection, companyId, stockItemId, options =
   return getAdditiveStockItemById(connection, companyId, stockItemId, "KDM", options);
 }
 
-function getSellableFinishedStockWhereSql(alias = "") {
+function getSellableStockFilterSql(alias = "") {
   const prefix = alias ? `${alias}.` : "";
   return `
     AND ${prefix}barcode IS NOT NULL
     AND TRIM(COALESCE(${prefix}barcode, '')) <> ''
-    AND UPPER(COALESCE(${prefix}status, 'IN_STOCK')) <> 'DELETED'
     AND UPPER(COALESCE(${prefix}source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
     AND UPPER(COALESCE(${prefix}category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
     AND UPPER(COALESCE(${prefix}product_name, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
     AND UPPER(COALESCE(${prefix}product_name, '')) NOT LIKE 'RECOVERY SILVER%'
+    AND UPPER(COALESCE(NULLIF(TRIM(${prefix}stock_state), ''), ${prefix}status, 'IN_STOCK')) NOT IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE')
+  `;
+}
+
+function getSellableFinishedStockWhereSql(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return `
+    ${getSellableStockFilterSql(alias)}
+    AND UPPER(COALESCE(${prefix}status, 'IN_STOCK')) <> 'DELETED'
   `;
 }
 
@@ -2306,6 +2384,591 @@ async function resolveAccessContext(
   };
 }
 
+function normalizeBranchType(value = "", fallback = "STORE") {
+  const clean = String(value || fallback).trim().toUpperCase();
+  if (["MAIN", "STORE", "WAREHOUSE", "OFFICE"].includes(clean)) return clean;
+  return "";
+}
+
+function normalizeBranchStatus(value = "", fallback = "ACTIVE") {
+  const clean = String(value || fallback).trim().toUpperCase();
+  if (["ACTIVE", "INACTIVE"].includes(clean)) return clean;
+  return "";
+}
+
+function normalizeBranchCode(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .slice(0, 50);
+}
+
+function getUserBranchId(user = {}) {
+  const raw = user?.branch_id ?? user?.branchId ?? null;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isBranchManagerRole(role = "") {
+  const normalizedRole = normalizeRoleValue(role);
+  return normalizedRole === "OWNER" || normalizedRole === "ACCOUNTS";
+}
+
+async function resolveBranchAccessContext(req, { requireCompanyScope = false } = {}) {
+  const access = await resolveAccessContext(req, {
+    requireActingUser: true,
+    requireCompanyScope,
+    allowSuperAdminAll: true
+  });
+
+  if (!access.ok) {
+    return access;
+  }
+
+  const role = normalizeRoleValue(access.actingUser?.role || "");
+  const userBranchId = getUserBranchId(access.actingUser);
+  const canViewAllBranches = Boolean(access.isSuperAdmin || isBranchManagerRole(role) || userBranchId === null);
+  const canManageBranches = Boolean(!access.isSuperAdmin && isBranchManagerRole(role));
+  const isBranchLocked = Boolean(!access.isSuperAdmin && !isBranchManagerRole(role) && userBranchId !== null);
+
+  return {
+    ...access,
+    role,
+    userBranchId,
+    branchScope: isBranchLocked ? userBranchId : null,
+    canViewAllBranches,
+    canManageBranches,
+    isBranchLocked
+  };
+}
+
+function sendSuperAdminReadOnlyError(res) {
+  return res.status(403).json({
+    success: false,
+    message: SUPERADMIN_OPERATIONAL_READ_ONLY_MESSAGE
+  });
+}
+
+function validateBranchPayload(body = {}, { partial = false } = {}) {
+  const hasBranchCode = Object.prototype.hasOwnProperty.call(body, "branch_code") ||
+    Object.prototype.hasOwnProperty.call(body, "branchCode");
+  const hasBranchName = Object.prototype.hasOwnProperty.call(body, "branch_name") ||
+    Object.prototype.hasOwnProperty.call(body, "branchName");
+  const hasBranchType = Object.prototype.hasOwnProperty.call(body, "branch_type") ||
+    Object.prototype.hasOwnProperty.call(body, "branchType");
+  const hasStatus = Object.prototype.hasOwnProperty.call(body, "status");
+
+  const branchCode = normalizeBranchCode(body.branch_code ?? body.branchCode ?? "");
+  const branchName = String(body.branch_name ?? body.branchName ?? "").trim().slice(0, 150);
+  const branchType = normalizeBranchType(body.branch_type ?? body.branchType ?? "STORE");
+  const status = normalizeBranchStatus(body.status ?? "ACTIVE");
+  const address = String(body.address ?? "").trim();
+  const contactName = String(body.contact_name ?? body.contactName ?? "").trim().slice(0, 150);
+  const contactPhone = String(body.contact_phone ?? body.contactPhone ?? "").trim().slice(0, 50);
+
+  if ((!partial || hasBranchCode) && !branchCode) {
+    return { ok: false, message: "branch_code cannot be empty" };
+  }
+
+  if ((!partial || hasBranchName) && !branchName) {
+    return { ok: false, message: "branch_name cannot be empty" };
+  }
+
+  if ((!partial || hasBranchType) && !branchType) {
+    return { ok: false, message: "branch_type must be MAIN, STORE, WAREHOUSE, or OFFICE" };
+  }
+
+  if ((!partial || hasStatus) && !status) {
+    return { ok: false, message: "status must be ACTIVE or INACTIVE" };
+  }
+
+  return {
+    ok: true,
+    branch: {
+      branchCode,
+      branchName,
+      branchType,
+      status,
+      address,
+      contactName,
+      contactPhone,
+      hasBranchCode,
+      hasBranchName,
+      hasBranchType,
+      hasStatus,
+      hasAddress: Object.prototype.hasOwnProperty.call(body, "address"),
+      hasContactName: Object.prototype.hasOwnProperty.call(body, "contact_name") ||
+        Object.prototype.hasOwnProperty.call(body, "contactName"),
+      hasContactPhone: Object.prototype.hasOwnProperty.call(body, "contact_phone") ||
+        Object.prototype.hasOwnProperty.call(body, "contactPhone")
+    }
+  };
+}
+
+function getRequestedBranchId(req) {
+  const raw = req.query.branchId ?? req.query.branch_id ?? req.body?.branchId ?? req.body?.branch_id ?? null;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+}
+
+function normalizeStockReadStatus(value = "") {
+  return String(value || "").trim().toUpperCase().slice(0, 40);
+}
+
+function getEffectiveStockState(row = {}) {
+  return String(row.stock_state || row.stockState || row.status || "IN_STOCK").trim().toUpperCase();
+}
+
+async function validateReadableBranchScope(access, requestedBranchId = null) {
+  if (access.isBranchLocked) {
+    if (requestedBranchId !== null && Number(requestedBranchId) !== Number(access.userBranchId)) {
+      return {
+        ok: false,
+        status: 403,
+        message: "You cannot access another branch"
+      };
+    }
+
+    return {
+      ok: true,
+      branchId: access.userBranchId,
+      branch: null
+    };
+  }
+
+  if (requestedBranchId === null) {
+    return {
+      ok: true,
+      branchId: null,
+      branch: null
+    };
+  }
+
+  const whereParts = ["id = ?"];
+  const params = [requestedBranchId];
+
+  if (access.companyScope !== null) {
+    whereParts.push("company_id = ?");
+    params.push(access.companyScope);
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT *
+    FROM branches
+    WHERE ${whereParts.join(" AND ")}
+    LIMIT 1
+    `,
+    params
+  );
+
+  if (!rows.length) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Branch not found in this company"
+    };
+  }
+
+  return {
+    ok: true,
+    branchId: requestedBranchId,
+    branch: rows[0]
+  };
+}
+
+function buildBranchStockWhere(access, { branchId = null, status = "", stockState = "", search = "" } = {}) {
+  const whereParts = [];
+  const params = [];
+  const normalizedStatus = normalizeStockReadStatus(status);
+  const normalizedStockState = normalizeStockReadStatus(stockState);
+  const cleanSearch = String(search || "").trim();
+
+  if (access.companyScope !== null) {
+    whereParts.push("s.company_id = ?");
+    params.push(access.companyScope);
+  }
+
+  if (branchId !== null) {
+    whereParts.push("s.current_branch_id = ?");
+    params.push(branchId);
+  }
+
+  if (normalizedStatus) {
+    whereParts.push("UPPER(COALESCE(s.status, '')) = ?");
+    params.push(normalizedStatus);
+  }
+
+  if (normalizedStockState) {
+    whereParts.push("UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = ?");
+    params.push(normalizedStockState);
+  }
+
+  if (cleanSearch) {
+    const likeSearch = `%${cleanSearch}%`;
+    whereParts.push(`
+      (
+        s.barcode LIKE ?
+        OR s.product_name LIKE ?
+        OR s.lot_number LIKE ?
+        OR s.sku LIKE ?
+      )
+    `);
+    params.push(likeSearch, likeSearch, likeSearch, likeSearch);
+  }
+
+  return {
+    whereSql: whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "",
+    params
+  };
+}
+
+function parsePositiveInteger(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0;
+}
+
+function normalizeTransferStatus(value = "") {
+  return String(value || "").trim().toUpperCase().slice(0, 40);
+}
+
+function canAccessTransferBranch(access, branchId) {
+  if (!access?.isBranchLocked) return true;
+  return Number(branchId || 0) === Number(access.userBranchId || 0);
+}
+
+function canCreateTransferFromBranch(access, fromBranchId) {
+  if (access?.isSuperAdmin) return false;
+  if (!access?.isBranchLocked) return true;
+  return Number(fromBranchId || 0) === Number(access.userBranchId || 0);
+}
+
+function canReceiveTransferToBranch(access, toBranchId) {
+  if (access?.isSuperAdmin) return false;
+  if (!access?.isBranchLocked) return true;
+  return Number(toBranchId || 0) === Number(access.userBranchId || 0);
+}
+
+function getRequestedBranchScopeValue(req = {}) {
+  const raw = req.query?.branchId ?? req.query?.branch_id ?? req.body?.branchId ?? req.body?.branch_id ?? null;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+}
+
+async function resolveOperationalBranchScope(connection, access, requestedBranchId = null) {
+  if (!access?.ok) return access;
+
+  if (access.isBranchLocked) {
+    if (requestedBranchId !== null && Number(requestedBranchId) !== Number(access.userBranchId)) {
+      return {
+        ok: false,
+        status: 403,
+        message: "You cannot access another branch stock"
+      };
+    }
+
+    return {
+      ok: true,
+      branchId: access.userBranchId,
+      branch: null,
+      isBranchFiltered: true
+    };
+  }
+
+  if (requestedBranchId === null) {
+    return {
+      ok: true,
+      branchId: null,
+      branch: null,
+      isBranchFiltered: false
+    };
+  }
+
+  const whereParts = ["id = ?"];
+  const params = [requestedBranchId];
+  if (access.companyScope !== null) {
+    whereParts.push("company_id = ?");
+    params.push(access.companyScope);
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM branches
+    WHERE ${whereParts.join(" AND ")}
+    LIMIT 1
+    `,
+    params
+  );
+
+  if (!rows.length) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Branch not found in this company"
+    };
+  }
+
+  return {
+    ok: true,
+    branchId: requestedBranchId,
+    branch: rows[0],
+    isBranchFiltered: true
+  };
+}
+
+function appendOperationalStockVisibilityFilter(whereParts, {
+  alias = "",
+  includeSold = false,
+  includeDeleted = false
+} = {}) {
+  const prefix = alias ? `${alias}.` : "";
+  whereParts.push(`UPPER(COALESCE(NULLIF(TRIM(${prefix}stock_state), ''), ${prefix}status, 'IN_STOCK')) NOT IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE')`);
+  if (!includeSold) whereParts.push(`UPPER(COALESCE(${prefix}status, 'IN_STOCK')) <> 'SOLD'`);
+  if (!includeDeleted) whereParts.push(`UPPER(COALESCE(${prefix}status, 'IN_STOCK')) <> 'DELETED'`);
+}
+
+function appendBranchScopeFilter(whereParts, params, branchScope, { alias = "" } = {}) {
+  if (!branchScope?.isBranchFiltered || branchScope.branchId === null || branchScope.branchId === undefined) return;
+  const prefix = alias ? `${alias}.` : "";
+  whereParts.push(`${prefix}current_branch_id = ?`);
+  params.push(branchScope.branchId);
+}
+
+function getBranchScopeResponse(branchScope = {}) {
+  return {
+    branchId: branchScope.branchId ?? null,
+    branchName: branchScope.branch?.branch_name || null,
+    branchCode: branchScope.branch?.branch_code || null,
+    isBranchFiltered: Boolean(branchScope.isBranchFiltered)
+  };
+}
+
+function getAnalyticsDateRange(req = {}) {
+  const fromDate = String(req.query?.fromDate || req.query?.from_date || "").trim();
+  const toDate = String(req.query?.toDate || req.query?.to_date || "").trim();
+  return {
+    fromDate: /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : "",
+    toDate: /^\d{4}-\d{2}-\d{2}$/.test(toDate) ? toDate : ""
+  };
+}
+
+function appendDateRangeFilter(whereParts, params, column, { fromDate = "", toDate = "" } = {}) {
+  if (fromDate) {
+    whereParts.push(`${column} >= ?`);
+    params.push(`${fromDate} 00:00:00`);
+  }
+  if (toDate) {
+    whereParts.push(`${column} < DATE_ADD(?, INTERVAL 1 DAY)`);
+    params.push(toDate);
+  }
+}
+
+function getAgeingLevel(hours = 0) {
+  const value = Number(hours || 0);
+  if (value >= 72) return "CRITICAL";
+  if (value >= 24) return "WARNING";
+  return "NORMAL";
+}
+
+function normalizeMovementType(value = "") {
+  return String(value || "").trim().toUpperCase().slice(0, 40);
+}
+
+async function resolveAnalyticsAccess(req, { requireCompanyScope = true } = {}) {
+  const access = await resolveBranchAccessContext(req, { requireCompanyScope });
+  if (!access.ok) return { access };
+  const requestedBranchId = getRequestedBranchScopeValue(req);
+  const branchScope = await resolveOperationalBranchScope(pool, access, requestedBranchId);
+  return { access, branchScope };
+}
+
+function buildAnalyticsStockScope(access, branchScope, { alias = "s" } = {}) {
+  const whereParts = ["1 = 1"];
+  const params = [];
+  if (access.companyScope !== null) {
+    whereParts.push(`${alias}.company_id = ?`);
+    params.push(access.companyScope);
+  }
+  appendBranchScopeFilter(whereParts, params, branchScope, { alias });
+  return { whereSql: whereParts.join(" AND "), params };
+}
+
+async function getBranchForCompany(connection, companyId, branchId) {
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM branches
+    WHERE id = ? AND company_id = ?
+    LIMIT 1
+    `,
+    [branchId, companyId]
+  );
+  return rows[0] || null;
+}
+
+async function getTransferForAccess(connection, access, transferId, { forUpdate = false } = {}) {
+  const lockSql = forUpdate ? "FOR UPDATE" : "";
+  const whereParts = ["bt.id = ?"];
+  const params = [transferId];
+
+  if (access.companyScope !== null) {
+    whereParts.push("bt.company_id = ?");
+    params.push(access.companyScope);
+  }
+
+  if (access.isBranchLocked) {
+    whereParts.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+    params.push(access.userBranchId, access.userBranchId);
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT
+      bt.*,
+      fb.branch_code AS from_branch_code,
+      fb.branch_name AS from_branch_name,
+      tb.branch_code AS to_branch_code,
+      tb.branch_name AS to_branch_name
+    FROM branch_transfers bt
+    LEFT JOIN branches fb
+      ON fb.id = bt.from_branch_id
+     AND fb.company_id = bt.company_id
+    LEFT JOIN branches tb
+      ON tb.id = bt.to_branch_id
+     AND tb.company_id = bt.company_id
+    WHERE ${whereParts.join(" AND ")}
+    LIMIT 1
+    ${lockSql}
+    `,
+    params
+  );
+
+  return rows[0] || null;
+}
+
+async function generateTransferNumberForCompany(connection, companyId) {
+  const now = new Date();
+  const dateKey = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const prefix = `TRF-${dateKey}-`;
+
+  const [rows] = await connection.query(
+    `
+    SELECT transfer_no
+    FROM branch_transfers
+    WHERE company_id = ?
+      AND transfer_no LIKE ?
+    ORDER BY transfer_no DESC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [companyId, `${prefix}%`]
+  );
+
+  const lastNo = String(rows[0]?.transfer_no || "");
+  const lastSequence = Number(lastNo.slice(prefix.length)) || 0;
+  const nextSequence = lastSequence + 1;
+  return `${prefix}${String(nextSequence).padStart(4, "0")}`;
+}
+
+async function writeBranchTransferAuditSafe(connection, req, access, {
+  transferId = null,
+  actionType = "",
+  beforeData = null,
+  afterData = null,
+  reason = ""
+} = {}) {
+  try {
+    await connection.query(
+      `
+      INSERT INTO branch_transfer_audit_logs
+      (
+        company_id,
+        transfer_id,
+        action_type,
+        actor_user_id,
+        before_data,
+        after_data,
+        reason,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [
+        access.companyScope,
+        transferId,
+        String(actionType || "").trim().toUpperCase().slice(0, 80),
+        access.actingUserId ?? null,
+        safeJsonStringify(sanitizeAuditPayload(beforeData)),
+        safeJsonStringify(sanitizeAuditPayload(afterData)),
+        String(reason || "").trim()
+      ]
+    );
+  } catch (error) {
+    console.error("Branch transfer audit write failed:", error);
+  }
+
+  await logActivitySafe(connection, req, access, {
+    actionType,
+    entityType: "BRANCH_TRANSFER",
+    entityId: transferId === null || transferId === undefined ? "" : String(transferId),
+    moduleName: "branch-transfer",
+    status: "success",
+    message: reason || actionType,
+    beforeData,
+    afterData
+  });
+}
+
+async function writeBranchReceiveLogSafe(executor, access, {
+  transferId = null,
+  barcode = null,
+  stockId = null,
+  branchId = null,
+  scanStatus = "",
+  reason = "",
+  scannedBy = null,
+  deviceInfo = null
+} = {}) {
+  try {
+    await executor.query(
+      `
+      INSERT INTO branch_receive_logs
+      (
+        company_id,
+        transfer_id,
+        barcode,
+        stock_id,
+        branch_id,
+        scan_status,
+        reason,
+        scanned_by,
+        scanned_at,
+        device_info
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+      `,
+      [
+        access.companyScope,
+        transferId,
+        barcode ? String(barcode).trim() : null,
+        stockId ?? null,
+        branchId ?? null,
+        String(scanStatus || "").trim().toUpperCase().slice(0, 40),
+        String(reason || "").trim() || null,
+        scannedBy ?? access.actingUserId ?? null,
+        deviceInfo ? String(deviceInfo).trim().slice(0, 1000) : null
+      ]
+    );
+  } catch (error) {
+    console.error("Branch receive log write failed:", error);
+  }
+}
+
 async function requireSuperAdminAccess(req, res) {
   const access = await resolveAccessContext(req, {
     requireActingUser: true,
@@ -2331,6 +2994,10 @@ async function requireSuperAdminAccess(req, res) {
 
 const DUPLICATE_BARCODE_MESSAGE = "Duplicate barcode found. Contact admin.";
 
+function normalizeBarcodeForComparison(barcode) {
+  return String(barcode || "").trim().toUpperCase();
+}
+
 function createBarcodeSafetyError(message = DUPLICATE_BARCODE_MESSAGE) {
   const error = new Error(message);
   error.status = 409;
@@ -2343,13 +3010,16 @@ async function ensureSingleStockBarcode(companyId, barcode, db = pool) {
   const cleanBarcode = String(barcode || "").trim();
   if (!cleanBarcode) return cleanBarcode;
 
+  const normalizedBarcode = normalizeBarcodeForComparison(cleanBarcode);
   const [rows] = await db.query(
     `
     SELECT COUNT(*) AS count
     FROM stock
-    WHERE company_id = ? AND barcode = ?
+    WHERE company_id = ?
+      AND UPPER(TRIM(barcode)) = ?
+      ${getSellableStockFilterSql()}
     `,
-    [companyId, cleanBarcode]
+    [companyId, normalizedBarcode]
   );
 
   if (Number(rows?.[0]?.count || 0) > 1) {
@@ -2375,7 +3045,7 @@ function getBarcodeSafetyMessage(error, fallback) {
   return error?.isBarcodeSafetyError ? error.message : fallback;
 }
 
-async function validateInvoiceSaveRequest(connection, invoiceNumber, items, companyId) {
+async function validateInvoiceSaveRequest(connection, invoiceNumber, items, companyId, branchScope = null) {
   const cleanInvoiceNumber = String(invoiceNumber || "").trim();
 
   if (!cleanInvoiceNumber) {
@@ -2421,9 +3091,10 @@ async function validateInvoiceSaveRequest(connection, invoiceNumber, items, comp
 
     const [stockRows] = await connection.query(
       `
-      SELECT id, status, company_id
+      SELECT id, status, stock_state, current_branch_id, company_id
       FROM stock
       WHERE barcode = ? AND company_id = ?
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
       [barcode, companyId]
@@ -2439,12 +3110,21 @@ async function validateInvoiceSaveRequest(connection, invoiceNumber, items, comp
 
     const stockRow = stockRows[0];
     const stockStatus = String(stockRow.status || "").trim().toUpperCase();
+    const effectiveStockState = getEffectiveStockState(stockRow);
 
-    if (stockStatus !== "IN_STOCK") {
+    if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
       return {
         ok: false,
         status: 400,
         message: `Barcode ${barcode} is not in sellable stock`
+      };
+    }
+
+    if (branchScope?.isBranchFiltered && Number(stockRow.current_branch_id || 0) !== Number(branchScope.branchId || 0)) {
+      return {
+        ok: false,
+        status: 403,
+        message: `Barcode ${barcode} does not belong to the selected billing branch`
       };
     }
   }
@@ -2597,6 +3277,7 @@ async function setSaleStatusAndSyncStock(connection, invoiceNumber, companyId, s
             invoice_number = '',
             sold_at = NULL
         WHERE barcode = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
         `,
         [barcode, companyId]
       );
@@ -2611,6 +3292,7 @@ async function setSaleStatusAndSyncStock(connection, invoiceNumber, companyId, s
           invoice_number = ?,
           sold_at = COALESCE(sold_at, NOW())
       WHERE barcode = ? AND company_id = ?
+        ${getSellableStockFilterSql()}
       `,
       [cleanInvoiceNumber, barcode, companyId]
     );
@@ -3471,6 +4153,14 @@ async function runSuperAdminAccessMutation(req, res, {
       });
     }
 
+    if (entityType === "USER" && isSuperAdminUser(before)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "SuperAdmin accounts cannot be managed from access-control actions."
+      });
+    }
+
     const mutationResult = await mutate(connection, {
       targetId,
       reason: reasonResult.reason,
@@ -3590,16 +4280,28 @@ async function indexExists(tableName, indexName) {
 async function addIndexIfMissing(tableName, indexName, definitionSql) {
   const exists = await indexExists(tableName, indexName);
   if (!exists) {
-    await pool.query(`ALTER TABLE ${tableName} ADD INDEX ${indexName} ${definitionSql}`);
-    console.log(`Index added: ${tableName}.${indexName}`);
+    try {
+      await pool.query(`ALTER TABLE ${tableName} ADD INDEX ${indexName} ${definitionSql}`);
+      console.log(`Index added: ${tableName}.${indexName}`);
+    } catch (error) {
+      if (error?.code !== "ER_DUP_KEYNAME") {
+        throw error;
+      }
+    }
   }
 }
 
 async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
   const exists = await indexExists(tableName, indexName);
   if (!exists) {
-    await pool.query(`ALTER TABLE ${tableName} ADD UNIQUE INDEX ${indexName} ${definitionSql}`);
-    console.log(`Unique index added: ${tableName}.${indexName}`);
+    try {
+      await pool.query(`ALTER TABLE ${tableName} ADD UNIQUE INDEX ${indexName} ${definitionSql}`);
+      console.log(`Unique index added: ${tableName}.${indexName}`);
+    } catch (error) {
+      if (error?.code !== "ER_DUP_KEYNAME") {
+        throw error;
+      }
+    }
   }
 }
 
@@ -3965,6 +4667,87 @@ async function seedInvoiceSequencesFromSalesHistory() {
   console.log(`Invoice sequences seeded: ${companyRows.length} company row(s), ${sequenceRows.length} detected sequence row(s)`);
 }
 
+async function backfillBranchFoundation() {
+  if (!(await tableExists("companies")) || !(await tableExists("branches"))) {
+    return;
+  }
+
+  const [branchInsertResult] = await pool.query(`
+    INSERT INTO branches
+    (
+      company_id,
+      branch_code,
+      branch_name,
+      branch_type,
+      address,
+      contact_name,
+      contact_phone,
+      status,
+      created_by,
+      created_at,
+      updated_at
+    )
+    SELECT
+      c.id,
+      'MAIN',
+      'Main Branch',
+      'MAIN',
+      NULL,
+      NULL,
+      NULL,
+      'ACTIVE',
+      NULL,
+      NOW(),
+      NOW()
+    FROM companies c
+    WHERE c.id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM branches b
+        WHERE b.company_id = c.id
+          AND UPPER(TRIM(b.branch_code)) = 'MAIN'
+      )
+  `);
+
+  let stockBranchBackfillCount = 0;
+  let stockStateBackfillCount = 0;
+
+  if (await tableExists("stock")) {
+    const hasCurrentBranchColumn = await columnExists("stock", "current_branch_id");
+    const hasStockStateColumn = await columnExists("stock", "stock_state");
+
+    if (hasCurrentBranchColumn) {
+      const [stockBranchResult] = await pool.query(`
+        UPDATE stock s
+        JOIN (
+          SELECT company_id, MIN(id) AS main_branch_id
+          FROM branches
+          WHERE UPPER(TRIM(branch_code)) = 'MAIN'
+          GROUP BY company_id
+        ) mb
+          ON mb.company_id = s.company_id
+        SET s.current_branch_id = mb.main_branch_id
+        WHERE s.current_branch_id IS NULL
+          AND s.company_id IS NOT NULL
+      `);
+      stockBranchBackfillCount = Number(stockBranchResult?.affectedRows || 0);
+    }
+
+    if (hasStockStateColumn) {
+      const [stockStateResult] = await pool.query(`
+        UPDATE stock
+        SET stock_state = COALESCE(NULLIF(TRIM(status), ''), 'IN_STOCK')
+        WHERE stock_state IS NULL
+      `);
+      stockStateBackfillCount = Number(stockStateResult?.affectedRows || 0);
+    }
+  }
+
+  console.log(
+    `Branch foundation backfilled: ${Number(branchInsertResult?.affectedRows || 0)} main branch row(s), ${stockBranchBackfillCount} stock branch row(s), ${stockStateBackfillCount} stock state row(s)`
+  );
+}
+
 async function ensureSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS companies (
@@ -4137,6 +4920,204 @@ async function ensureSchema() {
       company_id INT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branches (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_code VARCHAR(50) NOT NULL,
+      branch_name VARCHAR(150) NOT NULL,
+      branch_type VARCHAR(30) DEFAULT 'MAIN',
+      address TEXT NULL,
+      contact_name VARCHAR(150) NULL,
+      contact_phone VARCHAR(50) NULL,
+      status VARCHAR(30) DEFAULT 'ACTIVE',
+      created_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_transfers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      transfer_no VARCHAR(80) NOT NULL,
+      from_branch_id INT NOT NULL,
+      to_branch_id INT NOT NULL,
+      status VARCHAR(40) DEFAULT 'CREATED',
+      challan_no VARCHAR(80) NULL,
+      notes TEXT NULL,
+      created_by INT NULL,
+      dispatched_by INT NULL,
+      received_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      dispatched_at DATETIME NULL,
+      received_at DATETIME NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_transfer_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      transfer_id INT NOT NULL,
+      stock_id INT NULL,
+      barcode VARCHAR(120) NOT NULL,
+      from_branch_id INT NOT NULL,
+      to_branch_id INT NOT NULL,
+      item_status VARCHAR(40) DEFAULT 'PENDING_DISPATCH',
+      received_at DATETIME NULL,
+      received_by INT NULL,
+      mismatch_reason TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_receive_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      transfer_id INT NULL,
+      barcode VARCHAR(120) NULL,
+      stock_id INT NULL,
+      branch_id INT NULL,
+      scan_status VARCHAR(40) NOT NULL,
+      reason TEXT NULL,
+      scanned_by INT NULL,
+      scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      device_info TEXT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_transfer_audit_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      transfer_id INT NULL,
+      action_type VARCHAR(80) NOT NULL,
+      actor_user_id INT NULL,
+      before_data JSON NULL,
+      after_data JSON NULL,
+      reason TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_stock_snapshots (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT NOT NULL,
+      snapshot_date DATE NOT NULL,
+      total_items INT DEFAULT 0,
+      total_weight DECIMAL(14,3) DEFAULT 0.000,
+      in_stock_items INT DEFAULT 0,
+      in_stock_weight DECIMAL(14,3) DEFAULT 0.000,
+      in_transit_items INT DEFAULT 0,
+      in_transit_weight DECIMAL(14,3) DEFAULT 0.000,
+      shortage_items INT DEFAULT 0,
+      shortage_weight DECIMAL(14,3) DEFAULT 0.000,
+      sold_items INT DEFAULT 0,
+      damaged_items INT DEFAULT 0,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_branch_stock_snapshot_day (company_id, branch_id, snapshot_date)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_stock_snapshot_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      snapshot_id INT NOT NULL,
+      branch_id INT NOT NULL,
+      stock_id INT DEFAULT NULL,
+      barcode VARCHAR(255) DEFAULT '',
+      product_name VARCHAR(255) DEFAULT '',
+      lot_number VARCHAR(120) DEFAULT '',
+      weight DECIMAL(14,3) DEFAULT 0.000,
+      status VARCHAR(50) DEFAULT '',
+      stock_state VARCHAR(50) DEFAULT '',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_branch_snapshot_items_barcode (company_id, branch_id, barcode),
+      INDEX idx_branch_snapshot_items_snapshot (snapshot_id),
+      INDEX idx_branch_snapshot_items_stock (company_id, stock_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_reconciliation_runs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      run_no VARCHAR(80) NOT NULL,
+      run_type VARCHAR(30) DEFAULT 'MANUAL',
+      from_date DATE DEFAULT NULL,
+      to_date DATE DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'COMPLETED',
+      total_checked INT DEFAULT 0,
+      exception_count INT DEFAULT 0,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME DEFAULT NULL,
+      notes TEXT DEFAULT NULL,
+      INDEX idx_branch_reconciliation_runs_scope (company_id, branch_id, created_at),
+      UNIQUE KEY uq_branch_reconciliation_run_no (company_id, run_no)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_reconciliation_exceptions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      run_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      stock_id INT DEFAULT NULL,
+      barcode VARCHAR(255) DEFAULT '',
+      exception_type VARCHAR(60) NOT NULL,
+      severity VARCHAR(20) DEFAULT 'MEDIUM',
+      expected_branch_id INT DEFAULT NULL,
+      actual_branch_id INT DEFAULT NULL,
+      expected_state VARCHAR(50) DEFAULT '',
+      actual_state VARCHAR(50) DEFAULT '',
+      description TEXT DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'OPEN',
+      approved_by INT DEFAULT NULL,
+      approved_at DATETIME DEFAULT NULL,
+      resolution_note TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_branch_exceptions_scope_status (company_id, branch_id, status, severity),
+      INDEX idx_branch_exceptions_run (run_id),
+      INDEX idx_branch_exceptions_barcode (company_id, barcode),
+      INDEX idx_branch_exceptions_type (company_id, exception_type)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS branch_audit_alerts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      alert_type VARCHAR(60) NOT NULL,
+      title VARCHAR(255) DEFAULT '',
+      message TEXT DEFAULT NULL,
+      severity VARCHAR(20) DEFAULT 'MEDIUM',
+      status VARCHAR(30) DEFAULT 'OPEN',
+      reference_type VARCHAR(60) DEFAULT '',
+      reference_id INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      resolved_by INT DEFAULT NULL,
+      resolved_at DATETIME DEFAULT NULL,
+      resolution_note TEXT DEFAULT NULL,
+      INDEX idx_branch_audit_alerts_scope_status (company_id, branch_id, status, severity),
+      INDEX idx_branch_audit_alerts_reference (company_id, reference_type, reference_id)
     )
   `);
 
@@ -4826,6 +5807,7 @@ async function ensureSchema() {
     await addColumnIfMissing("users", "mobile", "VARCHAR(20) DEFAULT ''");
     await addColumnIfMissing("users", "role", "VARCHAR(50) DEFAULT ''");
     await addColumnIfMissing("users", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("users", "branch_id", "INT DEFAULT NULL");
     await addColumnIfMissing("users", "status", "VARCHAR(50) DEFAULT 'pending'");
     await addColumnIfMissing("users", "login_status", "VARCHAR(30) DEFAULT 'ENABLED'");
     await addColumnIfMissing("users", "blocked_until", "DATETIME DEFAULT NULL");
@@ -4877,6 +5859,8 @@ async function ensureSchema() {
     await addColumnIfMissing("stock", "used_in_process_step_id", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "used_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("stock", "used_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("stock", "current_branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("stock", "stock_state", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfMissing("stock", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("stock", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
@@ -5285,12 +6269,224 @@ async function ensureSchema() {
     await addColumnIfMissing("otp_verifications", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("branches")) {
+    await addColumnIfMissing("branches", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branches", "branch_code", "VARCHAR(50) NOT NULL");
+    await addColumnIfMissing("branches", "branch_name", "VARCHAR(150) NOT NULL");
+    await addColumnIfMissing("branches", "branch_type", "VARCHAR(30) DEFAULT 'MAIN'");
+    await addColumnIfMissing("branches", "address", "TEXT NULL");
+    await addColumnIfMissing("branches", "contact_name", "VARCHAR(150) NULL");
+    await addColumnIfMissing("branches", "contact_phone", "VARCHAR(50) NULL");
+    await addColumnIfMissing("branches", "status", "VARCHAR(30) DEFAULT 'ACTIVE'");
+    await addColumnIfMissing("branches", "created_by", "INT NULL");
+    await addColumnIfMissing("branches", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branches", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_transfers")) {
+    await addColumnIfMissing("branch_transfers", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfers", "transfer_no", "VARCHAR(80) NOT NULL");
+    await addColumnIfMissing("branch_transfers", "from_branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfers", "to_branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfers", "status", "VARCHAR(40) DEFAULT 'CREATED'");
+    await addColumnIfMissing("branch_transfers", "challan_no", "VARCHAR(80) NULL");
+    await addColumnIfMissing("branch_transfers", "notes", "TEXT NULL");
+    await addColumnIfMissing("branch_transfers", "created_by", "INT NULL");
+    await addColumnIfMissing("branch_transfers", "dispatched_by", "INT NULL");
+    await addColumnIfMissing("branch_transfers", "received_by", "INT NULL");
+    await addColumnIfMissing("branch_transfers", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_transfers", "dispatched_at", "DATETIME NULL");
+    await addColumnIfMissing("branch_transfers", "received_at", "DATETIME NULL");
+    await addColumnIfMissing("branch_transfers", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_transfer_items")) {
+    await addColumnIfMissing("branch_transfer_items", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfer_items", "transfer_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfer_items", "stock_id", "INT NULL");
+    await addColumnIfMissing("branch_transfer_items", "barcode", "VARCHAR(120) NOT NULL");
+    await addColumnIfMissing("branch_transfer_items", "from_branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfer_items", "to_branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfer_items", "item_status", "VARCHAR(40) DEFAULT 'PENDING_DISPATCH'");
+    await addColumnIfMissing("branch_transfer_items", "received_at", "DATETIME NULL");
+    await addColumnIfMissing("branch_transfer_items", "received_by", "INT NULL");
+    await addColumnIfMissing("branch_transfer_items", "mismatch_reason", "TEXT NULL");
+    await addColumnIfMissing("branch_transfer_items", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_transfer_items", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_receive_logs")) {
+    await addColumnIfMissing("branch_receive_logs", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_receive_logs", "transfer_id", "INT NULL");
+    await addColumnIfMissing("branch_receive_logs", "barcode", "VARCHAR(120) NULL");
+    await addColumnIfMissing("branch_receive_logs", "stock_id", "INT NULL");
+    await addColumnIfMissing("branch_receive_logs", "branch_id", "INT NULL");
+    await addColumnIfMissing("branch_receive_logs", "scan_status", "VARCHAR(40) NOT NULL");
+    await addColumnIfMissing("branch_receive_logs", "reason", "TEXT NULL");
+    await addColumnIfMissing("branch_receive_logs", "scanned_by", "INT NULL");
+    await addColumnIfMissing("branch_receive_logs", "scanned_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_receive_logs", "device_info", "TEXT NULL");
+  }
+
+  if (await tableExists("branch_transfer_audit_logs")) {
+    await addColumnIfMissing("branch_transfer_audit_logs", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "transfer_id", "INT NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "action_type", "VARCHAR(80) NOT NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "actor_user_id", "INT NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "before_data", "JSON NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "after_data", "JSON NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "reason", "TEXT NULL");
+    await addColumnIfMissing("branch_transfer_audit_logs", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_stock_snapshots")) {
+    await addColumnIfMissing("branch_stock_snapshots", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshots", "branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshots", "snapshot_date", "DATE NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshots", "total_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "total_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("branch_stock_snapshots", "in_stock_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "in_stock_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("branch_stock_snapshots", "in_transit_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "in_transit_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("branch_stock_snapshots", "shortage_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "shortage_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("branch_stock_snapshots", "sold_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "damaged_items", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_stock_snapshots", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_stock_snapshots", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_stock_snapshots", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await addUniqueIndexIfMissing("branch_stock_snapshots", "uq_branch_stock_snapshot_day", "(company_id, branch_id, snapshot_date)");
+  }
+
+  if (await tableExists("branch_stock_snapshot_items")) {
+    await addColumnIfMissing("branch_stock_snapshot_items", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshot_items", "snapshot_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshot_items", "branch_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_stock_snapshot_items", "stock_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_stock_snapshot_items", "barcode", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("branch_stock_snapshot_items", "product_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("branch_stock_snapshot_items", "lot_number", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("branch_stock_snapshot_items", "weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("branch_stock_snapshot_items", "status", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("branch_stock_snapshot_items", "stock_state", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("branch_stock_snapshot_items", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_reconciliation_runs")) {
+    await addColumnIfMissing("branch_reconciliation_runs", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "run_no", "VARCHAR(80) NOT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "run_type", "VARCHAR(30) DEFAULT 'MANUAL'");
+    await addColumnIfMissing("branch_reconciliation_runs", "from_date", "DATE DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "to_date", "DATE DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "status", "VARCHAR(30) DEFAULT 'COMPLETED'");
+    await addColumnIfMissing("branch_reconciliation_runs", "total_checked", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_reconciliation_runs", "exception_count", "INT DEFAULT 0");
+    await addColumnIfMissing("branch_reconciliation_runs", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_reconciliation_runs", "completed_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_runs", "notes", "TEXT DEFAULT NULL");
+    await addUniqueIndexIfMissing("branch_reconciliation_runs", "uq_branch_reconciliation_run_no", "(company_id, run_no)");
+  }
+
+  if (await tableExists("branch_reconciliation_exceptions")) {
+    await addColumnIfMissing("branch_reconciliation_exceptions", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "run_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "stock_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "barcode", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "exception_type", "VARCHAR(60) NOT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "severity", "VARCHAR(20) DEFAULT 'MEDIUM'");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "expected_branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "actual_branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "expected_state", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "actual_state", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "description", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "status", "VARCHAR(30) DEFAULT 'OPEN'");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "approved_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "approved_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "resolution_note", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_reconciliation_exceptions", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("branch_audit_alerts")) {
+    await addColumnIfMissing("branch_audit_alerts", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "alert_type", "VARCHAR(60) NOT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "title", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("branch_audit_alerts", "message", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "severity", "VARCHAR(20) DEFAULT 'MEDIUM'");
+    await addColumnIfMissing("branch_audit_alerts", "status", "VARCHAR(30) DEFAULT 'OPEN'");
+    await addColumnIfMissing("branch_audit_alerts", "reference_type", "VARCHAR(60) DEFAULT ''");
+    await addColumnIfMissing("branch_audit_alerts", "reference_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("branch_audit_alerts", "resolved_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "resolved_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("branch_audit_alerts", "resolution_note", "TEXT DEFAULT NULL");
+  }
+
+  await backfillBranchFoundation();
+
   if (await tableExists("stock")) {
     await addIndexIfMissing("stock", "idx_stock_company_status", "(company_id, status)");
     await addIndexIfMissing("stock", "idx_stock_company_invoice", "(company_id, invoice_number)");
     await addIndexIfMissing("stock", "idx_stock_company_created", "(company_id, created_at)");
     await addIndexIfMissing("stock", "idx_stock_recovery_step", "(company_id, reference_step_id)");
     await addIndexIfMissing("stock", "idx_stock_recovery_unused", "(company_id, category, source, status)");
+    await addIndexIfMissing("stock", "idx_stock_company_branch_status", "(company_id, current_branch_id, status)");
+    await addIndexIfMissing("stock", "idx_stock_company_stock_state", "(company_id, stock_state)");
+    await addIndexIfMissing("stock", "idx_stock_company_barcode", "(company_id, barcode)");
+  }
+
+  if (await tableExists("users")) {
+    await addIndexIfMissing("users", "idx_users_company_branch", "(company_id, branch_id)");
+  }
+
+  if (await tableExists("branches")) {
+    await addIndexIfMissing("branches", "idx_branches_company_code", "(company_id, branch_code)");
+    await addIndexIfMissing("branches", "idx_branches_company_status", "(company_id, status)");
+  }
+
+  if (await tableExists("branch_transfers")) {
+    await addIndexIfMissing("branch_transfers", "idx_branch_transfers_scope_status", "(company_id, from_branch_id, to_branch_id, status)");
+    await addIndexIfMissing("branch_transfers", "idx_branch_transfers_transfer_no", "(company_id, transfer_no)");
+  }
+
+  if (await tableExists("branch_transfer_items")) {
+    await addIndexIfMissing("branch_transfer_items", "idx_branch_transfer_items_transfer_barcode", "(company_id, transfer_id, barcode)");
+    await addIndexIfMissing("branch_transfer_items", "idx_branch_transfer_items_barcode_status", "(company_id, barcode, item_status)");
+  }
+
+  if (await tableExists("branch_receive_logs")) {
+    await addIndexIfMissing("branch_receive_logs", "idx_branch_receive_logs_transfer_barcode", "(company_id, transfer_id, barcode)");
+  }
+
+  if (await tableExists("branch_transfer_audit_logs")) {
+    await addIndexIfMissing("branch_transfer_audit_logs", "idx_branch_transfer_audit_scope_action", "(company_id, transfer_id, action_type)");
+  }
+
+  if (await tableExists("branch_stock_snapshot_items")) {
+    await addIndexIfMissing("branch_stock_snapshot_items", "idx_branch_snapshot_items_barcode", "(company_id, branch_id, barcode)");
+    await addIndexIfMissing("branch_stock_snapshot_items", "idx_branch_snapshot_items_snapshot", "(snapshot_id)");
+    await addIndexIfMissing("branch_stock_snapshot_items", "idx_branch_snapshot_items_stock", "(company_id, stock_id)");
+  }
+
+  if (await tableExists("branch_reconciliation_runs")) {
+    await addIndexIfMissing("branch_reconciliation_runs", "idx_branch_reconciliation_runs_scope", "(company_id, branch_id, created_at)");
+  }
+
+  if (await tableExists("branch_reconciliation_exceptions")) {
+    await addIndexIfMissing("branch_reconciliation_exceptions", "idx_branch_exceptions_scope_status", "(company_id, branch_id, status, severity)");
+    await addIndexIfMissing("branch_reconciliation_exceptions", "idx_branch_exceptions_run", "(run_id)");
+    await addIndexIfMissing("branch_reconciliation_exceptions", "idx_branch_exceptions_barcode", "(company_id, barcode)");
+    await addIndexIfMissing("branch_reconciliation_exceptions", "idx_branch_exceptions_type", "(company_id, exception_type)");
+  }
+
+  if (await tableExists("branch_audit_alerts")) {
+    await addIndexIfMissing("branch_audit_alerts", "idx_branch_audit_alerts_scope_status", "(company_id, branch_id, status, severity)");
+    await addIndexIfMissing("branch_audit_alerts", "idx_branch_audit_alerts_reference", "(company_id, reference_type, reference_id)");
   }
 
   if (await tableExists("process_step_recovery_inputs")) {
@@ -6650,10 +7846,8 @@ app.get("/ready", async (req, res) => {
 ========================= */
 app.get("/api/dashboard", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -6661,12 +7855,27 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    const requestedBranchId = getRequestedBranchScopeValue(req);
+    const branchScope = await resolveOperationalBranchScope(pool, access, requestedBranchId);
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
 
     const sellableStockFilter = getSellableFinishedStockWhereSql();
-    const stockWhere = companyId !== null
-      ? `WHERE company_id = ? ${sellableStockFilter}`
-      : `WHERE 1 = 1 ${sellableStockFilter}`;
-    const stockParams = companyId !== null ? [companyId] : [];
+    const stockWhereParts = ["1 = 1"];
+    const stockParams = [];
+    if (companyId !== null) {
+      stockWhereParts.push("company_id = ?");
+      stockParams.push(companyId);
+    }
+    if (branchScope.isBranchFiltered) {
+      stockWhereParts.push("current_branch_id = ?");
+      stockParams.push(branchScope.branchId);
+    }
+    const stockWhere = `WHERE ${stockWhereParts.join(" AND ")} ${sellableStockFilter}`;
 
     const salesWhere = companyId !== null ? "WHERE company_id = ?" : "";
     const salesParams = companyId !== null ? [companyId] : [];
@@ -6731,6 +7940,61 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       stockParams
     );
 
+    const branchSummaryParams = [];
+    const branchSummaryWhereParts = ["1 = 1"];
+    if (companyId !== null) {
+      branchSummaryWhereParts.push("s.company_id = ?");
+      branchSummaryParams.push(companyId);
+    }
+    appendBranchScopeFilter(branchSummaryWhereParts, branchSummaryParams, branchScope, { alias: "s" });
+
+    const [branchStockSummary] = await pool.query(
+      `
+      SELECT
+        s.current_branch_id,
+        b.branch_code,
+        b.branch_name,
+        COUNT(*) AS stock_count,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(s.status, 'IN_STOCK')) = 'IN_STOCK'
+          AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK'
+          THEN s.weight ELSE 0 END), 0) AS stock_weight,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_count,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN s.weight ELSE 0 END), 0) AS in_transit_weight
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      WHERE ${branchSummaryWhereParts.join(" AND ")}
+        AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      GROUP BY s.current_branch_id, b.branch_code, b.branch_name
+      ORDER BY b.branch_name ASC, s.current_branch_id ASC
+      `,
+      branchSummaryParams
+    );
+
+    const [branchSalesSummary] = await pool.query(
+      `
+      SELECT
+        s.current_branch_id,
+        b.branch_code,
+        b.branch_name,
+        COUNT(DISTINCT si.id) AS sold_items,
+        COALESCE(SUM(si.weight), 0) AS sold_weight
+      FROM sales_items si
+      INNER JOIN stock s
+        ON s.company_id = si.company_id
+       AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      WHERE ${branchSummaryWhereParts.join(" AND ")}
+      GROUP BY s.current_branch_id, b.branch_code, b.branch_name
+      ORDER BY b.branch_name ASC, s.current_branch_id ASC
+      LIMIT 200
+      `,
+      branchSummaryParams
+    );
+
     const returnSummary = await getReturnSummaryRows(companyId);
 
     return res.json({
@@ -6745,7 +8009,10 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       totalSalesAmount: Number(salesSummary[0]?.total_sales_amount || 0),
       recentInvoices,
       recentStock,
-      recentReturns: returnSummary.recentReturns
+      recentReturns: returnSummary.recentReturns,
+      branchScope: getBranchScopeResponse(branchScope),
+      branchStockSummary,
+      branchSalesSummary
     });
   } catch (error) {
     console.error("Dashboard error:", error);
@@ -7953,10 +9220,8 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -8593,10 +9858,8 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
 ========================= */
 app.get("/getStock", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -8604,25 +9867,50 @@ app.get("/getStock", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
-    const whereClause = companyId !== null ? "WHERE company_id = ?" : "";
-    const params = companyId !== null ? [companyId] : [];
+    const requestedBranchId = getRequestedBranchScopeValue(req);
+    const branchScope = await resolveOperationalBranchScope(pool, access, requestedBranchId);
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
+    const whereParts = [];
+    const params = [];
+    if (companyId !== null) {
+      whereParts.push("s.company_id = ?");
+      params.push(companyId);
+    }
+    appendBranchScopeFilter(whereParts, params, branchScope, { alias: "s" });
+    appendOperationalStockVisibilityFilter(whereParts, { alias: "s" });
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
     const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 2000 });
 
     const [rows] = await pool.query(
       `
-      SELECT *
-      FROM stock
+      SELECT
+        s.*,
+        b.branch_code,
+        b.branch_name,
+        b.branch_type,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS effective_stock_state
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
       ${whereClause}
       ORDER BY
-        CAST(COALESCE(lot_number, '0') AS UNSIGNED) ASC,
-        CAST(COALESCE(serial, '0') AS UNSIGNED) ASC,
-        id ASC
+        CAST(COALESCE(s.lot_number, '0') AS UNSIGNED) ASC,
+        CAST(COALESCE(s.serial, '0') AS UNSIGNED) ASC,
+        s.id ASC
       ${pagination.sql}
       `,
       params
     );
 
     setPaginationHeaders(res, pagination);
+    res.setHeader("X-Branch-Scope", JSON.stringify(getBranchScopeResponse(branchScope)));
     return res.json(rows);
   } catch (error) {
     console.error("Get stock error:", error);
@@ -11933,9 +13221,7 @@ app.get("/getSticker/:barcode", authMiddleware, async (req, res) => {
       FROM stock
       WHERE barcode = ?
         AND company_id = ?
-        AND barcode IS NOT NULL
-        AND TRIM(COALESCE(barcode, '')) <> ''
-        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
       [barcode, companyId]
@@ -12011,6 +13297,7 @@ app.get("/getReturnItem/:barcode", authMiddleware, async (req, res) => {
         ON si.barcode = s.barcode
        AND si.company_id = s.company_id
       WHERE s.barcode = ? AND s.company_id = ?
+        ${getSellableStockFilterSql("s")}
       LIMIT 1
       `,
       [barcode, companyId, barcode, companyId]
@@ -12092,6 +13379,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       SELECT *
       FROM stock
       WHERE barcode = ? AND company_id = ?
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
       [barcode, finalCompanyId]
@@ -12197,6 +13485,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
             invoice_number = '',
             sold_at = NULL
         WHERE barcode = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
         `,
         [barcode, finalCompanyId]
       );
@@ -12207,6 +13496,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         UPDATE stock
         SET status = 'DAMAGED_RETURN'
         WHERE barcode = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
         `,
         [barcode, finalCompanyId]
       );
@@ -13058,12 +14348,12 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     const [dupBarcode] = await pool.query(
       `
       SELECT id FROM stock
-      WHERE barcode = ?
+      WHERE UPPER(TRIM(barcode)) = ?
         AND company_id = ?
-        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
-      [cleanBarcode, finalCompanyId]
+      [normalizeBarcodeForComparison(cleanBarcode), finalCompanyId]
     );
 
     if (dupBarcode.length > 0) {
@@ -13201,9 +14491,7 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         SET status = ?, invoice_number = ?, sold_at = NOW(), deleted_at = NULL
         WHERE barcode = ?
           AND company_id = ?
-          AND barcode IS NOT NULL
-          AND TRIM(COALESCE(barcode, '')) <> ''
-          AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+          ${getSellableStockFilterSql()}
       `;
 
       const [soldResult] = await pool.query(soldSql, soldParams);
@@ -13254,9 +14542,7 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       SELECT id
       FROM stock
       WHERE barcode = ? AND company_id = ?
-        AND barcode IS NOT NULL
-        AND TRIM(COALESCE(barcode, '')) <> ''
-        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
       [oldBarcode, finalCompanyId]
@@ -13291,13 +14577,13 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     const [dupBarcode] = await pool.query(
       `
       SELECT id FROM stock
-      WHERE barcode = ?
+      WHERE UPPER(TRIM(barcode)) = ?
         AND company_id = ?
         AND id <> ?
-        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
-      [newBarcode, finalCompanyId, currentId]
+      [normalizeBarcodeForComparison(newBarcode), finalCompanyId, currentId]
     );
 
     if (dupBarcode.length > 0) {
@@ -13413,9 +14699,7 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
       SET status = 'DELETED', deleted_at = NOW()
       WHERE barcode = ?
         AND company_id = ?
-        AND barcode IS NOT NULL
-        AND TRIM(COALESCE(barcode, '')) <> ''
-        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+        ${getSellableStockFilterSql()}
     `;
     const params = [barcode, companyId];
 
@@ -13474,9 +14758,7 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
       SET status = 'IN_STOCK', deleted_at = NULL
       WHERE barcode = ?
         AND company_id = ?
-        AND barcode IS NOT NULL
-        AND TRIM(COALESCE(barcode, '')) <> ''
-        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+        ${getSellableStockFilterSql()}
     `;
     const params = [barcode, companyId];
 
@@ -13610,10 +14892,8 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -13629,6 +14909,15 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
     }
 
     connection = await pool.getConnection();
+    const requestedBranchId = getRequestedBranchScopeValue(req);
+    const branchScope = await resolveOperationalBranchScope(connection, access, requestedBranchId);
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
     const actingUserId = access.actingUserId ?? getRequestedUserId(req);
     const draftRow = await getOrCreateCurrentInvoiceDraft(connection, access.companyScope, actingUserId);
     await ensureSingleStockBarcode(access.companyScope, barcode, connection);
@@ -13657,9 +14946,7 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
       SELECT *
       FROM stock
       WHERE barcode = ? AND company_id = ?
-        AND barcode IS NOT NULL
-        AND TRIM(COALESCE(barcode, '')) <> ''
-        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+        ${getSellableStockFilterSql()}
       LIMIT 1
       `,
       [barcode, access.companyScope]
@@ -13674,10 +14961,18 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
 
     const stockRow = stockRows[0];
     const stockStatus = String(stockRow.status || "IN_STOCK").trim().toUpperCase();
-    if (stockStatus !== "IN_STOCK") {
+    const effectiveStockState = getEffectiveStockState(stockRow);
+    if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
       return res.status(400).json({
         success: false,
         message: "This barcode is not in sellable stock"
+      });
+    }
+
+    if (branchScope.isBranchFiltered && Number(stockRow.current_branch_id || 0) !== Number(branchScope.branchId || 0)) {
+      return res.status(403).json({
+        success: false,
+        message: "This barcode does not belong to the selected billing branch"
       });
     }
 
@@ -14190,10 +15485,9 @@ app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), asy
           SET status = 'SOLD', invoice_number = ?, sold_at = NOW()
           WHERE barcode = ?
             AND company_id = ?
-            AND barcode IS NOT NULL
-            AND TRIM(COALESCE(barcode, '')) <> ''
-            AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+            ${getSellableStockFilterSql()}
             AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+            AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
           `,
           [cleanInvoiceNumber, barcode, finalCompanyId]
         );
@@ -14286,11 +15580,23 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       metalNote = "",
       items = [],
       invoiceDraftId = null,
+      branchId = null,
+      branch_id = null,
       company_id = null,
       companyId = null
     } = req.body;
 
     const finalCompanyId = access.companyScope;
+    const requestedBranchId = getRequestedBranchScopeValue({ ...req, body: { ...req.body, branchId: branchId ?? branch_id } });
+    const branchScope = await resolveOperationalBranchScope(connection, access, requestedBranchId);
+    if (!branchScope.ok) {
+      await connection.rollback();
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
     let finalInvoiceNumber = String(invoiceNumber || "").trim();
 
     if (!finalInvoiceNumber) {
@@ -14306,7 +15612,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       connection,
       finalInvoiceNumber,
       items,
-      finalCompanyId
+      finalCompanyId,
+      branchScope
     );
 
     if (!validation.ok) {
@@ -14506,12 +15813,14 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
               deleted_at = NULL
           WHERE barcode = ?
             AND company_id = ?
-            AND barcode IS NOT NULL
-            AND TRIM(COALESCE(barcode, '')) <> ''
-            AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN')
+            ${getSellableStockFilterSql()}
             AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+            AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
+            ${branchScope.isBranchFiltered ? "AND current_branch_id = ?" : ""}
           `,
-          [cleanInvoiceNumber, barcode, finalCompanyId]
+          branchScope.isBranchFiltered
+            ? [cleanInvoiceNumber, barcode, finalCompanyId, branchScope.branchId]
+            : [cleanInvoiceNumber, barcode, finalCompanyId]
         );
 
         const affectedRows = assertSingleStockRowAffected(stockUpdateResult);
@@ -15542,6 +16851,7 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
           invoice_number = '',
           sold_at = NULL
       WHERE barcode = ? AND company_id = ?
+        ${getSellableStockFilterSql()}
       `,
       [barcode, companyId]
     );
@@ -15872,6 +17182,8 @@ app.get("/approvedCompanies", authMiddleware, async (req, res) => {
     const [rows] = await pool.query(`
       SELECT *
       FROM companies
+      WHERE deleted_at IS NULL
+        AND UPPER(COALESCE(access_status, 'ACTIVE')) <> 'SOFT_DELETED'
       ORDER BY id DESC
     `);
 
@@ -15886,6 +17198,4461 @@ app.get("/approvedCompanies", authMiddleware, async (req, res) => {
       message: "Approved companies fetch failed",
       error: getErrorDetail(error)
     });
+  }
+});
+
+app.get("/superadmin/deleted-companies", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM companies
+      WHERE deleted_at IS NOT NULL
+         OR UPPER(COALESCE(access_status, '')) = 'SOFT_DELETED'
+      ORDER BY COALESCE(deleted_at, updated_at, created_at) DESC, id DESC
+    `);
+
+    return res.json({
+      success: true,
+      companies: rows
+    });
+  } catch (error) {
+    console.error("Deleted companies error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Deleted companies fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-context", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    return res.json({
+      success: true,
+      context: {
+        company_id: access.companyScope,
+        companyId: access.companyScope,
+        role: access.role,
+        branch_id: access.userBranchId,
+        branchId: access.userBranchId,
+        branchScope: access.branchScope,
+        canViewAllBranches: access.canViewAllBranches,
+        canManageBranches: access.canManageBranches,
+        isBranchLocked: access.isBranchLocked,
+        isSuperAdmin: access.isSuperAdmin
+      }
+    });
+  } catch (error) {
+    console.error("Branch context error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch context fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-stock", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const requestedBranchId = getRequestedBranchId(req);
+    const branchScope = await validateReadableBranchScope(access, requestedBranchId);
+    if (!branchScope.ok) {
+      return sendAccessError(res, branchScope);
+    }
+
+    const pagination = getPagination(req, { defaultLimit: 500, maxLimit: 1000 });
+    const { whereSql, params } = buildBranchStockWhere(access, {
+      branchId: branchScope.branchId,
+      status: req.query.status,
+      stockState: req.query.stockState ?? req.query.stock_state,
+      search: req.query.search
+    });
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        s.*,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS effective_stock_state,
+        b.branch_code,
+        b.branch_name,
+        b.branch_type,
+        b.status AS branch_status
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      ${whereSql}
+      ORDER BY
+        s.company_id ASC,
+        b.branch_name ASC,
+        CAST(COALESCE(s.lot_number, '0') AS UNSIGNED) ASC,
+        CAST(COALESCE(s.serial, '0') AS UNSIGNED) ASC,
+        s.id ASC
+      ${pagination.sql}
+      `,
+      params
+    );
+
+    setPaginationHeaders(res, pagination);
+    return res.json({
+      success: true,
+      branchScope: branchScope.branchId,
+      limit: pagination.limit,
+      offset: pagination.offset,
+      stock: rows
+    });
+  } catch (error) {
+    console.error("Branch stock fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch stock fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-stock/summary", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const requestedBranchId = getRequestedBranchId(req);
+    const branchScope = await validateReadableBranchScope(access, requestedBranchId);
+    if (!branchScope.ok) {
+      return sendAccessError(res, branchScope);
+    }
+
+    const { whereSql, params } = buildBranchStockWhere(access, {
+      branchId: branchScope.branchId,
+      status: req.query.status,
+      stockState: req.query.stockState ?? req.query.stock_state,
+      search: req.query.search
+    });
+
+    const [summaryRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_items,
+        COALESCE(SUM(COALESCE(s.weight, 0)), 0) AS total_weight,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN 1 ELSE 0 END) AS in_stock_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) IN ('DAMAGED', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS damaged_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'DELETED' THEN 1 ELSE 0 END) AS deleted_items
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      ${whereSql}
+      `,
+      params
+    );
+
+    const [branchRows] = await pool.query(
+      `
+      SELECT
+        s.current_branch_id AS branch_id,
+        COALESCE(b.branch_code, '') AS branch_code,
+        COALESCE(b.branch_name, 'Unassigned Branch') AS branch_name,
+        COALESCE(b.branch_type, '') AS branch_type,
+        COUNT(*) AS total_items,
+        COALESCE(SUM(COALESCE(s.weight, 0)), 0) AS total_weight,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN 1 ELSE 0 END) AS in_stock_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) IN ('DAMAGED', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS damaged_items,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'DELETED' THEN 1 ELSE 0 END) AS deleted_items
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      ${whereSql}
+      GROUP BY s.current_branch_id, b.branch_code, b.branch_name, b.branch_type
+      ORDER BY b.branch_name ASC, s.current_branch_id ASC
+      `,
+      params
+    );
+
+    const summary = summaryRows[0] || {};
+    return res.json({
+      success: true,
+      branchScope: branchScope.branchId,
+      summary: {
+        total_items: Number(summary.total_items || 0),
+        total_weight: Number(summary.total_weight || 0),
+        in_stock_items: Number(summary.in_stock_items || 0),
+        sold_items: Number(summary.sold_items || 0),
+        in_transit_items: Number(summary.in_transit_items || 0),
+        damaged_items: Number(summary.damaged_items || 0),
+        deleted_items: Number(summary.deleted_items || 0)
+      },
+      branches: branchRows.map((row) => ({
+        branch_id: row.branch_id === null || row.branch_id === undefined ? null : Number(row.branch_id),
+        branch_code: row.branch_code || "",
+        branch_name: row.branch_name || "",
+        branch_type: row.branch_type || "",
+        total_items: Number(row.total_items || 0),
+        total_weight: Number(row.total_weight || 0),
+        in_stock_items: Number(row.in_stock_items || 0),
+        sold_items: Number(row.sold_items || 0),
+        in_transit_items: Number(row.in_transit_items || 0),
+        damaged_items: Number(row.damaged_items || 0),
+        deleted_items: Number(row.deleted_items || 0)
+      }))
+    });
+  } catch (error) {
+    console.error("Branch stock summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch stock summary failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-stock/by-barcode/:barcode", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const barcode = String(req.params.barcode || "").trim();
+    if (!barcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    const whereParts = ["UPPER(TRIM(s.barcode)) = ?"];
+    const params = [normalizeBarcodeForComparison(barcode)];
+
+    if (access.companyScope !== null) {
+      whereParts.push("s.company_id = ?");
+      params.push(access.companyScope);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push("s.current_branch_id = ?");
+      params.push(access.userBranchId);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        s.*,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS effective_stock_state,
+        b.branch_code,
+        b.branch_name,
+        b.branch_type,
+        b.status AS branch_status
+      FROM stock s
+      LEFT JOIN branches b
+        ON b.id = s.current_branch_id
+       AND b.company_id = s.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY s.id DESC
+      LIMIT 20
+      `,
+      params
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Barcode was not found in accessible branch stock"
+      });
+    }
+
+    return res.json({
+      success: true,
+      item: rows[0],
+      items: rows
+    });
+  } catch (error) {
+    console.error("Branch stock barcode fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch stock barcode fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-analytics/overview", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const stockScope = buildAnalyticsStockScope(access, branchScope, { alias: "s" });
+    const branchScopeParams = [];
+    const branchWhereParts = ["1 = 1"];
+    if (access.companyScope !== null) {
+      branchWhereParts.push("b.company_id = ?");
+      branchScopeParams.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      branchWhereParts.push("b.id = ?");
+      branchScopeParams.push(branchScope.branchId);
+    }
+
+    const [branchRows] = await pool.query(
+      `
+      SELECT id, company_id, branch_code, branch_name, branch_type, status
+      FROM branches b
+      WHERE ${branchWhereParts.join(" AND ")}
+      ORDER BY branch_name ASC, id ASC
+      `,
+      branchScopeParams
+    );
+
+    const [stockRows] = await pool.query(
+      `
+      SELECT
+        s.current_branch_id,
+        b.branch_code,
+        b.branch_name,
+        COUNT(*) AS stock_qty,
+        COALESCE(SUM(s.weight), 0) AS stock_weight,
+        0 AS stock_value,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_qty,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN s.weight ELSE 0 END), 0) AS in_transit_weight,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'TRANSFER_SHORTAGE' THEN 1 ELSE 0 END) AS shortage_qty
+      FROM stock s
+      LEFT JOIN branches b ON b.id = s.current_branch_id AND b.company_id = s.company_id
+      WHERE ${stockScope.whereSql}
+        AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      GROUP BY s.current_branch_id, b.branch_code, b.branch_name
+      ORDER BY b.branch_name ASC, s.current_branch_id ASC
+      `,
+      stockScope.params
+    );
+
+    const [salesRows] = await pool.query(
+      `
+      SELECT
+        s.current_branch_id,
+        COUNT(si.id) AS sold_qty,
+        COALESCE(SUM(COALESCE(NULLIF(si.customer_line_amount, 0), NULLIF(si.company_line_amount, 0), sh.total_amount, 0)), 0) AS sales_amount
+      FROM sales_items si
+      LEFT JOIN sales_history sh ON sh.id = si.sale_id AND sh.company_id = si.company_id
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE ${stockScope.whereSql}
+        AND COALESCE(si.is_deleted, 0) = 0
+      GROUP BY s.current_branch_id
+      `,
+      stockScope.params
+    );
+
+    const salesByBranch = new Map(salesRows.map((row) => [Number(row.current_branch_id || 0), row]));
+    const summariesByBranch = new Map(stockRows.map((row) => [Number(row.current_branch_id || 0), row]));
+    const branchSummaries = branchRows.map((branch) => {
+      const stock = summariesByBranch.get(Number(branch.id)) || {};
+      const sales = salesByBranch.get(Number(branch.id)) || {};
+      return {
+        branch_id: branch.id,
+        branch_code: branch.branch_code,
+        branch_name: branch.branch_name,
+        branch_type: branch.branch_type,
+        status: branch.status,
+        stock_qty: Number(stock.stock_qty || 0),
+        stock_weight: Number(stock.stock_weight || 0),
+        stock_value: Number(stock.stock_value || 0),
+        in_transit_qty: Number(stock.in_transit_qty || 0),
+        in_transit_weight: Number(stock.in_transit_weight || 0),
+        shortage_qty: Number(stock.shortage_qty || 0),
+        sold_qty: Number(sales.sold_qty || 0),
+        sales_amount: Number(sales.sales_amount || 0)
+      };
+    });
+
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      total_branches: branchRows.length,
+      total_stock_qty: branchSummaries.reduce((sum, row) => sum + row.stock_qty, 0),
+      total_stock_weight: branchSummaries.reduce((sum, row) => sum + row.stock_weight, 0),
+      total_stock_value: branchSummaries.reduce((sum, row) => sum + row.stock_value, 0),
+      total_in_transit_qty: branchSummaries.reduce((sum, row) => sum + row.in_transit_qty, 0),
+      total_in_transit_weight: branchSummaries.reduce((sum, row) => sum + row.in_transit_weight, 0),
+      total_shortage_qty: branchSummaries.reduce((sum, row) => sum + row.shortage_qty, 0),
+      total_branch_sales: branchSummaries.reduce((sum, row) => sum + row.sales_amount, 0),
+      branch_summaries: branchSummaries
+    });
+  } catch (error) {
+    console.error("Branch analytics overview error:", error);
+    return res.status(500).json({ success: false, message: "Branch analytics overview failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/branch-summary", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const dateRange = getAnalyticsDateRange(req);
+    const stockScope = buildAnalyticsStockScope(access, branchScope, { alias: "s" });
+
+    const [stockSummary] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS stock_qty,
+        COALESCE(SUM(weight), 0) AS stock_weight,
+        SUM(CASE WHEN UPPER(COALESCE(status, 'IN_STOCK')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_qty,
+        SUM(CASE WHEN UPPER(COALESCE(status, '')) IN ('DAMAGED_RETURN', 'DAMAGED') THEN 1 ELSE 0 END) AS damaged_count,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_count
+      FROM stock s
+      WHERE ${stockScope.whereSql}
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+      `,
+      stockScope.params
+    );
+
+    const salesWhere = [stockScope.whereSql, "COALESCE(si.is_deleted, 0) = 0"];
+    const salesParams = [...stockScope.params];
+    appendDateRangeFilter(salesWhere, salesParams, "si.created_at", dateRange);
+    const [salesSummary] = await pool.query(
+      `
+      SELECT COUNT(si.id) AS sold_qty, COALESCE(SUM(COALESCE(NULLIF(si.customer_line_amount, 0), NULLIF(si.company_line_amount, 0), sh.total_amount, 0)), 0) AS sales_amount
+      FROM sales_items si
+      LEFT JOIN sales_history sh ON sh.id = si.sale_id AND sh.company_id = si.company_id
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE ${salesWhere.join(" AND ")}
+      `,
+      salesParams
+    );
+
+    const transferBase = [];
+    const transferParams = [];
+    if (access.companyScope !== null) {
+      transferBase.push("bt.company_id = ?");
+      transferParams.push(access.companyScope);
+    } else {
+      transferBase.push("1 = 1");
+    }
+    if (branchScope.isBranchFiltered) {
+      transferBase.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      transferParams.push(branchScope.branchId, branchScope.branchId);
+    }
+    appendDateRangeFilter(transferBase, transferParams, "bt.created_at", dateRange);
+    const [transferSummary] = await pool.query(
+      `
+      SELECT
+        SUM(CASE WHEN ${branchScope.isBranchFiltered ? "bt.to_branch_id = ?" : "1 = 1"} THEN 1 ELSE 0 END) AS transfer_in,
+        SUM(CASE WHEN ${branchScope.isBranchFiltered ? "bt.from_branch_id = ?" : "1 = 1"} THEN 1 ELSE 0 END) AS transfer_out,
+        SUM(CASE WHEN UPPER(COALESCE(bt.status, '')) = 'SHORTAGE' THEN 1 ELSE 0 END) AS shortage_count
+      FROM branch_transfers bt
+      WHERE ${transferBase.join(" AND ")}
+      `,
+      branchScope.isBranchFiltered
+        ? [branchScope.branchId, branchScope.branchId, ...transferParams]
+        : transferParams
+    );
+
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      fromDate: dateRange.fromDate || null,
+      toDate: dateRange.toDate || null,
+      stock_qty: Number(stockSummary[0]?.stock_qty || 0),
+      stock_weight: Number(stockSummary[0]?.stock_weight || 0),
+      sold_qty: Number(salesSummary[0]?.sold_qty || 0),
+      sales_amount: Number(salesSummary[0]?.sales_amount || 0),
+      transfer_in: Number(transferSummary[0]?.transfer_in || 0),
+      transfer_out: Number(transferSummary[0]?.transfer_out || 0),
+      shortage_count: Number(transferSummary[0]?.shortage_count || 0),
+      damaged_count: Number(stockSummary[0]?.damaged_count || 0),
+      in_transit_count: Number(stockSummary[0]?.in_transit_count || 0)
+    });
+  } catch (error) {
+    console.error("Branch analytics summary error:", error);
+    return res.status(500).json({ success: false, message: "Branch analytics summary failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/transfer-ageing", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const whereParts = ["UPPER(COALESCE(bt.status, '')) IN ('IN_TRANSIT', 'PARTIALLY_RECEIVED')"];
+    const params = [];
+    if (access.companyScope !== null) {
+      whereParts.push("bt.company_id = ?");
+      params.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      params.push(branchScope.branchId, branchScope.branchId);
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT
+        bt.*,
+        fb.branch_name AS from_branch_name,
+        tb.branch_name AS to_branch_name,
+        TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()) AS age_hours,
+        COUNT(bti.id) AS total_items,
+        SUM(CASE WHEN UPPER(COALESCE(bti.item_status, '')) = 'RECEIVED' THEN 1 ELSE 0 END) AS received_items,
+        SUM(CASE WHEN UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS pending_items
+      FROM branch_transfers bt
+      LEFT JOIN branch_transfer_items bti ON bti.transfer_id = bt.id AND bti.company_id = bt.company_id AND UPPER(COALESCE(bti.item_status, '')) <> 'CANCELLED'
+      LEFT JOIN branches fb ON fb.id = bt.from_branch_id AND fb.company_id = bt.company_id
+      LEFT JOIN branches tb ON tb.id = bt.to_branch_id AND tb.company_id = bt.company_id
+      WHERE ${whereParts.join(" AND ")}
+      GROUP BY bt.id, fb.branch_name, tb.branch_name
+      ORDER BY age_hours DESC, bt.id DESC
+      `,
+      params
+    );
+    const transfers = rows.map((row) => ({
+      ...row,
+      age_hours: Number(row.age_hours || 0),
+      age_days: Number(row.age_hours || 0) / 24,
+      ageing_level: getAgeingLevel(row.age_hours),
+      is_overdue: Number(row.age_hours || 0) >= 24
+    }));
+    const groupedByBranch = transfers.reduce((summary, transfer) => {
+      const key = String(transfer.to_branch_id || "unassigned");
+      if (!summary[key]) {
+        summary[key] = {
+          branch_id: transfer.to_branch_id || null,
+          branch_name: transfer.to_branch_name || "Unassigned Branch",
+          transfers: [],
+          total_transfers: 0,
+          pending_items: 0,
+          critical_count: 0,
+          warning_count: 0
+        };
+      }
+      summary[key].transfers.push(transfer);
+      summary[key].total_transfers += 1;
+      summary[key].pending_items += Number(transfer.pending_items || 0);
+      if (transfer.ageing_level === "CRITICAL") summary[key].critical_count += 1;
+      if (transfer.ageing_level === "WARNING") summary[key].warning_count += 1;
+      return summary;
+    }, {});
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      transfers,
+      grouped_by_branch: Object.values(groupedByBranch)
+    });
+  } catch (error) {
+    console.error("Transfer ageing error:", error);
+    return res.status(500).json({ success: false, message: "Transfer ageing fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/shortages", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const whereParts = ["(UPPER(COALESCE(bt.status, '')) = 'SHORTAGE' OR UPPER(COALESCE(bti.item_status, '')) = 'SHORTAGE')"];
+    const params = [];
+    if (access.companyScope !== null) {
+      whereParts.push("bt.company_id = ?");
+      params.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      params.push(branchScope.branchId, branchScope.branchId);
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT
+        bt.id AS transfer_id,
+        bt.transfer_no,
+        bt.status,
+        bt.created_at,
+        bt.updated_at,
+        fb.branch_name AS from_branch_name,
+        tb.branch_name AS to_branch_name,
+        TIMESTAMPDIFF(HOUR, COALESCE(bt.received_at, bt.updated_at, bt.created_at), NOW()) AS shortage_age_hours,
+        COUNT(bti.id) AS missing_count,
+        GROUP_CONCAT(bti.barcode ORDER BY bti.id SEPARATOR ', ') AS missing_barcodes
+      FROM branch_transfers bt
+      LEFT JOIN branch_transfer_items bti ON bti.transfer_id = bt.id AND bti.company_id = bt.company_id AND UPPER(COALESCE(bti.item_status, '')) = 'SHORTAGE'
+      LEFT JOIN branches fb ON fb.id = bt.from_branch_id AND fb.company_id = bt.company_id
+      LEFT JOIN branches tb ON tb.id = bt.to_branch_id AND tb.company_id = bt.company_id
+      WHERE ${whereParts.join(" AND ")}
+      GROUP BY bt.id, fb.branch_name, tb.branch_name
+      ORDER BY shortage_age_hours DESC, bt.id DESC
+      `,
+      params
+    );
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      shortages: rows.map((row) => ({
+        ...row,
+        missing_count: Number(row.missing_count || 0),
+        shortage_age_hours: Number(row.shortage_age_hours || 0),
+        shortage_age_days: Number(row.shortage_age_hours || 0) / 24,
+        missing_barcodes: String(row.missing_barcodes || "").split(", ").filter(Boolean),
+        pending_mismatch_details: String(row.missing_barcodes || "")
+          .split(", ")
+          .filter(Boolean)
+          .map((barcode) => ({
+            barcode,
+            status: "SHORTAGE",
+            transfer_id: row.transfer_id,
+            transfer_no: row.transfer_no,
+            source_branch: row.from_branch_name || "",
+            destination_branch: row.to_branch_name || ""
+          }))
+      }))
+    });
+  } catch (error) {
+    console.error("Shortage analytics error:", error);
+    return res.status(500).json({ success: false, message: "Shortage analytics fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/in-transit", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const whereParts = ["UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT'"];
+    const params = [];
+    if (access.companyScope !== null) {
+      whereParts.push("bt.company_id = ?");
+      params.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      params.push(branchScope.branchId, branchScope.branchId);
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT
+        bt.id AS transfer_id,
+        bt.transfer_no,
+        bt.from_branch_id,
+        bt.to_branch_id,
+        bt.status AS transfer_status,
+        bt.dispatched_at,
+        fb.branch_name AS from_branch_name,
+        tb.branch_name AS to_branch_name,
+        COUNT(bti.id) AS qty,
+        COALESCE(SUM(s.weight), 0) AS weight,
+        TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()) AS age_hours,
+        GROUP_CONCAT(bti.barcode ORDER BY bti.id SEPARATOR ', ') AS barcodes
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+      LEFT JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+      LEFT JOIN branches fb ON fb.id = bt.from_branch_id AND fb.company_id = bt.company_id
+      LEFT JOIN branches tb ON tb.id = bt.to_branch_id AND tb.company_id = bt.company_id
+      WHERE ${whereParts.join(" AND ")}
+      GROUP BY bt.id, fb.branch_name, tb.branch_name
+      ORDER BY age_hours DESC, bt.id DESC
+      `,
+      params
+    );
+    const transfers = rows.map((row) => ({
+      ...row,
+      qty: Number(row.qty || 0),
+      weight: Number(row.weight || 0),
+      age_hours: Number(row.age_hours || 0),
+      age_days: Number(row.age_hours || 0) / 24,
+      ageing_level: getAgeingLevel(row.age_hours),
+      barcodes: String(row.barcodes || "").split(", ").filter(Boolean)
+    }));
+    const groupedByBranch = transfers.reduce((summary, transfer) => {
+      const key = String(transfer.to_branch_id || "unassigned");
+      if (!summary[key]) {
+        summary[key] = {
+          branch_id: transfer.to_branch_id || null,
+          branch_name: transfer.to_branch_name || "Unassigned Branch",
+          qty: 0,
+          weight: 0,
+          transfers: []
+        };
+      }
+      summary[key].qty += Number(transfer.qty || 0);
+      summary[key].weight += Number(transfer.weight || 0);
+      summary[key].transfers.push(transfer);
+      return summary;
+    }, {});
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      transfers,
+      grouped_by_branch: Object.values(groupedByBranch)
+    });
+  } catch (error) {
+    console.error("In-transit analytics error:", error);
+    return res.status(500).json({ success: false, message: "In-transit analytics fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/movement-ledger", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const barcode = normalizeBarcodeForComparison(req.query.barcode || "");
+    const movementType = normalizeMovementType(req.query.movementType || req.query.movement_type || "");
+    const dateRange = getAnalyticsDateRange(req);
+    const scopeSql = access.companyScope !== null ? "company_id = ?" : "1 = 1";
+    const scopeParams = access.companyScope !== null ? [access.companyScope] : [];
+    const branchFilterStock = branchScope.isBranchFiltered ? "AND current_branch_id = ?" : "";
+    const branchFilterTransfer = branchScope.isBranchFiltered ? "AND (from_branch_id = ? OR to_branch_id = ?)" : "";
+    const branchStockParams = branchScope.isBranchFiltered ? [branchScope.branchId] : [];
+    const branchTransferParams = branchScope.isBranchFiltered ? [branchScope.branchId, branchScope.branchId] : [];
+    const rows = [];
+    const ledgerFetchLimit = Math.min(3000, Math.max(500, pagination.limit + pagination.offset + 250));
+
+    const addFilteredRows = (items) => {
+      for (const item of items) {
+        if (barcode && normalizeBarcodeForComparison(item.barcode) !== barcode) continue;
+        if (movementType && normalizeMovementType(item.movement_type) !== movementType) continue;
+        const dateValue = String(item.movement_at || "").slice(0, 10);
+        if (dateRange.fromDate && dateValue < dateRange.fromDate) continue;
+        if (dateRange.toDate && dateValue > dateRange.toDate) continue;
+        rows.push(item);
+      }
+    };
+
+    const appendLedgerQueryFilters = (whereParts, params, {
+      barcodeColumn = "barcode",
+      dateColumn = "created_at",
+      movementName = ""
+    } = {}) => {
+      if (barcode) {
+        whereParts.push(`UPPER(TRIM(${barcodeColumn})) = ?`);
+        params.push(barcode);
+      }
+      if (dateRange.fromDate) {
+        whereParts.push(`${dateColumn} >= ?`);
+        params.push(`${dateRange.fromDate} 00:00:00`);
+      }
+      if (dateRange.toDate) {
+        whereParts.push(`${dateColumn} < DATE_ADD(?, INTERVAL 1 DAY)`);
+        params.push(dateRange.toDate);
+      }
+      if (movementType && movementName && movementType !== movementName) {
+        whereParts.push("1 = 0");
+      }
+    };
+
+    const createdWhereParts = [scopeSql, "barcode IS NOT NULL", "TRIM(barcode) <> ''"];
+    const createdParams = [...scopeParams, ...branchStockParams];
+    if (branchScope.isBranchFiltered) createdWhereParts.push("current_branch_id = ?");
+    appendLedgerQueryFilters(createdWhereParts, createdParams, {
+      barcodeColumn: "barcode",
+      dateColumn: "created_at",
+      movementName: "CREATED"
+    });
+
+    const [createdRows] = await pool.query(
+      `
+      SELECT id AS source_id, company_id, barcode, current_branch_id AS branch_id, 'CREATED' AS movement_type, created_at AS movement_at, product_name, weight, status, stock_state, 'stock' AS source_table
+      FROM stock
+      WHERE ${createdWhereParts.join(" AND ")}
+      ORDER BY created_at DESC
+      LIMIT ?
+      `,
+      [...createdParams, ledgerFetchLimit]
+    );
+    addFilteredRows(createdRows);
+
+    const transferWhereParts = [scopeSql.replace("company_id", "bti.company_id")];
+    const transferParams = [...scopeParams, ...branchTransferParams];
+    if (branchScope.isBranchFiltered) {
+      transferWhereParts.push("(bti.from_branch_id = ? OR bti.to_branch_id = ?)");
+    }
+    if (barcode) {
+      transferWhereParts.push("UPPER(TRIM(bti.barcode)) = ?");
+      transferParams.push(barcode);
+    }
+    if (dateRange.fromDate) {
+      transferWhereParts.push("COALESCE(bt.dispatched_at, bti.created_at) >= ?");
+      transferParams.push(`${dateRange.fromDate} 00:00:00`);
+    }
+    if (dateRange.toDate) {
+      transferWhereParts.push("COALESCE(bt.dispatched_at, bti.created_at) < DATE_ADD(?, INTERVAL 1 DAY)");
+      transferParams.push(dateRange.toDate);
+    }
+    if (movementType && !["TRANSFER_CREATED", "DISPATCHED", "RECEIVED", "SHORTAGE"].includes(movementType)) {
+      transferWhereParts.push("1 = 0");
+    }
+
+    const [transferRows] = await pool.query(
+      `
+      SELECT bti.id AS source_id, bti.company_id, bti.barcode, bti.from_branch_id, bti.to_branch_id, bti.item_status, bti.created_at, bti.received_at, s.weight, s.product_name, bt.transfer_no, bt.dispatched_at
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+      LEFT JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+      WHERE ${transferWhereParts.join(" AND ")}
+      ORDER BY bti.id DESC
+      LIMIT ?
+      `,
+      [...transferParams, ledgerFetchLimit]
+    );
+    addFilteredRows(transferRows.map((row) => ({ ...row, branch_id: row.from_branch_id, movement_type: "TRANSFER_CREATED", movement_at: row.created_at, source_table: "branch_transfer_items" })));
+    addFilteredRows(transferRows.filter((row) => ["IN_TRANSIT", "RECEIVED", "SHORTAGE"].includes(normalizeMovementType(row.item_status))).map((row) => ({ ...row, branch_id: row.from_branch_id, movement_type: "DISPATCHED", movement_at: row.dispatched_at || row.created_at, source_table: "branch_transfer_items" })));
+    addFilteredRows(transferRows.filter((row) => normalizeMovementType(row.item_status) === "RECEIVED").map((row) => ({ ...row, branch_id: row.to_branch_id, movement_type: "RECEIVED", movement_at: row.received_at || row.created_at, source_table: "branch_transfer_items" })));
+    addFilteredRows(transferRows.filter((row) => normalizeMovementType(row.item_status) === "SHORTAGE").map((row) => ({ ...row, branch_id: row.from_branch_id, movement_type: "SHORTAGE", movement_at: row.received_at || row.created_at, source_table: "branch_transfer_items" })));
+
+    const soldWhereParts = [scopeSql.replace("company_id", "si.company_id"), "COALESCE(si.is_deleted, 0) = 0"];
+    const soldParams = [...scopeParams, ...branchStockParams];
+    if (branchScope.isBranchFiltered) soldWhereParts.push("s.current_branch_id = ?");
+    appendLedgerQueryFilters(soldWhereParts, soldParams, {
+      barcodeColumn: "si.barcode",
+      dateColumn: "si.created_at",
+      movementName: "SOLD"
+    });
+
+    const [soldRows] = await pool.query(
+      `
+      SELECT si.id AS source_id, si.company_id, si.barcode, s.current_branch_id AS branch_id, 'SOLD' AS movement_type, si.created_at AS movement_at, si.product_name, si.weight, si.invoice_number, 'sales_items' AS source_table
+      FROM sales_items si
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE ${soldWhereParts.join(" AND ")}
+      ORDER BY si.id DESC
+      LIMIT ?
+      `,
+      [...soldParams, ledgerFetchLimit]
+    );
+    addFilteredRows(soldRows);
+
+    const returnWhereParts = [scopeSql.replace("company_id", "rh.company_id")];
+    const returnParams = [...scopeParams, ...branchStockParams];
+    if (branchScope.isBranchFiltered) returnWhereParts.push("s.current_branch_id = ?");
+    appendLedgerQueryFilters(returnWhereParts, returnParams, {
+      barcodeColumn: "rh.barcode",
+      dateColumn: "COALESCE(rh.return_date, rh.created_at)"
+    });
+    if (movementType && !["RETURNED", "DAMAGED"].includes(movementType)) {
+      returnWhereParts.push("1 = 0");
+    }
+
+    const [returnRows] = await pool.query(
+      `
+      SELECT rh.id AS source_id, rh.company_id, rh.barcode, s.current_branch_id AS branch_id, CASE WHEN UPPER(COALESCE(rh.return_type, '')) = 'DAMAGED_RETURN' THEN 'DAMAGED' ELSE 'RETURNED' END AS movement_type, COALESCE(rh.return_date, rh.created_at) AS movement_at, rh.product_name, rh.weight, rh.invoice_number, 'return_history' AS source_table
+      FROM return_history rh
+      LEFT JOIN stock s ON s.company_id = rh.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
+      WHERE ${returnWhereParts.join(" AND ")}
+      ORDER BY rh.id DESC
+      LIMIT ?
+      `,
+      [...returnParams, ledgerFetchLimit]
+    );
+    addFilteredRows(returnRows);
+
+    rows.sort((a, b) => new Date(b.movement_at || 0) - new Date(a.movement_at || 0));
+    const pagedRows = rows.slice(pagination.offset, pagination.offset + pagination.limit);
+    setPaginationHeaders(res, pagination);
+    return res.json({ success: true, branchScope: getBranchScopeResponse(branchScope), total: rows.length, movements: pagedRows, limit: pagination.limit, offset: pagination.offset });
+  } catch (error) {
+    console.error("Movement ledger error:", error);
+    return res.status(500).json({ success: false, message: "Movement ledger fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-analytics/reconciliation", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveAnalyticsAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const dateRange = getAnalyticsDateRange(req);
+    const stockScope = buildAnalyticsStockScope(access, branchScope, { alias: "s" });
+    const [closingRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS closing_stock, COALESCE(SUM(weight), 0) AS closing_weight
+      FROM stock s
+      WHERE ${stockScope.whereSql}
+        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
+      `,
+      stockScope.params
+    );
+    const transferWhere = [];
+    const transferParams = [];
+    if (access.companyScope !== null) {
+      transferWhere.push("bt.company_id = ?");
+      transferParams.push(access.companyScope);
+    } else {
+      transferWhere.push("1 = 1");
+    }
+    if (branchScope.isBranchFiltered) {
+      transferWhere.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      transferParams.push(branchScope.branchId, branchScope.branchId);
+    }
+    appendDateRangeFilter(transferWhere, transferParams, "bt.created_at", dateRange);
+    const [transferRows] = await pool.query(
+      `
+      SELECT
+        SUM(CASE WHEN ${branchScope.isBranchFiltered ? "bt.to_branch_id = ?" : "1 = 1"} THEN 1 ELSE 0 END) AS inward_transfer,
+        SUM(CASE WHEN ${branchScope.isBranchFiltered ? "bt.from_branch_id = ?" : "1 = 1"} THEN 1 ELSE 0 END) AS outward_transfer
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+      WHERE ${transferWhere.join(" AND ")}
+        AND UPPER(COALESCE(bti.item_status, '')) <> 'CANCELLED'
+      `,
+      branchScope.isBranchFiltered
+        ? [branchScope.branchId, branchScope.branchId, ...transferParams]
+        : transferParams
+    );
+    const salesWhere = [stockScope.whereSql, "COALESCE(si.is_deleted, 0) = 0"];
+    const salesParams = [...stockScope.params];
+    appendDateRangeFilter(salesWhere, salesParams, "si.created_at", dateRange);
+    const [salesRows] = await pool.query(
+      `
+      SELECT COUNT(si.id) AS sold, COALESCE(SUM(si.weight), 0) AS sold_weight
+      FROM sales_items si
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE ${salesWhere.join(" AND ")}
+      `,
+      salesParams
+    );
+    const [damagedRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS damaged
+      FROM stock s
+      WHERE ${stockScope.whereSql}
+        AND UPPER(COALESCE(status, '')) IN ('DAMAGED_RETURN', 'DAMAGED')
+      `,
+      stockScope.params
+    );
+    const [returnRows] = await pool.query(
+      `
+      SELECT COUNT(rh.id) AS returned
+      FROM return_history rh
+      LEFT JOIN stock s ON s.company_id = rh.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
+      WHERE ${stockScope.whereSql.replaceAll("s.", "s.")}
+      `,
+      stockScope.params
+    );
+    const closingStock = Number(closingRows[0]?.closing_stock || 0);
+    const inward = Number(transferRows[0]?.inward_transfer || 0);
+    const outward = Number(transferRows[0]?.outward_transfer || 0);
+    const sold = Number(salesRows[0]?.sold || 0);
+    const damaged = Number(damagedRows[0]?.damaged || 0);
+    const returned = Number(returnRows[0]?.returned || 0);
+    const openingStock = Math.max(0, closingStock - inward + outward + sold + damaged - returned);
+    const expectedClosing = openingStock + inward - outward - sold - damaged + returned;
+    return res.json({
+      success: true,
+      branchScope: getBranchScopeResponse(branchScope),
+      fromDate: dateRange.fromDate || null,
+      toDate: dateRange.toDate || null,
+      opening_stock: openingStock,
+      inward_transfer: inward,
+      outward_transfer: outward,
+      sold,
+      damaged,
+      returned,
+      closing_stock: closingStock,
+      closing_weight: Number(closingRows[0]?.closing_weight || 0),
+      mismatch: expectedClosing - closingStock,
+      note: "Opening stock is derived from current stock and recorded movements because legacy stock movement history is partial."
+    });
+  } catch (error) {
+    console.error("Branch reconciliation error:", error);
+    return res.status(500).json({ success: false, message: "Branch reconciliation fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+function normalizeAuditStatus(value = "", fallback = "") {
+  const clean = String(value || fallback).trim().toUpperCase().slice(0, 40);
+  return clean;
+}
+
+function normalizeAuditSeverity(value = "", fallback = "") {
+  const clean = String(value || fallback).trim().toUpperCase();
+  return ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(clean) ? clean : "";
+}
+
+function normalizeAuditExceptionType(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  const allowed = new Set([
+    "MISSING_FROM_BRANCH",
+    "WRONG_BRANCH",
+    "IN_TRANSIT_TOO_LONG",
+    "SHORTAGE_UNRESOLVED",
+    "SOLD_BUT_IN_STOCK",
+    "STOCK_STATE_MISMATCH",
+    "DUPLICATE_BARCODE",
+    "UNKNOWN"
+  ]);
+  return allowed.has(clean) ? clean : "";
+}
+
+function getAuditDateValue(value = "", fallback = "") {
+  const clean = String(value || fallback || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : "";
+}
+
+function canApproveBranchAudit(access = {}) {
+  if (!access?.ok || access.isSuperAdmin) return false;
+  return ["OWNER", "ACCOUNTS"].includes(normalizeRoleValue(access.role || access.actingUser?.role || ""));
+}
+
+async function resolveBranchAuditAccess(req, { requireCompanyScope = false } = {}) {
+  const access = await resolveBranchAccessContext(req, { requireCompanyScope });
+  if (!access.ok) return { access };
+  const requestedBranchId = getRequestedBranchScopeValue(req);
+  const branchScope = await resolveOperationalBranchScope(pool, access, requestedBranchId);
+  return { access, branchScope };
+}
+
+async function getAuditBranchesForScope(connection, access, branchScope) {
+  const whereParts = ["b.company_id = ?"];
+  const params = [access.companyScope];
+  if (branchScope?.isBranchFiltered) {
+    whereParts.push("b.id = ?");
+    params.push(branchScope.branchId);
+  }
+  const [rows] = await connection.query(
+    `
+    SELECT b.id, b.branch_code, b.branch_name
+    FROM branches b
+    WHERE ${whereParts.join(" AND ")}
+      AND UPPER(COALESCE(b.status, 'ACTIVE')) = 'ACTIVE'
+    ORDER BY b.branch_name ASC, b.id ASC
+    `,
+    params
+  );
+  return rows;
+}
+
+async function createOrRefreshBranchSnapshot(connection, access, branch, snapshotDate) {
+  const branchId = Number(branch.id);
+  const [summaryRows] = await connection.query(
+    `
+    SELECT
+      COUNT(*) AS total_items,
+      COALESCE(SUM(COALESCE(weight, 0)), 0) AS total_weight,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'SOLD' THEN 1 ELSE 0 END) AS in_stock_items,
+      COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'SOLD' THEN COALESCE(weight, 0) ELSE 0 END), 0) AS in_stock_weight,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_items,
+      COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_TRANSIT' THEN COALESCE(weight, 0) ELSE 0 END), 0) AS in_transit_weight,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'TRANSFER_SHORTAGE' THEN 1 ELSE 0 END) AS shortage_items,
+      COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'TRANSFER_SHORTAGE' THEN COALESCE(weight, 0) ELSE 0 END), 0) AS shortage_weight,
+      SUM(CASE WHEN UPPER(COALESCE(status, '')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_items,
+      SUM(CASE WHEN UPPER(COALESCE(status, '')) IN ('DAMAGED', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS damaged_items
+    FROM stock
+    WHERE company_id = ?
+      AND current_branch_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+    `,
+    [access.companyScope, branchId]
+  );
+  const summary = summaryRows[0] || {};
+
+  await connection.query(
+    `
+    INSERT INTO branch_stock_snapshots
+    (
+      company_id, branch_id, snapshot_date, total_items, total_weight,
+      in_stock_items, in_stock_weight, in_transit_items, in_transit_weight,
+      shortage_items, shortage_weight, sold_items, damaged_items, created_by, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    ON DUPLICATE KEY UPDATE
+      total_items = VALUES(total_items),
+      total_weight = VALUES(total_weight),
+      in_stock_items = VALUES(in_stock_items),
+      in_stock_weight = VALUES(in_stock_weight),
+      in_transit_items = VALUES(in_transit_items),
+      in_transit_weight = VALUES(in_transit_weight),
+      shortage_items = VALUES(shortage_items),
+      shortage_weight = VALUES(shortage_weight),
+      sold_items = VALUES(sold_items),
+      damaged_items = VALUES(damaged_items),
+      created_by = VALUES(created_by),
+      updated_at = NOW()
+    `,
+    [
+      access.companyScope,
+      branchId,
+      snapshotDate,
+      Number(summary.total_items || 0),
+      Number(summary.total_weight || 0),
+      Number(summary.in_stock_items || 0),
+      Number(summary.in_stock_weight || 0),
+      Number(summary.in_transit_items || 0),
+      Number(summary.in_transit_weight || 0),
+      Number(summary.shortage_items || 0),
+      Number(summary.shortage_weight || 0),
+      Number(summary.sold_items || 0),
+      Number(summary.damaged_items || 0),
+      access.actingUserId ?? null
+    ]
+  );
+
+  const [snapshotRows] = await connection.query(
+    `
+    SELECT *
+    FROM branch_stock_snapshots
+    WHERE company_id = ? AND branch_id = ? AND snapshot_date = ?
+    LIMIT 1
+    `,
+    [access.companyScope, branchId, snapshotDate]
+  );
+  const snapshot = snapshotRows[0];
+
+  await connection.query(
+    `
+    DELETE FROM branch_stock_snapshot_items
+    WHERE company_id = ? AND snapshot_id = ?
+    `,
+    [access.companyScope, snapshot.id]
+  );
+
+  await connection.query(
+    `
+    INSERT INTO branch_stock_snapshot_items
+    (
+      company_id, snapshot_id, branch_id, stock_id, barcode, product_name,
+      lot_number, weight, status, stock_state, created_at
+    )
+    SELECT
+      company_id, ?, current_branch_id, id, COALESCE(barcode, ''), COALESCE(product_name, ''),
+      COALESCE(lot_number, ''), COALESCE(weight, 0), COALESCE(status, ''),
+      COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK'), NOW()
+    FROM stock
+    WHERE company_id = ?
+      AND current_branch_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+    ORDER BY id ASC
+    `,
+    [snapshot.id, access.companyScope, branchId]
+  );
+
+  return {
+    ...snapshot,
+    total_items: Number(summary.total_items || 0),
+    total_weight: Number(summary.total_weight || 0),
+    in_stock_items: Number(summary.in_stock_items || 0),
+    in_stock_weight: Number(summary.in_stock_weight || 0),
+    in_transit_items: Number(summary.in_transit_items || 0),
+    in_transit_weight: Number(summary.in_transit_weight || 0),
+    shortage_items: Number(summary.shortage_items || 0),
+    shortage_weight: Number(summary.shortage_weight || 0),
+    sold_items: Number(summary.sold_items || 0),
+    damaged_items: Number(summary.damaged_items || 0),
+    branch_code: branch.branch_code,
+    branch_name: branch.branch_name
+  };
+}
+
+async function generateBranchAuditRunNo(connection, companyId) {
+  const dateKey = getTodayDateOnly().replace(/-/g, "");
+  const prefix = `AUD-${dateKey}-`;
+  const [rows] = await connection.query(
+    `
+    SELECT run_no
+    FROM branch_reconciliation_runs
+    WHERE company_id = ? AND run_no LIKE ?
+    ORDER BY run_no DESC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [companyId, `${prefix}%`]
+  );
+  const last = String(rows[0]?.run_no || "");
+  const next = (Number(last.slice(prefix.length)) || 0) + 1;
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
+function buildBranchAuditException(row = {}) {
+  return {
+    branch_id: row.branch_id ?? row.actual_branch_id ?? row.expected_branch_id ?? null,
+    stock_id: row.stock_id ?? null,
+    barcode: String(row.barcode || "").trim().slice(0, 255),
+    exception_type: normalizeAuditExceptionType(row.exception_type) || "UNKNOWN",
+    severity: normalizeAuditSeverity(row.severity) || "MEDIUM",
+    expected_branch_id: row.expected_branch_id ?? null,
+    actual_branch_id: row.actual_branch_id ?? null,
+    expected_state: String(row.expected_state || "").trim().slice(0, 50),
+    actual_state: String(row.actual_state || "").trim().slice(0, 50),
+    description: String(row.description || "").trim()
+  };
+}
+
+function getAuditBranchFilter(branchScope, column = "s.current_branch_id") {
+  if (!branchScope?.isBranchFiltered) return { sql: "", params: [] };
+  return { sql: ` AND ${column} = ?`, params: [branchScope.branchId] };
+}
+
+async function collectBranchAuditExceptions(connection, access, branchScope) {
+  const exceptions = [];
+  let totalChecked = 0;
+  const stockBranchFilter = getAuditBranchFilter(branchScope, "s.current_branch_id");
+
+  const [stockCountRows] = await connection.query(
+    `
+    SELECT COUNT(*) AS total_checked
+    FROM stock s
+    WHERE s.company_id = ?
+      AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      ${stockBranchFilter.sql}
+    `,
+    [access.companyScope, ...stockBranchFilter.params]
+  );
+  totalChecked += Number(stockCountRows[0]?.total_checked || 0);
+
+  const [duplicateRows] = await connection.query(
+    `
+    SELECT
+      MIN(s.current_branch_id) AS branch_id,
+      NULL AS stock_id,
+      MIN(s.barcode) AS barcode,
+      'DUPLICATE_BARCODE' AS exception_type,
+      CASE WHEN SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'IN_STOCK' THEN 1 ELSE 0 END) > 1 THEN 'CRITICAL' ELSE 'HIGH' END AS severity,
+      NULL AS expected_branch_id,
+      MIN(s.current_branch_id) AS actual_branch_id,
+      'UNIQUE_BARCODE' AS expected_state,
+      CONCAT(COUNT(*), '_DUPLICATES') AS actual_state,
+      CONCAT('Barcode appears ', COUNT(*), ' times inside the company stock table') AS description
+    FROM stock s
+    WHERE s.company_id = ?
+      AND s.barcode IS NOT NULL
+      AND TRIM(s.barcode) <> ''
+      AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      ${stockBranchFilter.sql}
+    GROUP BY s.company_id, UPPER(TRIM(s.barcode))
+    HAVING COUNT(*) > 1
+    LIMIT 1000
+    `,
+    [access.companyScope, ...stockBranchFilter.params]
+  );
+  exceptions.push(...duplicateRows.map(buildBranchAuditException));
+
+  if (!branchScope?.isBranchFiltered) {
+    const [missingBranchRows] = await connection.query(
+      `
+      SELECT
+        NULL AS branch_id,
+        s.id AS stock_id,
+        s.barcode,
+        'MISSING_FROM_BRANCH' AS exception_type,
+        'HIGH' AS severity,
+        NULL AS expected_branch_id,
+        s.current_branch_id AS actual_branch_id,
+        'ASSIGNED_BRANCH' AS expected_state,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS actual_state,
+        'Stock row has no current branch assignment' AS description
+      FROM stock s
+      WHERE s.company_id = ?
+        AND s.current_branch_id IS NULL
+        AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      LIMIT 1000
+      `,
+      [access.companyScope]
+    );
+    exceptions.push(...missingBranchRows.map(buildBranchAuditException));
+  }
+
+  const [stateNullRows] = await connection.query(
+    `
+    SELECT
+      s.current_branch_id AS branch_id,
+      s.id AS stock_id,
+      s.barcode,
+      'STOCK_STATE_MISMATCH' AS exception_type,
+      'MEDIUM' AS severity,
+      s.current_branch_id AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      COALESCE(s.status, 'IN_STOCK') AS expected_state,
+      COALESCE(s.stock_state, '') AS actual_state,
+      'stock_state is blank while status exists' AS description
+    FROM stock s
+    WHERE s.company_id = ?
+      AND (s.stock_state IS NULL OR TRIM(s.stock_state) = '')
+      AND TRIM(COALESCE(s.status, '')) <> ''
+      AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      ${stockBranchFilter.sql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...stockBranchFilter.params]
+  );
+  exceptions.push(...stateNullRows.map(buildBranchAuditException));
+
+  const transferBranchSql = branchScope?.isBranchFiltered ? "AND (bt.from_branch_id = ? OR bt.to_branch_id = ?)" : "";
+  const transferBranchParams = branchScope?.isBranchFiltered ? [branchScope.branchId, branchScope.branchId] : [];
+  const [staleTransitRows] = await connection.query(
+    `
+    SELECT
+      bt.to_branch_id AS branch_id,
+      bti.stock_id,
+      bti.barcode,
+      'IN_TRANSIT_TOO_LONG' AS exception_type,
+      CASE WHEN TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()) >= 120 THEN 'CRITICAL' ELSE 'HIGH' END AS severity,
+      bt.to_branch_id AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      'RECEIVED_OR_SHORTAGE' AS expected_state,
+      COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, bti.item_status, '') AS actual_state,
+      CONCAT('Transfer ', bt.transfer_no, ' is in transit for ', TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()), ' hours') AS description
+    FROM branch_transfer_items bti
+    INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+    LEFT JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+    WHERE bti.company_id = ?
+      AND UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT'
+      AND TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()) >= 72
+      ${transferBranchSql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...transferBranchParams]
+  );
+  exceptions.push(...staleTransitRows.map(buildBranchAuditException));
+
+  const [shortageRows] = await connection.query(
+    `
+    SELECT
+      bti.to_branch_id AS branch_id,
+      bti.stock_id,
+      bti.barcode,
+      'SHORTAGE_UNRESOLVED' AS exception_type,
+      'HIGH' AS severity,
+      bti.to_branch_id AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      'SHORTAGE_RESOLVED' AS expected_state,
+      COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, bti.item_status, '') AS actual_state,
+      CONCAT('Shortage remains unresolved for transfer ', bt.transfer_no) AS description
+    FROM branch_transfer_items bti
+    INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+    LEFT JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+    WHERE bti.company_id = ?
+      AND (UPPER(COALESCE(bti.item_status, '')) = 'SHORTAGE'
+        OR UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) = 'TRANSFER_SHORTAGE')
+      ${transferBranchSql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...transferBranchParams]
+  );
+  exceptions.push(...shortageRows.map(buildBranchAuditException));
+
+  const [receivedMismatchRows] = await connection.query(
+    `
+    SELECT
+      bti.to_branch_id AS branch_id,
+      bti.stock_id,
+      bti.barcode,
+      'WRONG_BRANCH' AS exception_type,
+      'CRITICAL' AS severity,
+      bti.to_branch_id AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      'DESTINATION_BRANCH' AS expected_state,
+      COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '') AS actual_state,
+      CONCAT('Received transfer item is not currently at destination branch for transfer ', bt.transfer_no) AS description
+    FROM branch_transfer_items bti
+    INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+    INNER JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+    WHERE bti.company_id = ?
+      AND UPPER(COALESCE(bti.item_status, '')) = 'RECEIVED'
+      AND COALESCE(s.current_branch_id, 0) <> COALESCE(bti.to_branch_id, 0)
+      ${transferBranchSql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...transferBranchParams]
+  );
+  exceptions.push(...receivedMismatchRows.map(buildBranchAuditException));
+
+  const [inTransitMismatchRows] = await connection.query(
+    `
+    SELECT
+      bti.from_branch_id AS branch_id,
+      bti.stock_id,
+      bti.barcode,
+      'STOCK_STATE_MISMATCH' AS exception_type,
+      'HIGH' AS severity,
+      bti.from_branch_id AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      'IN_TRANSIT' AS expected_state,
+      COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '') AS actual_state,
+      CONCAT('Transfer item is IN_TRANSIT but stock row is not marked IN_TRANSIT for transfer ', bt.transfer_no) AS description
+    FROM branch_transfer_items bti
+    INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+    INNER JOIN stock s ON s.id = bti.stock_id AND s.company_id = bti.company_id
+    WHERE bti.company_id = ?
+      AND UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT'
+      AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) <> 'IN_TRANSIT'
+      ${transferBranchSql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...transferBranchParams]
+  );
+  exceptions.push(...inTransitMismatchRows.map(buildBranchAuditException));
+
+  const [soldMismatchRows] = await connection.query(
+    `
+    SELECT
+      s.current_branch_id AS branch_id,
+      s.id AS stock_id,
+      s.barcode,
+      'SOLD_BUT_IN_STOCK' AS exception_type,
+      'CRITICAL' AS severity,
+      NULL AS expected_branch_id,
+      s.current_branch_id AS actual_branch_id,
+      'SOLD_OR_REMOVED_FROM_STOCK' AS expected_state,
+      COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '') AS actual_state,
+      CONCAT('Barcode appears in sales items but stock still appears available: ', si.invoice_number) AS description
+    FROM sales_items si
+    INNER JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+    WHERE si.company_id = ?
+      AND COALESCE(si.is_deleted, 0) = 0
+      AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK'
+      ${stockBranchFilter.sql}
+    LIMIT 1000
+    `,
+    [access.companyScope, ...stockBranchFilter.params]
+  );
+  exceptions.push(...soldMismatchRows.map(buildBranchAuditException));
+
+  return { exceptions, totalChecked };
+}
+
+async function insertBranchAuditExceptions(connection, companyId, runId, exceptions) {
+  if (!exceptions.length) return;
+  const values = exceptions.map((item) => [
+    companyId,
+    runId,
+    item.branch_id ?? null,
+    item.stock_id ?? null,
+    item.barcode || "",
+    item.exception_type || "UNKNOWN",
+    item.severity || "MEDIUM",
+    item.expected_branch_id ?? null,
+    item.actual_branch_id ?? null,
+    item.expected_state || "",
+    item.actual_state || "",
+    item.description || "",
+    "OPEN"
+  ]);
+  await connection.query(
+    `
+    INSERT INTO branch_reconciliation_exceptions
+    (
+      company_id, run_id, branch_id, stock_id, barcode, exception_type, severity,
+      expected_branch_id, actual_branch_id, expected_state, actual_state, description, status
+    )
+    VALUES ?
+    `,
+    [values]
+  );
+}
+
+async function createBranchAuditAlerts(connection, companyId, runId, exceptions) {
+  const alertExceptions = exceptions.filter((item) => ["HIGH", "CRITICAL"].includes(item.severity));
+  if (!alertExceptions.length) return;
+  const values = alertExceptions.slice(0, 500).map((item) => [
+    companyId,
+    item.branch_id ?? item.actual_branch_id ?? item.expected_branch_id ?? null,
+    item.exception_type,
+    `${item.severity} ${item.exception_type.replace(/_/g, " ")}`,
+    item.description || `Audit exception for barcode ${item.barcode || "-"}`,
+    item.severity,
+    "OPEN",
+    "BRANCH_RECONCILIATION_RUN",
+    runId
+  ]);
+  await connection.query(
+    `
+    INSERT INTO branch_audit_alerts
+    (
+      company_id, branch_id, alert_type, title, message, severity,
+      status, reference_type, reference_id
+    )
+    VALUES ?
+    `,
+    [values]
+  );
+}
+
+app.post("/branch-audit/snapshot", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    const snapshotDate = getAuditDateValue(req.body?.snapshotDate || req.body?.snapshot_date, getTodayDateOnly());
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const branches = await getAuditBranchesForScope(connection, access, branchScope);
+    if (!branches.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "No accessible active branch found for snapshot" });
+    }
+    const snapshots = [];
+    for (const branch of branches) {
+      snapshots.push(await createOrRefreshBranchSnapshot(connection, access, branch, snapshotDate));
+    }
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Branch stock snapshot refreshed",
+      snapshot_date: snapshotDate,
+      refreshed: true,
+      snapshots
+    });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error("Branch audit snapshot error:", error);
+    return res.status(500).json({ success: false, message: "Branch snapshot failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/branch-audit/snapshots", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const dateRange = getAnalyticsDateRange(req);
+    const whereParts = ["bs.company_id = ?"];
+    const params = [access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("bs.branch_id = ?");
+      params.push(branchScope.branchId);
+    }
+    appendDateRangeFilter(whereParts, params, "bs.snapshot_date", dateRange);
+    const [rows] = await pool.query(
+      `
+      SELECT bs.*, b.branch_code, b.branch_name
+      FROM branch_stock_snapshots bs
+      LEFT JOIN branches b ON b.id = bs.branch_id AND b.company_id = bs.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY bs.snapshot_date DESC, bs.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+    setPaginationHeaders(res, pagination);
+    return res.json({ success: true, snapshots: rows, limit: pagination.limit, offset: pagination.offset });
+  } catch (error) {
+    console.error("Branch audit snapshots fetch error:", error);
+    return res.status(500).json({ success: false, message: "Snapshots fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-audit/snapshots/:id", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const snapshotId = parsePositiveInteger(req.params.id);
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const whereParts = ["bs.id = ?", "bs.company_id = ?"];
+    const params = [snapshotId, access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("bs.branch_id = ?");
+      params.push(branchScope.branchId);
+    }
+    const [snapshotRows] = await pool.query(
+      `
+      SELECT bs.*, b.branch_code, b.branch_name
+      FROM branch_stock_snapshots bs
+      LEFT JOIN branches b ON b.id = bs.branch_id AND b.company_id = bs.company_id
+      WHERE ${whereParts.join(" AND ")}
+      LIMIT 1
+      `,
+      params
+    );
+    if (!snapshotRows.length) return res.status(404).json({ success: false, message: "Snapshot not found" });
+    const [items] = await pool.query(
+      `
+      SELECT *
+      FROM branch_stock_snapshot_items
+      WHERE company_id = ? AND snapshot_id = ?
+      ORDER BY id ASC
+      ${pagination.sql}
+      `,
+      [access.companyScope, snapshotId]
+    );
+    setPaginationHeaders(res, pagination);
+    return res.json({ success: true, snapshot: snapshotRows[0], items, limit: pagination.limit, offset: pagination.offset });
+  } catch (error) {
+    console.error("Branch audit snapshot detail error:", error);
+    return res.status(500).json({ success: false, message: "Snapshot detail fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/branch-audit/reconcile", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const runNo = await generateBranchAuditRunNo(connection, access.companyScope);
+    const fromDate = getAuditDateValue(req.body?.fromDate || req.body?.from_date);
+    const toDate = getAuditDateValue(req.body?.toDate || req.body?.to_date);
+    const notes = String(req.body?.notes || "").trim();
+    const [runInsert] = await connection.query(
+      `
+      INSERT INTO branch_reconciliation_runs
+      (company_id, branch_id, run_no, run_type, from_date, to_date, status, created_by, created_at, notes)
+      VALUES (?, ?, ?, 'MANUAL', ?, ?, 'RUNNING', ?, NOW(), ?)
+      `,
+      [access.companyScope, branchScope.isBranchFiltered ? branchScope.branchId : null, runNo, fromDate || null, toDate || null, access.actingUserId ?? null, notes || null]
+    );
+    const runId = runInsert.insertId;
+    const { exceptions, totalChecked } = await collectBranchAuditExceptions(connection, access, branchScope);
+    await insertBranchAuditExceptions(connection, access.companyScope, runId, exceptions);
+    await createBranchAuditAlerts(connection, access.companyScope, runId, exceptions);
+    await connection.query(
+      `
+      UPDATE branch_reconciliation_runs
+      SET status = 'COMPLETED',
+          total_checked = ?,
+          exception_count = ?,
+          completed_at = NOW()
+      WHERE id = ? AND company_id = ?
+      `,
+      [totalChecked, exceptions.length, runId, access.companyScope]
+    );
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Reconciliation audit completed",
+      run: {
+        id: runId,
+        run_no: runNo,
+        branch_id: branchScope.isBranchFiltered ? branchScope.branchId : null,
+        total_checked: totalChecked,
+        exception_count: exceptions.length,
+        status: "COMPLETED"
+      },
+      counts: exceptions.reduce((summary, item) => {
+        summary.by_type[item.exception_type] = (summary.by_type[item.exception_type] || 0) + 1;
+        summary.by_severity[item.severity] = (summary.by_severity[item.severity] || 0) + 1;
+        return summary;
+      }, { by_type: {}, by_severity: {} })
+    });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch (_) {}
+    }
+    console.error("Branch audit reconcile error:", error);
+    return res.status(500).json({ success: false, message: "Reconciliation audit failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/branch-audit/runs", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const dateRange = getAnalyticsDateRange(req);
+    const status = normalizeAuditStatus(req.query.status || "");
+    const whereParts = ["br.company_id = ?"];
+    const params = [access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(br.branch_id = ? OR br.branch_id IS NULL)");
+      params.push(branchScope.branchId);
+    }
+    if (status) {
+      whereParts.push("UPPER(COALESCE(br.status, '')) = ?");
+      params.push(status);
+    }
+    appendDateRangeFilter(whereParts, params, "br.created_at", dateRange);
+    const [rows] = await pool.query(
+      `
+      SELECT br.*, b.branch_code, b.branch_name
+      FROM branch_reconciliation_runs br
+      LEFT JOIN branches b ON b.id = br.branch_id AND b.company_id = br.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY br.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+    setPaginationHeaders(res, pagination);
+    return res.json({ success: true, runs: rows, limit: pagination.limit, offset: pagination.offset });
+  } catch (error) {
+    console.error("Branch audit runs fetch error:", error);
+    return res.status(500).json({ success: false, message: "Audit runs fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-audit/runs/:id", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const runId = parsePositiveInteger(req.params.id);
+    const exceptionPagination = getPagination(req, { defaultLimit: 200, maxLimit: 500 });
+    const runWhere = ["br.id = ?", "br.company_id = ?"];
+    const runParams = [runId, access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      runWhere.push("(br.branch_id = ? OR br.branch_id IS NULL)");
+      runParams.push(branchScope.branchId);
+    }
+    const [runRows] = await pool.query(
+      `
+      SELECT br.*, b.branch_code, b.branch_name
+      FROM branch_reconciliation_runs br
+      LEFT JOIN branches b ON b.id = br.branch_id AND b.company_id = br.company_id
+      WHERE ${runWhere.join(" AND ")}
+      LIMIT 1
+      `,
+      runParams
+    );
+    if (!runRows.length) return res.status(404).json({ success: false, message: "Audit run not found" });
+    const exceptionWhere = ["company_id = ?", "run_id = ?"];
+    const exceptionParams = [access.companyScope, runId];
+    if (branchScope.isBranchFiltered) {
+      exceptionWhere.push("(branch_id = ? OR branch_id IS NULL)");
+      exceptionParams.push(branchScope.branchId);
+    }
+    const [exceptions] = await pool.query(
+      `
+      SELECT *
+      FROM branch_reconciliation_exceptions
+      WHERE ${exceptionWhere.join(" AND ")}
+      ORDER BY FIELD(severity, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), id DESC
+      ${exceptionPagination.sql}
+      `,
+      exceptionParams
+    );
+    const [countRows] = await pool.query(
+      `
+      SELECT exception_type, severity, status, COUNT(*) AS count
+      FROM branch_reconciliation_exceptions
+      WHERE ${exceptionWhere.join(" AND ")}
+      GROUP BY exception_type, severity, status
+      `,
+      exceptionParams
+    );
+    const counts = { by_type: {}, by_severity: {}, by_status: {} };
+    countRows.forEach((row) => {
+      counts.by_type[row.exception_type] = (counts.by_type[row.exception_type] || 0) + Number(row.count || 0);
+      counts.by_severity[row.severity] = (counts.by_severity[row.severity] || 0) + Number(row.count || 0);
+      counts.by_status[row.status] = (counts.by_status[row.status] || 0) + Number(row.count || 0);
+    });
+    setPaginationHeaders(res, exceptionPagination);
+    return res.json({ success: true, run: runRows[0], exceptions, counts, limit: exceptionPagination.limit, offset: exceptionPagination.offset });
+  } catch (error) {
+    console.error("Branch audit run detail error:", error);
+    return res.status(500).json({ success: false, message: "Audit run detail fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-audit/exceptions", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const status = normalizeAuditStatus(req.query.status || "");
+    const severity = normalizeAuditSeverity(req.query.severity || "");
+    const exceptionType = normalizeAuditExceptionType(req.query.exceptionType || req.query.exception_type || "");
+    const barcode = String(req.query.barcode || "").trim();
+    const whereParts = ["e.company_id = ?"];
+    const params = [access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(e.branch_id = ? OR e.branch_id IS NULL)");
+      params.push(branchScope.branchId);
+    }
+    if (status) {
+      whereParts.push("UPPER(COALESCE(e.status, '')) = ?");
+      params.push(status);
+    }
+    if (severity) {
+      whereParts.push("UPPER(COALESCE(e.severity, '')) = ?");
+      params.push(severity);
+    }
+    if (exceptionType) {
+      whereParts.push("UPPER(COALESCE(e.exception_type, '')) = ?");
+      params.push(exceptionType);
+    }
+    if (barcode) {
+      whereParts.push("e.barcode LIKE ?");
+      params.push(`%${barcode}%`);
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT e.*, b.branch_code, b.branch_name, r.run_no
+      FROM branch_reconciliation_exceptions e
+      LEFT JOIN branches b ON b.id = e.branch_id AND b.company_id = e.company_id
+      LEFT JOIN branch_reconciliation_runs r ON r.id = e.run_id AND r.company_id = e.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY FIELD(e.severity, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), e.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+    setPaginationHeaders(res, pagination);
+    return res.json({ success: true, exceptions: rows, canApprove: canApproveBranchAudit(access), limit: pagination.limit, offset: pagination.offset });
+  } catch (error) {
+    console.error("Branch audit exceptions fetch error:", error);
+    return res.status(500).json({ success: false, message: "Exceptions fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/branch-audit/exceptions/:id/approve", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canApproveBranchAudit(access)) {
+      return res.status(403).json({ success: false, message: "Only Owner/Admin/Accounts can approve audit exceptions" });
+    }
+    const exceptionId = parsePositiveInteger(req.params.id);
+    const resolutionNote = String(req.body?.resolution_note || req.body?.resolutionNote || "").trim();
+    if (!resolutionNote) return res.status(400).json({ success: false, message: "resolution_note is required" });
+    const whereParts = ["id = ?", "company_id = ?"];
+    const params = [exceptionId, access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(branch_id = ? OR branch_id IS NULL)");
+      params.push(branchScope.branchId);
+    }
+    const [result] = await pool.query(
+      `
+      UPDATE branch_reconciliation_exceptions
+      SET status = 'APPROVED',
+          approved_by = ?,
+          approved_at = NOW(),
+          resolution_note = ?,
+          updated_at = NOW()
+      WHERE ${whereParts.join(" AND ")}
+        AND UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+      `,
+      [access.actingUserId ?? null, resolutionNote, ...params]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: "Open exception not found" });
+    return res.json({ success: true, message: "Audit exception approved and closed" });
+  } catch (error) {
+    console.error("Branch audit exception approve error:", error);
+    return res.status(500).json({ success: false, message: "Exception approval failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/branch-audit/alerts/:id/resolve", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canApproveBranchAudit(access)) {
+      return res.status(403).json({ success: false, message: "Only Owner/Admin/Accounts can resolve audit alerts" });
+    }
+    const alertId = parsePositiveInteger(req.params.id);
+    const resolutionNote = String(req.body?.resolution_note || req.body?.resolutionNote || "").trim();
+    const whereParts = ["id = ?", "company_id = ?"];
+    const params = [alertId, access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("(branch_id = ? OR branch_id IS NULL)");
+      params.push(branchScope.branchId);
+    }
+    const [result] = await pool.query(
+      `
+      UPDATE branch_audit_alerts
+      SET status = 'RESOLVED',
+          resolved_by = ?,
+          resolved_at = NOW(),
+          resolution_note = ? 
+      WHERE ${whereParts.join(" AND ")}
+        AND UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+      `,
+      [access.actingUserId ?? null, resolutionNote || null, ...params]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: "Open alert not found" });
+    return res.json({ success: true, message: "Audit alert resolved" });
+  } catch (error) {
+    console.error("Branch audit alert resolve error:", error);
+    return res.status(500).json({ success: false, message: "Alert resolve failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/branch-audit/dashboard", authMiddleware, async (req, res) => {
+  try {
+    const { access, branchScope } = await resolveBranchAuditAccess(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+    const branchSql = branchScope.isBranchFiltered ? "AND (branch_id = ? OR branch_id IS NULL)" : "";
+    const branchParams = branchScope.isBranchFiltered ? [branchScope.branchId] : [];
+    const [summaryRows] = await pool.query(
+      `
+      SELECT
+        SUM(CASE WHEN UPPER(status) = 'OPEN' THEN 1 ELSE 0 END) AS open_exceptions,
+        SUM(CASE WHEN UPPER(status) = 'OPEN' AND severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_exceptions,
+        SUM(CASE WHEN UPPER(status) = 'OPEN' AND severity = 'HIGH' THEN 1 ELSE 0 END) AS high_exceptions
+      FROM branch_reconciliation_exceptions
+      WHERE company_id = ?
+        ${branchSql}
+      `,
+      [access.companyScope, ...branchParams]
+    );
+    const transferBranchSql = branchScope.isBranchFiltered ? "AND (bt.from_branch_id = ? OR bt.to_branch_id = ?)" : "";
+    const transferBranchParams = branchScope.isBranchFiltered ? [branchScope.branchId, branchScope.branchId] : [];
+    const [staleRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS stale_transfers
+      FROM branch_transfers bt
+      WHERE bt.company_id = ?
+        AND UPPER(COALESCE(bt.status, '')) IN ('IN_TRANSIT', 'PARTIALLY_RECEIVED')
+        AND TIMESTAMPDIFF(HOUR, COALESCE(bt.dispatched_at, bt.created_at), NOW()) >= 72
+        ${transferBranchSql}
+      `,
+      [access.companyScope, ...transferBranchParams]
+    );
+    const [shortageRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS unresolved_shortages
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt ON bt.id = bti.transfer_id AND bt.company_id = bti.company_id
+      WHERE bti.company_id = ?
+        AND UPPER(COALESCE(bti.item_status, '')) = 'SHORTAGE'
+        ${transferBranchSql}
+      `,
+      [access.companyScope, ...transferBranchParams]
+    );
+    const [alertRows] = await pool.query(
+      `
+      SELECT *
+      FROM branch_audit_alerts
+      WHERE company_id = ?
+        AND UPPER(COALESCE(status, 'OPEN')) = 'OPEN'
+        ${branchSql}
+      ORDER BY FIELD(severity, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), id DESC
+      LIMIT 50
+      `,
+      [access.companyScope, ...branchParams]
+    );
+    const [snapshotRows] = await pool.query(
+      `
+      SELECT bs.*, b.branch_code, b.branch_name
+      FROM branch_stock_snapshots bs
+      LEFT JOIN branches b ON b.id = bs.branch_id AND b.company_id = bs.company_id
+      WHERE bs.company_id = ?
+        ${branchScope.isBranchFiltered ? "AND bs.branch_id = ?" : ""}
+      ORDER BY bs.snapshot_date DESC, bs.id DESC
+      LIMIT 10
+      `,
+      branchScope.isBranchFiltered ? [access.companyScope, branchScope.branchId] : [access.companyScope]
+    );
+    const [runRows] = await pool.query(
+      `
+      SELECT br.*, b.branch_code, b.branch_name
+      FROM branch_reconciliation_runs br
+      LEFT JOIN branches b ON b.id = br.branch_id AND b.company_id = br.company_id
+      WHERE br.company_id = ?
+        ${branchSql.replaceAll("branch_id", "br.branch_id")}
+      ORDER BY br.id DESC
+      LIMIT 10
+      `,
+      [access.companyScope, ...branchParams]
+    );
+    const [riskRows] = await pool.query(
+      `
+      SELECT
+        b.id AS branch_id,
+        b.branch_code,
+        b.branch_name,
+        COALESCE(SUM(CASE WHEN e.severity = 'CRITICAL' AND e.status = 'OPEN' THEN 5 ELSE 0 END), 0)
+          + COALESCE(SUM(CASE WHEN e.severity = 'HIGH' AND e.status = 'OPEN' THEN 3 ELSE 0 END), 0)
+          + COALESCE(SUM(CASE WHEN e.severity = 'MEDIUM' AND e.status = 'OPEN' THEN 1 ELSE 0 END), 0) AS risk_score,
+        COUNT(e.id) AS open_exception_count
+      FROM branches b
+      LEFT JOIN branch_reconciliation_exceptions e
+        ON e.branch_id = b.id
+       AND e.company_id = b.company_id
+       AND UPPER(COALESCE(e.status, 'OPEN')) = 'OPEN'
+      WHERE b.company_id = ?
+        ${branchScope.isBranchFiltered ? "AND b.id = ?" : ""}
+      GROUP BY b.id, b.branch_code, b.branch_name
+      ORDER BY risk_score DESC, b.branch_name ASC
+      LIMIT 50
+      `,
+      branchScope.isBranchFiltered ? [access.companyScope, branchScope.branchId] : [access.companyScope]
+    );
+    const summary = summaryRows[0] || {};
+    return res.json({
+      success: true,
+      open_exceptions: Number(summary.open_exceptions || 0),
+      critical_exceptions: Number(summary.critical_exceptions || 0),
+      high_exceptions: Number(summary.high_exceptions || 0),
+      stale_transfers: Number(staleRows[0]?.stale_transfers || 0),
+      unresolved_shortages: Number(shortageRows[0]?.unresolved_shortages || 0),
+      open_alerts: alertRows,
+      latest_snapshots: snapshotRows,
+      latest_reconciliation_runs: runRows,
+      branch_risk: riskRows.map((row) => ({
+        ...row,
+        risk_score: Number(row.risk_score || 0),
+        open_exception_count: Number(row.open_exception_count || 0)
+      })),
+      canApprove: canApproveBranchAudit(access)
+    });
+  } catch (error) {
+    console.error("Branch audit dashboard error:", error);
+    return res.status(500).json({ success: false, message: "Audit dashboard fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/branch-transfers", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const fromBranchId = parsePositiveInteger(req.body?.from_branch_id ?? req.body?.fromBranchId);
+    const toBranchId = parsePositiveInteger(req.body?.to_branch_id ?? req.body?.toBranchId);
+    const challanNo = String(req.body?.challan_no ?? req.body?.challanNo ?? "").trim().slice(0, 80);
+    const notes = String(req.body?.notes ?? "").trim();
+
+    if (!fromBranchId || !toBranchId) {
+      return res.status(400).json({
+        success: false,
+        message: "from_branch_id and to_branch_id are required"
+      });
+    }
+
+    if (fromBranchId === toBranchId) {
+      return res.status(400).json({
+        success: false,
+        message: "from_branch_id and to_branch_id cannot be same"
+      });
+    }
+
+    if (!canCreateTransferFromBranch(access, fromBranchId)) {
+      return res.status(403).json({
+        success: false,
+        message: "You can create transfers only from your assigned branch"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const fromBranch = await getBranchForCompany(connection, access.companyScope, fromBranchId);
+    const toBranch = await getBranchForCompany(connection, access.companyScope, toBranchId);
+
+    if (!fromBranch || !toBranch) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Both branches must belong to this company"
+      });
+    }
+
+    const transferNo = await generateTransferNumberForCompany(connection, access.companyScope);
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO branch_transfers
+      (
+        company_id,
+        transfer_no,
+        from_branch_id,
+        to_branch_id,
+        status,
+        challan_no,
+        notes,
+        created_by,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, 'CREATED', ?, ?, ?, NOW(), NOW())
+      `,
+      [
+        access.companyScope,
+        transferNo,
+        fromBranchId,
+        toBranchId,
+        challanNo || null,
+        notes || null,
+        access.actingUserId ?? null
+      ]
+    );
+
+    const transfer = await getTransferForAccess(connection, access, insertResult.insertId);
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId: insertResult.insertId,
+      actionType: "CREATE",
+      afterData: transfer,
+      reason: "Transfer draft created"
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Transfer draft created successfully",
+      transfer
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer create error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer draft create failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/branch-transfers", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const status = normalizeTransferStatus(req.query.status);
+    const fromBranchId = parsePositiveInteger(req.query.fromBranchId ?? req.query.from_branch_id);
+    const toBranchId = parsePositiveInteger(req.query.toBranchId ?? req.query.to_branch_id);
+    const whereParts = [];
+    const params = [];
+
+    if (access.companyScope !== null) {
+      whereParts.push("bt.company_id = ?");
+      params.push(access.companyScope);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push("(bt.from_branch_id = ? OR bt.to_branch_id = ?)");
+      params.push(access.userBranchId, access.userBranchId);
+    }
+
+    if (status) {
+      whereParts.push("UPPER(COALESCE(bt.status, '')) = ?");
+      params.push(status);
+    }
+
+    if (fromBranchId) {
+      if (!canAccessTransferBranch(access, fromBranchId)) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot access another branch"
+        });
+      }
+      whereParts.push("bt.from_branch_id = ?");
+      params.push(fromBranchId);
+    }
+
+    if (toBranchId) {
+      if (!canAccessTransferBranch(access, toBranchId)) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot access another branch"
+        });
+      }
+      whereParts.push("bt.to_branch_id = ?");
+      params.push(toBranchId);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `
+      SELECT
+        bt.*,
+        fb.branch_code AS from_branch_code,
+        fb.branch_name AS from_branch_name,
+        tb.branch_code AS to_branch_code,
+        tb.branch_name AS to_branch_name,
+        COALESCE(item_counts.total_items, 0) AS total_items,
+        COALESCE(item_counts.active_items, 0) AS active_items
+      FROM branch_transfers bt
+      LEFT JOIN branches fb
+        ON fb.id = bt.from_branch_id
+       AND fb.company_id = bt.company_id
+      LEFT JOIN branches tb
+        ON tb.id = bt.to_branch_id
+       AND tb.company_id = bt.company_id
+      LEFT JOIN (
+        SELECT
+          transfer_id,
+          company_id,
+          COUNT(*) AS total_items,
+          SUM(CASE WHEN UPPER(COALESCE(item_status, '')) <> 'CANCELLED' THEN 1 ELSE 0 END) AS active_items
+        FROM branch_transfer_items
+        GROUP BY transfer_id, company_id
+      ) item_counts
+        ON item_counts.transfer_id = bt.id
+       AND item_counts.company_id = bt.company_id
+      ${whereSql}
+      ORDER BY bt.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+
+    setPaginationHeaders(res, pagination);
+    return res.json({
+      success: true,
+      transfers: rows,
+      limit: pagination.limit,
+      offset: pagination.offset
+    });
+  } catch (error) {
+    console.error("Branch transfers fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch transfers fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-transfers/incoming", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const requestedStatus = normalizeTransferStatus(req.query.status);
+    const branchId = parsePositiveInteger(req.query.branchId ?? req.query.branch_id);
+    const whereParts = [];
+    const params = [];
+
+    if (access.companyScope !== null) {
+      whereParts.push("bt.company_id = ?");
+      params.push(access.companyScope);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push("bt.to_branch_id = ?");
+      params.push(access.userBranchId);
+    }
+
+    if (branchId) {
+      if (!canAccessTransferBranch(access, branchId)) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot access another branch"
+        });
+      }
+
+      whereParts.push("bt.to_branch_id = ?");
+      params.push(branchId);
+    }
+
+    if (requestedStatus) {
+      whereParts.push("UPPER(COALESCE(bt.status, '')) = ?");
+      params.push(requestedStatus);
+    } else {
+      whereParts.push("UPPER(COALESCE(bt.status, '')) IN ('IN_TRANSIT', 'PARTIALLY_RECEIVED')");
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `
+      SELECT
+        bt.*,
+        fb.branch_code AS from_branch_code,
+        fb.branch_name AS from_branch_name,
+        tb.branch_code AS to_branch_code,
+        tb.branch_name AS to_branch_name,
+        COALESCE(item_counts.total_items, 0) AS total_items,
+        COALESCE(item_counts.in_transit_items, 0) AS pending_items,
+        COALESCE(item_counts.received_items, 0) AS received_items,
+        COALESCE(item_counts.shortage_items, 0) AS shortage_items
+      FROM branch_transfers bt
+      LEFT JOIN branches fb
+        ON fb.id = bt.from_branch_id
+       AND fb.company_id = bt.company_id
+      LEFT JOIN branches tb
+        ON tb.id = bt.to_branch_id
+       AND tb.company_id = bt.company_id
+      LEFT JOIN (
+        SELECT
+          transfer_id,
+          company_id,
+          SUM(CASE WHEN UPPER(COALESCE(item_status, '')) <> 'CANCELLED' THEN 1 ELSE 0 END) AS total_items,
+          SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS in_transit_items,
+          SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'RECEIVED' THEN 1 ELSE 0 END) AS received_items,
+          SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'SHORTAGE' THEN 1 ELSE 0 END) AS shortage_items
+        FROM branch_transfer_items
+        GROUP BY transfer_id, company_id
+      ) item_counts
+        ON item_counts.transfer_id = bt.id
+       AND item_counts.company_id = bt.company_id
+      ${whereSql}
+      ORDER BY bt.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+
+    setPaginationHeaders(res, pagination);
+    return res.json({
+      success: true,
+      transfers: rows,
+      limit: pagination.limit,
+      offset: pagination.offset
+    });
+  } catch (error) {
+    console.error("Incoming branch transfers fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Incoming branch transfers fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branch-transfers/:id", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    const transfer = await getTransferForAccess(connection, access, transferId);
+    if (!transfer) {
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    const [items] = await connection.query(
+      `
+      SELECT
+        bti.*,
+        s.product_name,
+        s.sku,
+        s.lot_number,
+        s.weight,
+        s.status AS stock_status,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS effective_stock_state
+      FROM branch_transfer_items bti
+      LEFT JOIN stock s
+        ON s.id = bti.stock_id
+       AND s.company_id = bti.company_id
+      WHERE bti.transfer_id = ?
+        AND bti.company_id = ?
+      ORDER BY bti.id ASC
+      `,
+      [transferId, transfer.company_id]
+    );
+
+    const counts = items.reduce(
+      (summary, item) => {
+        const itemStatus = String(item.item_status || "").trim().toUpperCase();
+        summary.total_items += 1;
+        if (itemStatus === "PENDING_DISPATCH") summary.pending_dispatch_items += 1;
+        if (itemStatus === "IN_TRANSIT") summary.in_transit_items += 1;
+        if (itemStatus === "RECEIVED") summary.received_items += 1;
+        if (itemStatus === "CANCELLED") summary.cancelled_items += 1;
+        return summary;
+      },
+      {
+        total_items: 0,
+        pending_dispatch_items: 0,
+        in_transit_items: 0,
+        received_items: 0,
+        cancelled_items: 0
+      }
+    );
+
+    return res.json({
+      success: true,
+      transfer,
+      items,
+      counts
+    });
+  } catch (error) {
+    console.error("Branch transfer detail error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch transfer detail failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branch-transfers/:id/dispatch", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    if (String(transfer.status || "").trim().toUpperCase() !== "CREATED") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Only CREATED transfers can be dispatched"
+      });
+    }
+
+    if (!canCreateTransferFromBranch(access, transfer.from_branch_id)) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You can dispatch transfers only from your assigned branch"
+      });
+    }
+
+    if (Number(transfer.from_branch_id || 0) === Number(transfer.to_branch_id || 0)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Transfer source and destination branch cannot be same"
+      });
+    }
+
+    const fromBranch = await getBranchForCompany(connection, access.companyScope, transfer.from_branch_id);
+    const toBranch = await getBranchForCompany(connection, access.companyScope, transfer.to_branch_id);
+    if (!fromBranch || !toBranch) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer branches must belong to this company"
+      });
+    }
+
+    const [activeItems] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) = 'PENDING_DISPATCH'
+      ORDER BY id ASC
+      FOR UPDATE
+      `,
+      [transferId, access.companyScope]
+    );
+
+    if (!activeItems.length) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Transfer must have at least one pending item before dispatch"
+      });
+    }
+
+    const lockedItems = [];
+
+    for (const item of activeItems) {
+      const normalizedBarcode = normalizeBarcodeForComparison(item.barcode);
+      if (!normalizedBarcode) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Transfer item has an empty barcode"
+        });
+      }
+
+      const [stockRows] = await connection.query(
+        `
+        SELECT
+          id,
+          company_id,
+          barcode,
+          product_name,
+          sku,
+          lot_number,
+          weight,
+          status,
+          stock_state,
+          current_branch_id
+        FROM stock
+        WHERE company_id = ?
+          AND UPPER(TRIM(barcode)) = ?
+        ORDER BY id DESC
+        LIMIT 2
+        FOR UPDATE
+        `,
+        [access.companyScope, normalizedBarcode]
+      );
+
+      if (!stockRows.length) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: `Barcode ${item.barcode} was not found in this company stock`
+        });
+      }
+
+      if (stockRows.length > 1) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: DUPLICATE_BARCODE_MESSAGE
+        });
+      }
+
+      const stockItem = stockRows[0];
+      const stockStatus = String(stockItem.status || "IN_STOCK").trim().toUpperCase();
+      const effectiveStockState = getEffectiveStockState(stockItem);
+
+      if (Number(stockItem.company_id || 0) !== Number(access.companyScope || 0)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Barcode ${item.barcode} does not belong to this company`
+        });
+      }
+
+      if (Number(stockItem.current_branch_id || 0) !== Number(transfer.from_branch_id || 0)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Barcode ${item.barcode} does not belong to the transfer source branch`
+        });
+      }
+
+      if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Barcode ${item.barcode} is not available in stock for dispatch`
+        });
+      }
+
+      if (["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED", "IN_TRANSIT"].includes(stockStatus) ||
+        ["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED", "IN_TRANSIT"].includes(effectiveStockState)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Barcode ${item.barcode} cannot be dispatched because it is sold, damaged, deleted, or already in transit`
+        });
+      }
+
+      const [otherTransferRows] = await connection.query(
+        `
+        SELECT bti.id, bti.transfer_id
+        FROM branch_transfer_items bti
+        INNER JOIN branch_transfers bt
+          ON bt.id = bti.transfer_id
+         AND bt.company_id = bti.company_id
+        WHERE bti.company_id = ?
+          AND UPPER(TRIM(bti.barcode)) = ?
+          AND bti.transfer_id <> ?
+          AND UPPER(COALESCE(bti.item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT')
+          AND UPPER(COALESCE(bt.status, 'CREATED')) NOT IN ('CANCELLED', 'RECEIVED', 'SHORTAGE')
+        LIMIT 1
+        `,
+        [access.companyScope, normalizedBarcode, transferId]
+      );
+
+      if (otherTransferRows.length) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `Barcode ${item.barcode} is already in another open transfer`
+        });
+      }
+
+      const [stockUpdateResult] = await connection.query(
+        `
+        UPDATE stock
+        SET stock_state = 'IN_TRANSIT',
+            updated_at = NOW()
+        WHERE id = ?
+          AND company_id = ?
+          AND current_branch_id = ?
+          AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+          AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
+        `,
+        [stockItem.id, access.companyScope, transfer.from_branch_id]
+      );
+
+      if (Number(stockUpdateResult?.affectedRows || 0) !== 1) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `Barcode ${item.barcode} could not be locked for dispatch`
+        });
+      }
+
+      await connection.query(
+        `
+        UPDATE branch_transfer_items
+        SET item_status = 'IN_TRANSIT',
+            stock_id = ?,
+            updated_at = NOW()
+        WHERE id = ?
+          AND transfer_id = ?
+          AND company_id = ?
+          AND UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) = 'PENDING_DISPATCH'
+        `,
+        [stockItem.id, item.id, transferId, access.companyScope]
+      );
+
+      lockedItems.push({
+        item_id: item.id,
+        stock_id: stockItem.id,
+        barcode: stockItem.barcode || item.barcode
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE branch_transfers
+      SET status = 'IN_TRANSIT',
+          dispatched_by = ?,
+          dispatched_at = NOW(),
+          updated_at = NOW()
+      WHERE id = ? AND company_id = ?
+      `,
+      [access.actingUserId ?? null, transferId, access.companyScope]
+    );
+
+    const dispatchedTransfer = await getTransferForAccess(connection, access, transferId);
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "DISPATCH",
+      beforeData: transfer,
+      afterData: {
+        transfer: dispatchedTransfer,
+        lockedItems
+      },
+      reason: "Transfer dispatched"
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Transfer dispatched successfully",
+      transfer: dispatchedTransfer,
+      dispatchedItems: lockedItems
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer dispatch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer dispatch failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branch-transfers/:id/receive-scan", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    const barcode = String(req.body?.barcode || "").trim();
+    const deviceInfo = req.body?.device_info ?? req.body?.deviceInfo ?? null;
+
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    if (!barcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    const failWithReceiveLog = async (statusCode, message, {
+      transfer = null,
+      item = null,
+      stock = null,
+      scanStatus = "FAILED",
+      reason = message
+    } = {}) => {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+
+      await writeBranchReceiveLogSafe(pool, access, {
+        transferId,
+        barcode,
+        stockId: stock?.id ?? item?.stock_id ?? null,
+        branchId: transfer?.to_branch_id ?? null,
+        scanStatus,
+        reason,
+        deviceInfo
+      });
+
+      return res.status(statusCode).json({
+        success: false,
+        message
+      });
+    };
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      return failWithReceiveLog(404, "Transfer not found", {
+        scanStatus: "TRANSFER_NOT_FOUND"
+      });
+    }
+
+    const transferStatus = String(transfer.status || "").trim().toUpperCase();
+    if (!["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(transferStatus)) {
+      return failWithReceiveLog(400, "Only IN_TRANSIT or PARTIALLY_RECEIVED transfers can be received", {
+        transfer,
+        scanStatus: "INVALID_TRANSFER_STATUS"
+      });
+    }
+
+    if (!canReceiveTransferToBranch(access, transfer.to_branch_id)) {
+      return failWithReceiveLog(403, "You can receive transfers only for your assigned destination branch", {
+        transfer,
+        scanStatus: "WRONG_BRANCH"
+      });
+    }
+
+    const toBranch = await getBranchForCompany(connection, access.companyScope, transfer.to_branch_id);
+    if (!toBranch) {
+      return failWithReceiveLog(404, "Destination branch was not found for this company", {
+        transfer,
+        scanStatus: "BRANCH_NOT_FOUND"
+      });
+    }
+
+    const normalizedBarcode = normalizeBarcodeForComparison(barcode);
+    const [itemRows] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(TRIM(barcode)) = ?
+      ORDER BY id DESC
+      LIMIT 2
+      FOR UPDATE
+      `,
+      [transferId, access.companyScope, normalizedBarcode]
+    );
+
+    if (!itemRows.length) {
+      return failWithReceiveLog(404, "Barcode does not belong to this transfer", {
+        transfer,
+        scanStatus: "WRONG_BARCODE",
+        reason: "Barcode was scanned against the wrong transfer or branch"
+      });
+    }
+
+    if (itemRows.length > 1) {
+      return failWithReceiveLog(409, "Duplicate transfer item barcode found", {
+        transfer,
+        item: itemRows[0],
+        scanStatus: "DUPLICATE_TRANSFER_ITEM"
+      });
+    }
+
+    const transferItem = itemRows[0];
+    const itemStatus = String(transferItem.item_status || "").trim().toUpperCase();
+
+    if (itemStatus === "RECEIVED") {
+      return failWithReceiveLog(409, "Barcode is already received in this transfer", {
+        transfer,
+        item: transferItem,
+        scanStatus: "DUPLICATE_RECEIVE"
+      });
+    }
+
+    if (itemStatus !== "IN_TRANSIT") {
+      return failWithReceiveLog(400, "Only IN_TRANSIT transfer items can be received", {
+        transfer,
+        item: transferItem,
+        scanStatus: "INVALID_ITEM_STATUS"
+      });
+    }
+
+    const [stockRows] = await connection.query(
+      `
+      SELECT
+        id,
+        company_id,
+        barcode,
+        product_name,
+        sku,
+        lot_number,
+        weight,
+        status,
+        stock_state,
+        current_branch_id
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(TRIM(barcode)) = ?
+      ORDER BY id DESC
+      LIMIT 2
+      FOR UPDATE
+      `,
+      [access.companyScope, normalizedBarcode]
+    );
+
+    if (!stockRows.length) {
+      return failWithReceiveLog(404, "Stock row was not found for this barcode", {
+        transfer,
+        item: transferItem,
+        scanStatus: "UNKNOWN_BARCODE"
+      });
+    }
+
+    if (stockRows.length > 1) {
+      return failWithReceiveLog(409, DUPLICATE_BARCODE_MESSAGE, {
+        transfer,
+        item: transferItem,
+        stock: stockRows[0],
+        scanStatus: "DUPLICATE_STOCK_BARCODE"
+      });
+    }
+
+    const stockItem = stockRows[0];
+    const stockStatus = String(stockItem.status || "IN_STOCK").trim().toUpperCase();
+    const effectiveStockState = getEffectiveStockState(stockItem);
+
+    if (Number(stockItem.company_id || 0) !== Number(access.companyScope || 0)) {
+      return failWithReceiveLog(400, "Barcode does not belong to this company", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "WRONG_COMPANY"
+      });
+    }
+
+    if (transferItem.stock_id && Number(transferItem.stock_id || 0) !== Number(stockItem.id || 0)) {
+      return failWithReceiveLog(409, "Transfer item does not match the stock barcode record", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "STOCK_MISMATCH"
+      });
+    }
+
+    if (["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(stockStatus) ||
+      ["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(effectiveStockState)) {
+      return failWithReceiveLog(400, "Sold, damaged, or deleted barcode cannot be received", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "INVALID_STOCK_STATUS"
+      });
+    }
+
+    if (effectiveStockState !== "IN_TRANSIT") {
+      return failWithReceiveLog(400, "Barcode is not currently in transit", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "NOT_IN_TRANSIT"
+      });
+    }
+
+    if (Number(stockItem.current_branch_id || 0) !== Number(transfer.from_branch_id || 0)) {
+      return failWithReceiveLog(400, "Barcode is no longer at the transfer source branch", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "SOURCE_BRANCH_MISMATCH"
+      });
+    }
+
+    const [stockUpdateResult] = await connection.query(
+      `
+      UPDATE stock
+      SET current_branch_id = ?,
+          stock_state = 'IN_STOCK',
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+        AND current_branch_id = ?
+        AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_TRANSIT'
+      `,
+      [transfer.to_branch_id, stockItem.id, access.companyScope, transfer.from_branch_id]
+    );
+
+    if (Number(stockUpdateResult?.affectedRows || 0) !== 1) {
+      return failWithReceiveLog(409, "Barcode could not be moved into destination branch stock", {
+        transfer,
+        item: transferItem,
+        stock: stockItem,
+        scanStatus: "STOCK_MOVE_FAILED"
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE branch_transfer_items
+      SET item_status = 'RECEIVED',
+          received_by = ?,
+          received_at = NOW(),
+          stock_id = ?,
+          updated_at = NOW()
+      WHERE id = ?
+        AND transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(item_status, '')) = 'IN_TRANSIT'
+      `,
+      [access.actingUserId ?? null, stockItem.id, transferItem.id, transferId, access.companyScope]
+    );
+
+    await writeBranchReceiveLogSafe(connection, access, {
+      transferId,
+      barcode: stockItem.barcode || barcode,
+      stockId: stockItem.id,
+      branchId: transfer.to_branch_id,
+      scanStatus: "RECEIVED",
+      reason: "Barcode received successfully",
+      deviceInfo
+    });
+
+    const [countRows] = await connection.query(
+      `
+      SELECT
+        SUM(CASE WHEN UPPER(COALESCE(item_status, '')) <> 'CANCELLED' THEN 1 ELSE 0 END) AS active_items,
+        SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS pending_items,
+        SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'RECEIVED' THEN 1 ELSE 0 END) AS received_items,
+        SUM(CASE WHEN UPPER(COALESCE(item_status, '')) = 'SHORTAGE' THEN 1 ELSE 0 END) AS shortage_items
+      FROM branch_transfer_items
+      WHERE transfer_id = ?
+        AND company_id = ?
+      `,
+      [transferId, access.companyScope]
+    );
+    const counts = countRows[0] || {};
+    const pendingItems = Number(counts.pending_items || 0);
+    const shortageItems = Number(counts.shortage_items || 0);
+    const nextStatus = pendingItems === 0 && shortageItems === 0 ? "RECEIVED" : "PARTIALLY_RECEIVED";
+
+    await connection.query(
+      `
+      UPDATE branch_transfers
+      SET status = ?,
+          received_by = CASE WHEN ? = 'RECEIVED' THEN ? ELSE received_by END,
+          received_at = CASE WHEN ? = 'RECEIVED' THEN NOW() ELSE received_at END,
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [
+        nextStatus,
+        nextStatus,
+        access.actingUserId ?? null,
+        nextStatus,
+        transferId,
+        access.companyScope
+      ]
+    );
+
+    const updatedTransfer = await getTransferForAccess(connection, access, transferId);
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "RECEIVE_SCAN",
+      beforeData: {
+        transfer,
+        item: transferItem,
+        stock: stockItem
+      },
+      afterData: {
+        transfer: updatedTransfer,
+        barcode: stockItem.barcode || barcode,
+        counts
+      },
+      reason: "Transfer barcode received"
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Barcode received successfully",
+      transfer: updatedTransfer,
+      barcode: stockItem.barcode || barcode,
+      stock_id: stockItem.id,
+      counts: {
+        active_items: Number(counts.active_items || 0),
+        received_items: Number(counts.received_items || 0),
+        pending_items: pendingItems,
+        shortage_items: shortageItems
+      }
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer receive scan error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer receive scan failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    const notes = String(req.body?.notes || "").trim();
+
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    const transferStatus = String(transfer.status || "").trim().toUpperCase();
+    if (!["IN_TRANSIT", "PARTIALLY_RECEIVED"].includes(transferStatus)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Shortage can be confirmed only for IN_TRANSIT or PARTIALLY_RECEIVED transfers"
+      });
+    }
+
+    if (!canReceiveTransferToBranch(access, transfer.to_branch_id)) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You can confirm shortage only for your assigned destination branch"
+      });
+    }
+
+    const [shortageItems] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(item_status, '')) = 'IN_TRANSIT'
+      ORDER BY id ASC
+      FOR UPDATE
+      `,
+      [transferId, access.companyScope]
+    );
+
+    if (!shortageItems.length) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "There are no pending in-transit items to mark as shortage"
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE stock s
+      INNER JOIN branch_transfer_items bti
+        ON bti.stock_id = s.id
+       AND bti.company_id = s.company_id
+      SET s.stock_state = 'TRANSFER_SHORTAGE',
+          s.updated_at = NOW()
+      WHERE bti.transfer_id = ?
+        AND bti.company_id = ?
+        AND UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT'
+        AND s.current_branch_id = ?
+        AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT'
+      `,
+      [transferId, access.companyScope, transfer.from_branch_id]
+    );
+
+    await connection.query(
+      `
+      UPDATE branch_transfer_items
+      SET item_status = 'SHORTAGE',
+          mismatch_reason = ?,
+          updated_at = NOW()
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(item_status, '')) = 'IN_TRANSIT'
+      `,
+      [notes || "Shortage confirmed at destination branch", transferId, access.companyScope]
+    );
+
+    await connection.query(
+      `
+      UPDATE branch_transfers
+      SET status = 'SHORTAGE',
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [transferId, access.companyScope]
+    );
+
+    const shortageTransfer = await getTransferForAccess(connection, access, transferId);
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "CONFIRM_SHORTAGE",
+      beforeData: {
+        transfer,
+        shortageItems
+      },
+      afterData: shortageTransfer,
+      reason: notes || "Transfer shortage confirmed"
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Transfer shortage confirmed",
+      transfer: shortageTransfer,
+      shortage_items: shortageItems.length,
+      stock_state: "TRANSFER_SHORTAGE"
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer shortage confirm error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer shortage confirmation failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/branch-transfers/:id/receive-summary", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    const transfer = await getTransferForAccess(connection, access, transferId);
+    if (!transfer) {
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    if (access.isBranchLocked && Number(transfer.to_branch_id || 0) !== Number(access.userBranchId || 0)) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot access another branch receive summary"
+      });
+    }
+
+    const [items] = await connection.query(
+      `
+      SELECT
+        bti.*,
+        s.product_name,
+        s.sku,
+        s.lot_number,
+        s.weight,
+        s.status AS stock_status,
+        COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK') AS effective_stock_state
+      FROM branch_transfer_items bti
+      LEFT JOIN stock s
+        ON s.id = bti.stock_id
+       AND s.company_id = bti.company_id
+      WHERE bti.transfer_id = ?
+        AND bti.company_id = ?
+        AND UPPER(COALESCE(bti.item_status, '')) <> 'CANCELLED'
+      ORDER BY bti.id ASC
+      `,
+      [transferId, transfer.company_id]
+    );
+
+    const [wrongScanRows] = await connection.query(
+      `
+      SELECT COUNT(*) AS wrong_scan_count
+      FROM branch_receive_logs
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(scan_status, '')) NOT IN ('RECEIVED', 'SUCCESS')
+      `,
+      [transferId, transfer.company_id]
+    );
+
+    const receivedItems = [];
+    const pendingItems = [];
+    let shortageCount = 0;
+
+    for (const item of items) {
+      const status = String(item.item_status || "").trim().toUpperCase();
+      if (status === "RECEIVED") receivedItems.push(item);
+      if (status === "IN_TRANSIT") pendingItems.push(item);
+      if (status === "SHORTAGE") shortageCount += 1;
+    }
+
+    return res.json({
+      success: true,
+      transfer,
+      total_items: items.length,
+      received_count: receivedItems.length,
+      pending_count: pendingItems.length,
+      shortage_count: shortageCount,
+      wrong_scan_count: Number(wrongScanRows[0]?.wrong_scan_count || 0),
+      received_items: receivedItems,
+      pending_items: pendingItems
+    });
+  } catch (error) {
+    console.error("Branch transfer receive summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer receive summary failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branch-transfers/:id/items/scan", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    const barcode = String(req.body?.barcode || "").trim();
+
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    if (!barcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    if (String(transfer.status || "").trim().toUpperCase() !== "CREATED") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Items can be added only to CREATED transfers"
+      });
+    }
+
+    if (!canCreateTransferFromBranch(access, transfer.from_branch_id)) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You can add items only from your assigned branch"
+      });
+    }
+
+    const normalizedBarcode = normalizeBarcodeForComparison(barcode);
+    const [stockRows] = await connection.query(
+      `
+      SELECT
+        id,
+        company_id,
+        barcode,
+        product_name,
+        sku,
+        lot_number,
+        weight,
+        status,
+        stock_state,
+        current_branch_id
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(TRIM(barcode)) = ?
+      ORDER BY id DESC
+      LIMIT 2
+      FOR UPDATE
+      `,
+      [access.companyScope, normalizedBarcode]
+    );
+
+    if (!stockRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Barcode was not found in this company stock"
+      });
+    }
+
+    if (stockRows.length > 1) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: DUPLICATE_BARCODE_MESSAGE
+      });
+    }
+
+    const stockItem = stockRows[0];
+    const stockStatus = String(stockItem.status || "IN_STOCK").trim().toUpperCase();
+    const effectiveStockState = String(stockItem.stock_state || stockItem.status || "IN_STOCK").trim().toUpperCase();
+
+    if (Number(stockItem.current_branch_id || 0) !== Number(transfer.from_branch_id || 0)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Barcode does not belong to the transfer source branch"
+      });
+    }
+
+    if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is not available in stock for transfer"
+      });
+    }
+
+    if (["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(stockStatus) ||
+      ["SOLD", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(effectiveStockState)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Sold, damaged, or deleted barcode cannot be transferred"
+      });
+    }
+
+    const [duplicateItemRows] = await connection.query(
+      `
+      SELECT id
+      FROM branch_transfer_items
+      WHERE company_id = ?
+        AND transfer_id = ?
+        AND UPPER(TRIM(barcode)) = ?
+        AND UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) <> 'CANCELLED'
+      LIMIT 1
+      `,
+      [access.companyScope, transferId, normalizedBarcode]
+    );
+
+    if (duplicateItemRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Barcode is already added to this transfer"
+      });
+    }
+
+    const [openTransferRows] = await connection.query(
+      `
+      SELECT bti.id, bti.transfer_id
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt
+        ON bt.id = bti.transfer_id
+       AND bt.company_id = bti.company_id
+      WHERE bti.company_id = ?
+        AND UPPER(TRIM(bti.barcode)) = ?
+        AND UPPER(COALESCE(bti.item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT')
+        AND UPPER(COALESCE(bt.status, 'CREATED')) NOT IN ('CANCELLED', 'RECEIVED', 'SHORTAGE')
+      LIMIT 1
+      `,
+      [access.companyScope, normalizedBarcode]
+    );
+
+    if (openTransferRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Barcode is already in another open transfer"
+      });
+    }
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO branch_transfer_items
+      (
+        company_id,
+        transfer_id,
+        stock_id,
+        barcode,
+        from_branch_id,
+        to_branch_id,
+        item_status,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING_DISPATCH', NOW(), NOW())
+      `,
+      [
+        access.companyScope,
+        transferId,
+        stockItem.id,
+        String(stockItem.barcode || barcode).trim(),
+        transfer.from_branch_id,
+        transfer.to_branch_id
+      ]
+    );
+
+    const [itemRows] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId, access.companyScope]
+    );
+    const transferItem = itemRows[0] || null;
+
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "ADD_ITEM",
+      afterData: {
+        item: transferItem,
+        stock: stockItem
+      },
+      reason: "Transfer item added"
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Barcode added to transfer",
+      item: transferItem
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer item scan error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer item add failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.delete("/branch-transfers/:id/items/:itemId", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    const itemId = parsePositiveInteger(req.params.itemId);
+    if (!transferId || !itemId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id and item id are required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    if (String(transfer.status || "").trim().toUpperCase() !== "CREATED") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Items can be removed only from CREATED transfers"
+      });
+    }
+
+    if (!canCreateTransferFromBranch(access, transfer.from_branch_id)) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You can remove items only from your assigned branch"
+      });
+    }
+
+    const [itemRows] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE id = ?
+        AND transfer_id = ?
+        AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [itemId, transferId, access.companyScope]
+    );
+
+    if (!itemRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer item not found"
+      });
+    }
+
+    const beforeItem = itemRows[0];
+    await connection.query(
+      `
+      UPDATE branch_transfer_items
+      SET item_status = 'CANCELLED',
+          updated_at = NOW()
+      WHERE id = ?
+        AND transfer_id = ?
+        AND company_id = ?
+      `,
+      [itemId, transferId, access.companyScope]
+    );
+
+    const [updatedRows] = await connection.query(
+      `
+      SELECT *
+      FROM branch_transfer_items
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [itemId]
+    );
+
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "REMOVE_ITEM",
+      beforeData: beforeItem,
+      afterData: updatedRows[0] || null,
+      reason: "Transfer item cancelled"
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Transfer item removed",
+      item: updatedRows[0] || null
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer item remove error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer item remove failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.delete("/branch-transfers/:id", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const transferId = parsePositiveInteger(req.params.id);
+    if (!transferId) {
+      return res.status(400).json({
+        success: false,
+        message: "Transfer id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const transfer = await getTransferForAccess(connection, access, transferId, { forUpdate: true });
+    if (!transfer) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Transfer not found"
+      });
+    }
+
+    if (String(transfer.status || "").trim().toUpperCase() !== "CREATED") {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Only CREATED transfers can be cancelled"
+      });
+    }
+
+    if (!canCreateTransferFromBranch(access, transfer.from_branch_id)) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You can cancel transfers only from your assigned branch"
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE branch_transfer_items
+      SET item_status = 'CANCELLED',
+          updated_at = NOW()
+      WHERE transfer_id = ?
+        AND company_id = ?
+        AND UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT')
+      `,
+      [transferId, access.companyScope]
+    );
+
+    await connection.query(
+      `
+      UPDATE branch_transfers
+      SET status = 'CANCELLED',
+          updated_at = NOW()
+      WHERE id = ? AND company_id = ?
+      `,
+      [transferId, access.companyScope]
+    );
+
+    const cancelledTransfer = await getTransferForAccess(connection, access, transferId);
+    await writeBranchTransferAuditSafe(connection, req, access, {
+      transferId,
+      actionType: "CANCEL",
+      beforeData: transfer,
+      afterData: cancelledTransfer,
+      reason: "Transfer draft cancelled"
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Transfer cancelled successfully",
+      transfer: cancelledTransfer
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch transfer cancel error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transfer cancel failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/branches", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const whereParts = [];
+    const params = [];
+
+    if (access.companyScope !== null) {
+      whereParts.push("b.company_id = ?");
+      params.push(access.companyScope);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push("b.id = ?");
+      params.push(access.userBranchId);
+    }
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+    const [rows] = await pool.query(
+      `
+      SELECT
+        b.*,
+        c.company_name
+      FROM branches b
+      LEFT JOIN companies c ON c.id = b.company_id
+      ${whereSql}
+      ORDER BY b.company_id ASC, b.branch_type ASC, b.branch_name ASC, b.id ASC
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      branches: rows
+    });
+  } catch (error) {
+    console.error("Branches fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branches fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branches/:id", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const branchId = Number(req.params.id || 0);
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch id is required"
+      });
+    }
+
+    const whereParts = ["b.id = ?"];
+    const params = [branchId];
+
+    if (access.companyScope !== null) {
+      whereParts.push("b.company_id = ?");
+      params.push(access.companyScope);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push("b.id = ?");
+      params.push(access.userBranchId);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        b.*,
+        c.company_name
+      FROM branches b
+      LEFT JOIN companies c ON c.id = b.company_id
+      WHERE ${whereParts.join(" AND ")}
+      LIMIT 1
+      `,
+      params
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Branch not found"
+      });
+    }
+
+    return res.json({
+      success: true,
+      branch: rows[0]
+    });
+  } catch (error) {
+    console.error("Branch fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/branches", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    if (!access.canManageBranches) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to manage branches"
+      });
+    }
+
+    const validation = validateBranchPayload(req.body);
+    if (!validation.ok) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message
+      });
+    }
+
+    const branch = validation.branch;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [duplicateRows] = await connection.query(
+      `
+      SELECT id
+      FROM branches
+      WHERE company_id = ?
+        AND UPPER(TRIM(branch_code)) = ?
+      LIMIT 1
+      `,
+      [access.companyScope, branch.branchCode]
+    );
+
+    if (duplicateRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "branch_code already exists in this company"
+      });
+    }
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO branches
+      (
+        company_id,
+        branch_code,
+        branch_name,
+        branch_type,
+        address,
+        contact_name,
+        contact_phone,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      `,
+      [
+        access.companyScope,
+        branch.branchCode,
+        branch.branchName,
+        branch.branchType,
+        branch.address || null,
+        branch.contactName || null,
+        branch.contactPhone || null,
+        branch.status,
+        access.actingUserId ?? null
+      ]
+    );
+
+    const [createdRows] = await connection.query(
+      `
+      SELECT *
+      FROM branches
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId, access.companyScope]
+    );
+    const createdBranch = createdRows[0] || null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "CREATE",
+      entityType: "BRANCH",
+      entityId: String(insertResult.insertId),
+      moduleName: "branch-management",
+      status: "success",
+      message: "Branch created",
+      afterData: createdBranch
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Branch created successfully",
+      branch: createdBranch
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch create error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch create failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.put("/branches/:id", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    if (!access.canManageBranches) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to manage branches"
+      });
+    }
+
+    const branchId = Number(req.params.id || 0);
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch id is required"
+      });
+    }
+
+    const validation = validateBranchPayload(req.body, { partial: true });
+    if (!validation.ok) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [currentRows] = await connection.query(
+      `
+      SELECT *
+      FROM branches
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [branchId, access.companyScope]
+    );
+
+    if (!currentRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Branch not found"
+      });
+    }
+
+    const beforeBranch = currentRows[0];
+    const branch = validation.branch;
+    const nextBranchCode = branch.hasBranchCode ? branch.branchCode : String(beforeBranch.branch_code || "").trim();
+    const nextBranchName = branch.hasBranchName ? branch.branchName : String(beforeBranch.branch_name || "").trim();
+    const nextBranchType = branch.hasBranchType ? branch.branchType : String(beforeBranch.branch_type || "STORE").trim().toUpperCase();
+    const nextStatus = branch.hasStatus ? branch.status : String(beforeBranch.status || "ACTIVE").trim().toUpperCase();
+    const nextAddress = branch.hasAddress ? branch.address || null : beforeBranch.address;
+    const nextContactName = branch.hasContactName ? branch.contactName || null : beforeBranch.contact_name;
+    const nextContactPhone = branch.hasContactPhone ? branch.contactPhone || null : beforeBranch.contact_phone;
+
+    if (!normalizeBranchCode(nextBranchCode)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "branch_code cannot be empty"
+      });
+    }
+
+    if (!nextBranchName) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "branch_name cannot be empty"
+      });
+    }
+
+    if (!normalizeBranchType(nextBranchType)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "branch_type must be MAIN, STORE, WAREHOUSE, or OFFICE"
+      });
+    }
+
+    if (!normalizeBranchStatus(nextStatus)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "status must be ACTIVE or INACTIVE"
+      });
+    }
+
+    if (normalizeBranchCode(nextBranchCode) !== normalizeBranchCode(beforeBranch.branch_code)) {
+      const [duplicateRows] = await connection.query(
+        `
+        SELECT id
+        FROM branches
+        WHERE company_id = ?
+          AND UPPER(TRIM(branch_code)) = ?
+          AND id <> ?
+        LIMIT 1
+        `,
+        [access.companyScope, normalizeBranchCode(nextBranchCode), branchId]
+      );
+
+      if (duplicateRows.length) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "branch_code already exists in this company"
+        });
+      }
+    }
+
+    await connection.query(
+      `
+      UPDATE branches
+      SET branch_code = ?,
+          branch_name = ?,
+          branch_type = ?,
+          address = ?,
+          contact_name = ?,
+          contact_phone = ?,
+          status = ?,
+          updated_at = NOW()
+      WHERE id = ? AND company_id = ?
+      `,
+      [
+        normalizeBranchCode(nextBranchCode),
+        nextBranchName,
+        normalizeBranchType(nextBranchType),
+        nextAddress,
+        nextContactName,
+        nextContactPhone,
+        normalizeBranchStatus(nextStatus),
+        branchId,
+        access.companyScope
+      ]
+    );
+
+    const [updatedRows] = await connection.query(
+      `
+      SELECT *
+      FROM branches
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [branchId, access.companyScope]
+    );
+    const updatedBranch = updatedRows[0] || null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "UPDATE",
+      entityType: "BRANCH",
+      entityId: String(branchId),
+      moduleName: "branch-management",
+      status: "success",
+      message: "Branch updated",
+      beforeData: beforeBranch,
+      afterData: updatedBranch
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Branch updated successfully",
+      branch: updatedBranch
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch update failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branches/:id/users", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    if (!access.canManageBranches) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to assign branch users"
+      });
+    }
+
+    const branchId = Number(req.params.id || 0);
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch id is required"
+      });
+    }
+
+    const rawUserIds = Array.isArray(req.body?.userIds)
+      ? req.body.userIds
+      : Array.isArray(req.body?.users)
+        ? req.body.users
+        : [req.body?.userId ?? req.body?.user_id];
+    const userIds = [...new Set(rawUserIds.map((value) => Number(value || 0)).filter(Boolean))];
+
+    if (!userIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one user id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [branchRows] = await connection.query(
+      `
+      SELECT *
+      FROM branches
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [branchId, access.companyScope]
+    );
+
+    if (!branchRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Branch not found"
+      });
+    }
+
+    const assignedUsers = [];
+    const skippedUsers = [];
+
+    for (const userId of userIds) {
+      const [userRows] = await connection.query(
+        `
+        SELECT id, name, email, role, company_id, branch_id
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [userId]
+      );
+
+      const userRow = userRows[0] || null;
+      if (!userRow || Number(userRow.company_id || 0) !== Number(access.companyScope)) {
+        skippedUsers.push({
+          user_id: userId,
+          reason: "User not found in this company"
+        });
+        continue;
+      }
+
+      await connection.query(
+        `
+        UPDATE users
+        SET branch_id = ?,
+            updated_by = ?,
+            updated_at = NOW()
+        WHERE id = ? AND company_id = ?
+        `,
+        [branchId, access.actingUserId ?? null, userId, access.companyScope]
+      );
+
+      assignedUsers.push({
+        user_id: userRow.id,
+        name: userRow.name || "",
+        email: userRow.email || "",
+        role: userRow.role || "",
+        previous_branch_id: userRow.branch_id ?? null,
+        branch_id: branchId
+      });
+    }
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "ASSIGN_USERS",
+      entityType: "BRANCH",
+      entityId: String(branchId),
+      moduleName: "branch-management",
+      status: "success",
+      message: "Branch users assigned",
+      afterData: {
+        branch_id: branchId,
+        assignedUsers,
+        skippedUsers
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Branch user assignment completed",
+      branch_id: branchId,
+      assignedUsers,
+      skippedUsers
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch user assignment error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch user assignment failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -16222,12 +21989,20 @@ app.get("/approvedUsers", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), as
         u.email,
         u.role,
         u.status,
+        u.login_status,
+        u.blocked_until,
+        u.deleted_at,
+        u.deactivated_at,
+        u.force_logout_after,
+        u.access_reason,
         u.created_at,
         u.company_id,
         c.company_name
       FROM users u
       LEFT JOIN companies c ON c.id = u.company_id
       WHERE LOWER(COALESCE(u.status, '')) = 'approved'
+      AND u.deleted_at IS NULL
+      AND UPPER(COALESCE(u.role, '')) <> 'SUPERADMIN'
       ${companyId !== null ? "AND u.company_id = ?" : ""}
       ORDER BY u.id DESC
       `,
@@ -16243,6 +22018,49 @@ app.get("/approvedUsers", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), as
     return res.status(500).json({
       success: false,
       message: "Approved users fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/deleted-users", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const [rows] = await pool.query(`
+      SELECT 
+        u.id,
+        u.name,
+        u.mobile,
+        u.email,
+        u.role,
+        u.status,
+        u.login_status,
+        u.blocked_until,
+        u.deleted_at,
+        u.deactivated_at,
+        u.force_logout_after,
+        u.access_reason,
+        u.created_at,
+        u.company_id,
+        c.company_name
+      FROM users u
+      LEFT JOIN companies c ON c.id = u.company_id
+      WHERE u.deleted_at IS NOT NULL
+        AND UPPER(COALESCE(u.role, '')) <> 'SUPERADMIN'
+      ORDER BY u.deleted_at DESC, u.id DESC
+    `);
+
+    return res.json({
+      success: true,
+      users: rows
+    });
+  } catch (error) {
+    console.error("Deleted users error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Deleted users fetch failed",
       error: getErrorDetail(error)
     });
   }
@@ -16602,6 +22420,224 @@ app.delete("/superadmin/users/:id/soft-delete", authMiddleware, checkRole(["SUPE
       return { ok: true };
     }
   });
+});
+
+app.get("/superadmin/barcode-duplicates", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        d.company_id,
+        d.normalized_barcode,
+        d.duplicate_count,
+        s.id,
+        s.barcode,
+        s.status,
+        s.source,
+        s.category,
+        s.product_name,
+        s.lot_number,
+        s.created_at,
+        s.updated_at,
+        s.invoice_number AS stock_invoice_number,
+        s.sold_at,
+        s.deleted_at,
+        COALESCE(si.sales_item_count, 0) AS sales_item_count,
+        si.invoice_numbers AS sales_invoice_numbers,
+        si.sale_ids,
+        si.latest_sale_item_at,
+        COALESCE(rh.return_count, 0) AS return_count,
+        rh.return_ids,
+        rh.return_invoice_numbers,
+        rh.return_types,
+        rh.latest_return_at
+      FROM (
+        SELECT
+          company_id,
+          UPPER(TRIM(barcode)) AS normalized_barcode,
+          COUNT(*) AS duplicate_count
+        FROM stock
+        WHERE company_id IS NOT NULL
+          ${getSellableStockFilterSql()}
+        GROUP BY company_id, UPPER(TRIM(barcode))
+        HAVING COUNT(*) > 1
+      ) d
+      INNER JOIN stock s
+        ON s.company_id = d.company_id
+       AND UPPER(TRIM(s.barcode)) = d.normalized_barcode
+       ${getSellableStockFilterSql("s")}
+      LEFT JOIN (
+        SELECT
+          company_id,
+          UPPER(TRIM(barcode)) AS normalized_barcode,
+          COUNT(*) AS sales_item_count,
+          GROUP_CONCAT(DISTINCT invoice_number ORDER BY invoice_number SEPARATOR ', ') AS invoice_numbers,
+          GROUP_CONCAT(DISTINCT sale_id ORDER BY sale_id SEPARATOR ', ') AS sale_ids,
+          MAX(created_at) AS latest_sale_item_at
+        FROM sales_items
+        WHERE barcode IS NOT NULL
+          AND TRIM(COALESCE(barcode, '')) <> ''
+        GROUP BY company_id, UPPER(TRIM(barcode))
+      ) si
+        ON si.company_id = s.company_id
+       AND si.normalized_barcode = d.normalized_barcode
+      LEFT JOIN (
+        SELECT
+          company_id,
+          UPPER(TRIM(barcode)) AS normalized_barcode,
+          COUNT(*) AS return_count,
+          GROUP_CONCAT(DISTINCT id ORDER BY id SEPARATOR ', ') AS return_ids,
+          GROUP_CONCAT(DISTINCT invoice_number ORDER BY invoice_number SEPARATOR ', ') AS return_invoice_numbers,
+          GROUP_CONCAT(DISTINCT return_type ORDER BY return_type SEPARATOR ', ') AS return_types,
+          MAX(COALESCE(return_date, created_at)) AS latest_return_at
+        FROM return_history
+        WHERE barcode IS NOT NULL
+          AND TRIM(COALESCE(barcode, '')) <> ''
+        GROUP BY company_id, UPPER(TRIM(barcode))
+      ) rh
+        ON rh.company_id = s.company_id
+       AND rh.normalized_barcode = d.normalized_barcode
+      ORDER BY d.duplicate_count DESC, d.company_id ASC, d.normalized_barcode ASC, s.id ASC
+      LIMIT 2500
+      `
+    );
+
+    const groupsByKey = new Map();
+    for (const row of rows) {
+      const key = `${row.company_id}:${row.normalized_barcode}`;
+      if (!groupsByKey.has(key)) {
+        groupsByKey.set(key, {
+          company_id: row.company_id,
+          normalized_barcode: row.normalized_barcode,
+          duplicate_count: Number(row.duplicate_count || 0),
+          affected_rows: []
+        });
+      }
+
+      groupsByKey.get(key).affected_rows.push({
+        id: row.id,
+        barcode: row.barcode || "",
+        status: row.status || "",
+        source: row.source || "",
+        category: row.category || "",
+        product_name: row.product_name || "",
+        lot_number: row.lot_number || "",
+        created_at: row.created_at || null,
+        updated_at: row.updated_at || null,
+        invoice_linkage: {
+          stock_invoice_number: row.stock_invoice_number || "",
+          sold_at: row.sold_at || null,
+          sales_item_count: Number(row.sales_item_count || 0),
+          invoice_numbers: row.sales_invoice_numbers || "",
+          sale_ids: row.sale_ids || "",
+          latest_sale_item_at: row.latest_sale_item_at || null
+        },
+        return_linkage: {
+          return_count: Number(row.return_count || 0),
+          return_ids: row.return_ids || "",
+          invoice_numbers: row.return_invoice_numbers || "",
+          return_types: row.return_types || "",
+          latest_return_at: row.latest_return_at || null
+        },
+        deleted_at: row.deleted_at || null
+      });
+    }
+
+    const classifyDuplicateGroup = (group) => {
+      const rowStatuses = group.affected_rows.map((item) =>
+        String(item.status || "").trim().toUpperCase()
+      );
+      const inStockCount = rowStatuses.filter((status) => status === "IN_STOCK").length;
+      const soldCount = rowStatuses.filter((status) => status === "SOLD").length;
+      const deletedCount = group.affected_rows.filter((item, index) =>
+        rowStatuses[index] === "DELETED" || item.deleted_at
+      ).length;
+      const otherCount = group.affected_rows.length - inStockCount - soldCount - deletedCount;
+
+      if (inStockCount > 1) {
+        return {
+          severity: "CRITICAL",
+          recommendation: "manual review required",
+          reason: "Multiple active IN_STOCK rows share the same sellable barcode."
+        };
+      }
+
+      if (inStockCount > 0 && soldCount > 0) {
+        return {
+          severity: "HIGH",
+          recommendation: "manual review required",
+          reason: "An active row and sold history share the same sellable barcode."
+        };
+      }
+
+      if (soldCount > 0 && deletedCount > 0 && otherCount === 0) {
+        return {
+          severity: "MEDIUM",
+          recommendation: "historical duplicate",
+          reason: "Only SOLD and DELETED rows share this barcode; verify invoice and return history before cleanup."
+        };
+      }
+
+      if (deletedCount === group.affected_rows.length) {
+        return {
+          severity: "LOW",
+          recommendation: "safe candidate for barcode regeneration",
+          reason: "All duplicate rows are deleted historical rows."
+        };
+      }
+
+      return {
+        severity: "MEDIUM",
+        recommendation: "manual review required",
+        reason: "Duplicate rows are historical or mixed non-active states and need review before cleanup."
+      };
+    };
+
+    const duplicates = Array.from(groupsByKey.values()).map((group) => ({
+      ...group,
+      ...classifyDuplicateGroup(group)
+    }));
+
+    const severityCounts = duplicates.reduce((summary, group) => {
+      summary[group.severity.toLowerCase()] += 1;
+      return summary;
+    }, {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    });
+
+    const affectedCompanies = new Set(duplicates.map((group) => group.company_id));
+    const affectedStockRows = duplicates.reduce(
+      (total, group) => total + group.affected_rows.length,
+      0
+    );
+
+    return res.json({
+      success: true,
+      summary: {
+        total_duplicate_groups: duplicates.length,
+        critical_count: severityCounts.critical,
+        high_count: severityCounts.high,
+        medium_count: severityCounts.medium,
+        low_count: severityCounts.low,
+        affected_companies: affectedCompanies.size,
+        affected_stock_rows: affectedStockRows
+      },
+      duplicates
+    });
+  } catch (error) {
+    console.error("SuperAdmin barcode duplicate audit error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Barcode duplicate audit failed",
+      error: getErrorDetail(error)
+    });
+  }
 });
 
 app.get("/superadmin/audit-log", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {

@@ -530,6 +530,22 @@
             </div>
           </div>
 
+          <div class="sub-card" style="margin-top:16px;">
+            <h3>Branch Invoice Stock</h3>
+            <div class="form-grid">
+              <div class="input-box">
+                <label>Invoice Branch</label>
+                <select id="invoiceBranchSelect" onchange="handleInvoiceBranchChange()">
+                  <option value="">All allowed branches</option>
+                </select>
+              </div>
+              <div class="input-box">
+                <label>Current Branch</label>
+                <input type="text" id="invoiceBranchLabel" value="Loading branch..." readonly />
+              </div>
+            </div>
+          </div>
+
           <div class="invoice-summary-box">
             <h3>Summary</h3>
 
@@ -653,6 +669,8 @@
     let currentInvoiceDraftId = null;
     let invoiceHeaderSyncTimer = null;
     let isHydratingInvoiceDraft = false;
+    let invoiceBranchContext = null;
+    let invoiceBranches = [];
 
     function getLoggedInUser() {
       try {
@@ -842,6 +860,11 @@
         params.set("companyId", String(companyId));
       }
 
+        const branchId = getSelectedInvoiceBranchId();
+        if (branchId) {
+          params.set("branchId", String(branchId));
+        }
+
         const url = `${API_BASE}/getStock${params.toString() ? `?${params.toString()}` : ""}`;
 
         const res = await fetch(url, { cache: "no-store" });
@@ -852,6 +875,60 @@
       } catch (err) {
         console.log("Load stock error:", err);
       }
+    }
+
+    function getSelectedInvoiceBranchId() {
+      const raw = document.getElementById("invoiceBranchSelect")?.value || "";
+      return raw ? Number(raw) : null;
+    }
+
+    async function loadInvoiceBranchFilter() {
+      const select = document.getElementById("invoiceBranchSelect");
+      const label = document.getElementById("invoiceBranchLabel");
+      if (!select) return;
+
+      try {
+        const [contextRes, branchesRes] = await Promise.all([
+          fetch(`${API_BASE}/branch-context`, { cache: "no-store" }),
+          fetch(`${API_BASE}/branches`, { cache: "no-store" })
+        ]);
+        const contextData = await contextRes.json();
+        const branchesData = await branchesRes.json();
+        invoiceBranchContext = contextData.context || null;
+        invoiceBranches = Array.isArray(branchesData.branches) ? branchesData.branches : [];
+        const lockedBranchId = invoiceBranchContext?.userBranchId || null;
+
+        if (invoiceBranchContext?.isBranchLocked && lockedBranchId) {
+          const branch = invoiceBranches.find((item) => Number(item.id) === Number(lockedBranchId));
+          select.innerHTML = `<option value="${lockedBranchId}">${branch?.branch_name || "Assigned Branch"}</option>`;
+          select.value = String(lockedBranchId);
+          select.disabled = true;
+        } else {
+          select.disabled = false;
+          select.innerHTML = `<option value="">All allowed branches</option>${invoiceBranches.map((branch) => `<option value="${branch.id}">${branch.branch_name || ""} (${branch.branch_code || ""})</option>`).join("")}`;
+        }
+
+        updateInvoiceBranchLabel();
+      } catch (error) {
+        console.log("Invoice branch load error:", error);
+        if (label) label.value = "Branch information unavailable";
+      }
+    }
+
+    function updateInvoiceBranchLabel() {
+      const label = document.getElementById("invoiceBranchLabel");
+      if (!label) return;
+      const branchId = getSelectedInvoiceBranchId();
+      const branch = invoiceBranches.find((item) => Number(item.id) === Number(branchId));
+      if (branch) label.value = `${branch.branch_name || "Branch"} (${branch.branch_code || ""})`;
+      else if (invoiceBranchContext?.isBranchLocked) label.value = "Assigned branch";
+      else label.value = "All allowed branches";
+    }
+
+    async function handleInvoiceBranchChange() {
+      updateInvoiceBranchLabel();
+      stockLoadedOnce = false;
+      await loadFromServer(true);
     }
 
     function buildAccessParams(forceCompany = false) {
@@ -954,6 +1031,8 @@
         },
         body: JSON.stringify({
           barcode,
+          branchId: getSelectedInvoiceBranchId(),
+          branch_id: getSelectedInvoiceBranchId(),
           companyId: getCurrentCompanyId(),
           actingUserId: getCurrentUserId()
         })
@@ -1784,6 +1863,7 @@
       renderCompanyInfo();
       renderPageTitle();
 
+      await loadInvoiceBranchFilter();
       await loadFromServer();
       bindInvoiceHeaderSync();
 

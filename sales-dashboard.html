@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Store Dashboard</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+    .mode-hero {
+      margin-bottom: 24px;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 18px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .mode-hero strong {
+      display: block;
+      color: #2f2a21;
+      font-size: 20px;
+    }
+    .mode-hero span {
+      color: #6f604c;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .mode-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 9px 12px;
+      background: #2f2a21;
+      color: #fff;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .metric-card,
+    .panel {
+      position: relative;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow:
+        0 2px 8px rgba(15, 23, 42, 0.05),
+        0 10px 24px rgba(15, 23, 42, 0.04);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+    .metric-card::after,
+    .panel::after {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 3px;
+      background: linear-gradient(90deg, #c99d51 0%, #f1d99a 52%, #b88932 100%);
+      opacity: 0.88;
+      pointer-events: none;
+    }
+    .metric-card {
+      min-height: 130px;
+    }
+    .metric-card:hover,
+    .panel:hover {
+      transform: translateY(-1px);
+      border-color: rgba(201, 157, 81, 0.28);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    }
+    .metric-topline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .metric-icon,
+    .section-heading-icon {
+      position: relative;
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(145deg, #fffaf0 0%, #f8f4ec 58%, #f2e6cc 100%);
+      border: 1px solid rgba(201, 157, 81, 0.18);
+      color: #7c5a1d;
+      font-size: 25px;
+      line-height: 1;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.75),
+        0 8px 18px rgba(124, 90, 29, 0.08);
+      flex-shrink: 0;
+    }
+    .metric-icon::before,
+    .section-heading-icon::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: 14px;
+      background: radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 58%);
+      pointer-events: none;
+    }
+    .section-heading-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      font-size: 22px;
+    }
+    .section-heading-icon::before {
+      border-radius: 12px;
+    }
+    .metric-title {
+      min-width: 0;
+      flex: 1;
+    }
+    .metric-card h4 {
+      margin: 0;
+      color: #4b5563;
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .metric-card strong {
+      display: block;
+      margin-top: 6px;
+      color: #111827;
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+    .panel {
+      margin-bottom: 24px;
+    }
+    .panel h3 {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 6px;
+      color: #2f2a21;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .subtext,
+    .status-line {
+      color: #64748b;
+      font-size: 13px;
+    }
+    .subtext {
+      margin: 0 0 12px;
+    }
+    .status-line {
+      margin-bottom: 14px;
+      font-weight: 700;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .dashboard-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .dashboard-table th,
+    .dashboard-table td {
+      border-bottom: 1px solid #f1f5f9;
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 14px;
+    }
+    .dashboard-table th {
+      background: #f8fafc;
+      color: #475569;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .dashboard-table tbody tr:nth-child(even) td {
+      background: #fffdf8;
+    }
+    .dashboard-table tr:hover td {
+      background: #fff7df;
+    }
+    @media (max-width: 900px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand">
+          <a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings" aria-label="Open settings">
+            <i class="fas fa-gear"></i>
+          </a>
+          <h2>ERP PANEL</h2>
+          <p>Store Mode</p>
+        </div>
+        <ul class="menu"></ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left">
+          <button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+          <div class="title">
+            <h1>Store Dashboard</h1>
+            <p>Store, stock, billing, returns, and profit metrics</p>
+          </div>
+        </div>
+        <div class="top-right">
+          <input type="date" id="dashboardDate" onchange="loadSalesDashboard(true)" />
+          <button type="button" onclick="loadSalesDashboard(true)">Refresh</button>
+          <button type="button" onclick="logoutUser()">Logout</button>
+        </div>
+      </div>
+
+      <section class="page active">
+        <div class="mode-hero">
+          <div>
+            <strong>Store</strong>
+            <span>Finished products, customer billing, dues, returns, sales reports, and margin</span>
+          </div>
+          <div class="mode-chip"><i class="fas fa-store"></i> Retail Desk</div>
+        </div>
+
+        <div class="status-line" id="dashboardStatus">Loading store dashboard...</div>
+
+        <div class="dashboard-grid">
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">📦</span><div class="metric-title"><h4>In Stock</h4></div></div><strong id="inStock">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🛒</span><div class="metric-title"><h4>Sold</h4></div></div><strong id="sold">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">💸</span><div class="metric-title"><h4>Today Sales</h4></div></div><strong id="todaySales">&#8377; 0.00</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">📈</span><div class="metric-title"><h4>Total Sales Value</h4></div></div><strong id="totalSales">&#8377; 0.00</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🧾</span><div class="metric-title"><h4>Invoices</h4></div></div><strong id="invoiceCount">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">💳</span><div class="metric-title"><h4>Total Due</h4></div></div><strong id="totalDue">&#8377; 0.00</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">💰</span><div class="metric-title"><h4>Estimated Profit / Margin</h4></div></div><strong id="estimatedProfit">&#8377; 0.00</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🔄</span><div class="metric-title"><h4>Total Returns</h4></div></div><strong id="totalReturns">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">✅</span><div class="metric-title"><h4>Normal Return</h4></div></div><strong id="normalReturns">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⚠️</span><div class="metric-title"><h4>Damaged Return</h4></div></div><strong id="damagedReturns">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🚨</span><div class="metric-title"><h4>Low Stock Alert</h4></div></div><strong id="lowStockCount">0</strong></div>
+          <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⚖️</span><div class="metric-title"><h4>Total Weight</h4></div></div><strong id="totalWeight">0.000 g</strong></div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="section-heading-icon">💳</span> Billing Summary</h3>
+          <p class="subtext">Invoice, sales, paid, due, and margin values for selected date where available.</p>
+          <div class="dashboard-grid">
+            <div class="metric-card"><div class="metric-topline"><span class="metric-icon">🧾</span><div class="metric-title"><h4>Billing Sales</h4></div></div><strong id="billingSales">&#8377; 0.00</strong></div>
+            <div class="metric-card"><div class="metric-topline"><span class="metric-icon">✅</span><div class="metric-title"><h4>Paid</h4></div></div><strong id="billingPaid">&#8377; 0.00</strong></div>
+            <div class="metric-card"><div class="metric-topline"><span class="metric-icon">⏳</span><div class="metric-title"><h4>Due</h4></div></div><strong id="billingDue">&#8377; 0.00</strong></div>
+            <div class="metric-card"><div class="metric-topline"><span class="metric-icon">💰</span><div class="metric-title"><h4>Margin</h4></div></div><strong id="billingMargin">&#8377; 0.00</strong></div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h3><span class="section-heading-icon">🧾</span> Recent Sales</h3>
+            <p class="subtext">Latest invoice entries</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Date</th></tr></thead>
+              <tbody id="recentSalesRows"><tr><td colspan="4">No recent sales found</td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3><span class="section-heading-icon">📦</span> Recent Inventory / Stock</h3>
+            <p class="subtext">Latest finished product stock</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Barcode</th><th>Product</th><th>Lot</th><th>Weight</th><th>Status</th></tr></thead>
+              <tbody id="recentStockRows"><tr><td colspan="5">No recent inventory found</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h3><span class="section-heading-icon">📊</span> Sales by Lot</h3>
+            <p class="subtext">Derived from available dashboard stock snapshot</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Lot</th><th>Sold Qty</th><th>Sold Weight</th></tr></thead>
+              <tbody id="salesByLotRows"><tr><td colspan="3">No sales by lot found</td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3><span class="section-heading-icon">🔔</span> Low Stock Lots</h3>
+            <p class="subtext">Lots with low available store quantity</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Lot</th><th>Product</th><th>In Stock Qty</th><th>Status</th></tr></thead>
+              <tbody id="lowStockLotsRows"><tr><td colspan="4">No low stock lot found</td></tr></tbody>
+            </table>
+          </div>
+          <div class="panel">
+            <h3><span class="section-heading-icon">📦</span> Lot Summary</h3>
+            <p class="subtext">Sales-related lot status snapshot</p>
+            <table class="dashboard-table">
+              <thead><tr><th>Lot</th><th>Total</th><th>In Stock</th><th>Sold</th></tr></thead>
+              <tbody id="lotSummaryRows"><tr><td colspan="4">No lot summary found</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    const API_BASE = window.ERP_API_BASE;
+    let dashboardData = null;
+    let returnData = null;
+    let smartData = null;
+    let profitData = null;
+
+    function saveSidebarState(isCollapsed) {
+      localStorage.setItem("erpSidebarCollapsed", isCollapsed ? "true" : "false");
+    }
+
+    function applySidebarState() {
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      sidebar.classList.toggle("collapsed", localStorage.getItem("erpSidebarCollapsed") === "true");
+    }
+
+    function toggleSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      if (!sidebar) return;
+      sidebar.classList.toggle("collapsed");
+      saveSidebarState(sidebar.classList.contains("collapsed"));
+    }
+
+    function getTodayDateValue() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    function safeText(value) {
+      return String(value ?? "").trim();
+    }
+
+    function formatCurrency(value) {
+      return `\u20B9 ${Number(value || 0).toFixed(2)}`;
+    }
+
+    function formatWeight(value) {
+      return `${Number(value || 0).toFixed(3)} g`;
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function getCommonParams() {
+      const params = new URLSearchParams();
+      const userId = typeof getCurrentUserId === "function" ? getCurrentUserId() : null;
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : null;
+      if (userId !== null) params.set("actingUserId", String(userId));
+      if (companyId !== null) params.set("companyId", String(companyId));
+      return params;
+    }
+
+    function getSmartParams() {
+      const params = getCommonParams();
+      params.set("date", document.getElementById("dashboardDate")?.value || getTodayDateValue());
+      return params;
+    }
+
+    function getProfitParams() {
+      const params = getCommonParams();
+      const date = document.getElementById("dashboardDate")?.value || getTodayDateValue();
+      params.set("from", date);
+      params.set("to", date);
+      return params;
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) throw new Error(data?.message || "Dashboard request failed");
+      return data;
+    }
+
+    function renderRecentSales() {
+      const rows = Array.isArray(dashboardData?.recentInvoices) ? dashboardData.recentInvoices : [];
+      document.getElementById("recentSalesRows").innerHTML = rows.length
+        ? rows.slice(0, 8).map((row) => `
+          <tr>
+            <td>${safeText(row.invoice_number || "-")}</td>
+            <td>${safeText(row.customer_name || "-")}</td>
+            <td>${formatCurrency(row.total_amount)}</td>
+            <td>${safeText(row.invoice_date || row.created_at || "-")}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="4">No recent sales found</td></tr>`;
+    }
+
+    function renderRecentStock() {
+      const rows = Array.isArray(dashboardData?.recentStock) ? dashboardData.recentStock : [];
+      document.getElementById("recentStockRows").innerHTML = rows.length
+        ? rows.slice(0, 8).map((row) => `
+          <tr>
+            <td>${safeText(row.barcode || "-")}</td>
+            <td>${safeText(row.product_name || "-")}</td>
+            <td>${safeText(row.lot_number || "-")}</td>
+            <td>${formatWeight(row.weight)}</td>
+            <td>${safeText(row.status || "-")}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="5">No recent inventory found</td></tr>`;
+    }
+
+    function renderLotTables() {
+      const stockRows = Array.isArray(dashboardData?.recentStock) ? dashboardData.recentStock : [];
+      const lots = {};
+      stockRows.forEach((row) => {
+        const lot = safeText(row.lot_number || "-");
+        if (!lots[lot]) lots[lot] = { lot, product: safeText(row.product_name || "-"), total: 0, inStock: 0, sold: 0, soldWeight: 0 };
+        lots[lot].total += 1;
+        if (lots[lot].product === "-" && row.product_name) lots[lot].product = safeText(row.product_name);
+        const status = safeText(row.status).toUpperCase();
+        if (status === "IN_STOCK") lots[lot].inStock += 1;
+        if (status === "SOLD") {
+          lots[lot].sold += 1;
+          lots[lot].soldWeight += Number(row.weight || 0);
+        }
+      });
+
+      const lotRows = Object.values(lots);
+      document.getElementById("lotSummaryRows").innerHTML = lotRows.length
+        ? lotRows.map((row) => `<tr><td>${row.lot}</td><td>${row.total}</td><td>${row.inStock}</td><td>${row.sold}</td></tr>`).join("")
+        : `<tr><td colspan="4">No lot summary found</td></tr>`;
+
+      const soldRows = lotRows.filter((row) => row.sold > 0);
+      document.getElementById("salesByLotRows").innerHTML = soldRows.length
+        ? soldRows.map((row) => `<tr><td>${row.lot}</td><td>${row.sold}</td><td>${formatWeight(row.soldWeight)}</td></tr>`).join("")
+        : `<tr><td colspan="3">No sales by lot found</td></tr>`;
+
+      const lowStockRows = lotRows.filter((row) => row.inStock > 0 && row.inStock <= 3);
+      setText("lowStockCount", lowStockRows.length);
+      const lowStockBody = document.getElementById("lowStockLotsRows");
+      if (lowStockBody) {
+        lowStockBody.innerHTML = lowStockRows.length
+          ? lowStockRows.map((row) => `<tr><td>${row.lot}</td><td>${row.product}</td><td>${row.inStock}</td><td>LOW STOCK</td></tr>`).join("")
+          : `<tr><td colspan="4">No low stock lot found</td></tr>`;
+      }
+    }
+
+    function renderSalesDashboard() {
+      const billing = smartData?.billingSummary || {};
+      setText("inStock", Number(dashboardData?.availableItems || 0));
+      setText("sold", Number(dashboardData?.soldItems || 0));
+      setText("todaySales", formatCurrency(smartData?.todaySalesAmount || 0));
+      setText("totalSales", formatCurrency(dashboardData?.totalSalesAmount || 0));
+      setText("invoiceCount", Number(billing.invoiceCount || dashboardData?.totalSales || 0));
+      setText("totalDue", formatCurrency(billing.totalDue || 0));
+      setText("estimatedProfit", formatCurrency(profitData?.totalProfit ?? billing.totalMargin ?? 0));
+      setText("totalReturns", Number(returnData?.totalReturns || 0));
+      setText("normalReturns", Number(returnData?.returnToStockCount || 0));
+      setText("damagedReturns", Number(returnData?.damagedReturnCount || 0));
+      setText("totalWeight", formatWeight(dashboardData?.totalWeight || 0));
+      setText("billingSales", formatCurrency(billing.totalSales || 0));
+      setText("billingPaid", formatCurrency(billing.totalPaid || 0));
+      setText("billingDue", formatCurrency(billing.totalDue || 0));
+      setText("billingMargin", formatCurrency(billing.totalMargin || 0));
+      renderRecentSales();
+      renderRecentStock();
+      renderLotTables();
+    }
+
+    async function loadSalesDashboard(showToastOnSuccess = false) {
+      const status = document.getElementById("dashboardStatus");
+      try {
+        status.textContent = "Loading store dashboard...";
+        const common = getCommonParams().toString();
+        const smart = getSmartParams().toString();
+        const profit = getProfitParams().toString();
+        [dashboardData, returnData, smartData, profitData] = await Promise.all([
+          fetchJson(`${API_BASE}/api/dashboard${common ? `?${common}` : ""}`),
+          fetchJson(`${API_BASE}/getReturnSummary${common ? `?${common}` : ""}`),
+          fetchJson(`${API_BASE}/api/smart-dashboard?${smart}`),
+          fetchJson(`${API_BASE}/api/reports/profit?${profit}`)
+        ]);
+        renderSalesDashboard();
+        status.textContent = "";
+        if (showToastOnSuccess) showToast("Store dashboard refreshed", "success");
+      } catch (error) {
+        status.textContent = error.message || "Store dashboard load failed";
+        showToast(status.textContent, "error");
+      }
+    }
+
+    function logoutUser() {
+      if (typeof clearAuthSession === "function") clearAuthSession();
+      window.location.href = "login.html";
+    }
+
+    window.addEventListener("load", async function () {
+      requireLogin();
+      requirePageAccess("sales-dashboard");
+      filterSidebarMenuByRole();
+      applySidebarState();
+      document.getElementById("dashboardDate").value = getTodayDateValue();
+      await loadSalesDashboard(false);
+    });
+  </script>
+  <script src="js/toast.js"></script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>
