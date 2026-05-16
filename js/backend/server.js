@@ -2538,11 +2538,18 @@ function validateBranchPayload(body = {}, { partial = false } = {}) {
   };
 }
 
-const QUICK_BRANCH_LOGIN_ROLES = new Set(["Billing", "Stock", "Sticker", "Process", "Invoice"]);
+const QUICK_BRANCH_LOGIN_ROLES = new Map([
+  ["branch manager", "BranchManager"],
+  ["billing", "Billing"],
+  ["stock", "Stock"],
+  ["sticker", "Sticker"],
+  ["process", "Process"],
+  ["invoice", "Invoice"]
+]);
 
 function normalizeQuickBranchLoginRole(value = "") {
   const clean = String(value || "").trim().toLowerCase();
-  return [...QUICK_BRANCH_LOGIN_ROLES].find((role) => role.toLowerCase() === clean) || "";
+  return QUICK_BRANCH_LOGIN_ROLES.get(clean) || "";
 }
 
 function getRequestedBranchId(req) {
@@ -17025,10 +17032,8 @@ app.get("/getSalesHistory", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "S
 
 app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"]), async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -17038,6 +17043,30 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     const companyId = access.companyScope;
     const showDeleted = String(req.query.deleted || "").trim() === "1";
     const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
+    const whereParts = [`COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`];
+    const params = [];
+
+    if (companyId !== null) {
+      whereParts.push("sh.company_id = ?");
+      params.push(companyId);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push(`
+        EXISTS (
+          SELECT 1
+          FROM sales_items si
+          INNER JOIN stock s
+            ON s.company_id = si.company_id
+           AND s.barcode = si.barcode
+          WHERE si.company_id = sh.company_id
+            AND si.invoice_number = sh.invoice_number
+            AND COALESCE(si.is_deleted, 0) = 0
+            AND s.current_branch_id = ?
+        )
+      `);
+      params.push(access.userBranchId);
+    }
 
     const [sales] = await pool.query(
       `
@@ -17045,13 +17074,11 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
         sh.*,
         (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id) AS total_items
       FROM sales_history sh
-      ${companyId !== null
-        ? `WHERE sh.company_id = ? AND COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`
-        : `WHERE COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`}
+      WHERE ${whereParts.join(" AND ")}
       ORDER BY sh.id DESC
       ${pagination.sql}
       `,
-      companyId !== null ? [companyId] : []
+      params
     );
 
     setPaginationHeaders(res, pagination);
@@ -23799,7 +23826,7 @@ app.post("/branches/create-with-login", authMiddleware, async (req, res) => {
     if (!cleanName || !cleanEmail || !cleanPassword || !cleanRole) {
       return res.status(400).json({
         success: false,
-        message: "Staff name, email, password, and a valid role are required"
+        message: "Staff name, email, password, and a valid quick login role are required"
       });
     }
 
@@ -25612,6 +25639,8 @@ app.post("/login", loginRateLimiter, async (req, res) => {
         status: user.status,
         company_id: user.company_id,
         companyId: user.company_id,
+        branch_id: user.branch_id ?? null,
+        branchId: user.branch_id ?? null,
         company_name: user.company_name || "",
         companyName: user.company_name || "",
         company_status: user.company_status || ""
@@ -26546,10 +26575,8 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
 
 app.get("/api/reports/profit", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -26575,30 +26602,47 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
     }
 
     const whereParts = [
-      "company_id = ?",
-      "COALESCE(is_deleted, 0) = 0",
-      "UPPER(COALESCE(status, 'ACTIVE')) <> 'DELETED'"
+      "sh.company_id = ?",
+      "COALESCE(sh.is_deleted, 0) = 0",
+      "UPPER(COALESCE(sh.status, 'ACTIVE')) <> 'DELETED'"
     ];
     const params = [access.companyScope];
 
     if (fromDate) {
-      whereParts.push("COALESCE(invoice_date, DATE(created_at)) >= ?");
+      whereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) >= ?");
       params.push(fromDate);
     }
 
     if (toDate) {
-      whereParts.push("COALESCE(invoice_date, DATE(created_at)) <= ?");
+      whereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) <= ?");
       params.push(toDate);
+    }
+
+    if (access.isBranchLocked) {
+      whereParts.push(`
+        EXISTS (
+          SELECT 1
+          FROM sales_items si
+          INNER JOIN stock s
+            ON s.company_id = si.company_id
+           AND s.barcode = si.barcode
+          WHERE si.company_id = sh.company_id
+            AND si.invoice_number = sh.invoice_number
+            AND COALESCE(si.is_deleted, 0) = 0
+            AND s.current_branch_id = ?
+        )
+      `);
+      params.push(access.userBranchId);
     }
 
     const [rows] = await pool.query(
       `
       SELECT
-        COALESCE(SUM(COALESCE(total_amount, 0)), 0) AS total_sales,
-        COALESCE(SUM(COALESCE(company_total_amount, 0)), 0) AS total_cost,
-        COALESCE(SUM(COALESCE(total_amount, 0) - COALESCE(company_total_amount, 0)), 0) AS total_profit,
+        COALESCE(SUM(COALESCE(sh.total_amount, 0)), 0) AS total_sales,
+        COALESCE(SUM(COALESCE(sh.company_total_amount, 0)), 0) AS total_cost,
+        COALESCE(SUM(COALESCE(sh.total_amount, 0) - COALESCE(sh.company_total_amount, 0)), 0) AS total_profit,
         COUNT(*) AS total_invoices
-      FROM sales_history
+      FROM sales_history sh
       WHERE ${whereParts.join(" AND ")}
       `,
       params

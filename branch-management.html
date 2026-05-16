@@ -90,6 +90,7 @@
                       <label for="branchLoginRole">Role</label>
                       <select id="branchLoginRole">
                         <option value="">Select role</option>
+                        <option value="Branch Manager">Branch Manager</option>
                         <option>Billing</option>
                         <option>Stock</option>
                         <option>Sticker</option>
@@ -153,7 +154,7 @@
 
     const branchFields = ["branchName", "branchCode", "branchType", "branchAddress", "contactName", "contactPhone", "branchStatus"];
     const branchLoginFields = ["createBranchLogin", "branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginRole"];
-    const quickBranchLoginRoles = ["Billing", "Stock", "Sticker", "Process", "Invoice"];
+    const quickBranchLoginRoles = ["Branch Manager", "Billing", "Stock", "Sticker", "Process", "Invoice"];
 
     function notify(message, type = "info") {
       if (window.showToast) showToast(message, type);
@@ -369,7 +370,7 @@
             return notify("Staff name, email, password, and role are required", "warning");
           }
           if (!quickBranchLoginRoles.includes(login.role)) {
-            return notify("Only Billing, Stock, Sticker, Process, or Invoice roles are allowed here", "error");
+            return notify("Only Branch Manager, Billing, Stock, Sticker, Process, or Invoice roles are allowed here", "error");
           }
           payload.login = login;
         }

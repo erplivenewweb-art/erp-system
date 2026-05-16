@@ -125,6 +125,7 @@ function normalizeRoleValue(role = "") {
   if (!clean) return "";
 
   if (clean === "ADMIN") return "OWNER";
+  if (["BRANCHMANAGER", "BRANCH_MANAGER", "STOREMANAGER", "STORE_MANAGER"].includes(clean)) return "STAFF";
   if (["BILLING", "INVOICE", "STICKER", "STOCK", "PROCESS"].includes(clean)) return "STAFF";
   if (["TRANSACTION", "EXPENSE"].includes(clean)) return "ACCOUNTS";
 

@@ -87,6 +87,18 @@ const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "enforcement-qa-dashboard"]);
 const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management"]);
+const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
+  "sales-dashboard",
+  "stock",
+  "billing",
+  "invoice",
+  "return",
+  "sales-history",
+  "daily-report",
+  "transaction",
+  "transaction-reports",
+  "profit-report"
+]);
 const ERP_NAVIGATION_MODES = {
   production: {
     label: "Production",
@@ -233,10 +245,17 @@ function getNormalizedRole(user = null) {
   const raw = String(targetUser?.role || "").trim().toLowerCase();
 
   if (raw === "admin") return "owner";
+  if (["branchmanager", "branch_manager", "storemanager", "store_manager"].includes(raw)) return "staff";
   if (["billing", "invoice", "sticker", "stock", "process"].includes(raw)) return "staff";
   if (["transaction", "expense"].includes(raw)) return "accounts";
 
   return raw;
+}
+
+function isBranchManagerProfile(user = null) {
+  const targetUser = user || getLoggedInUser();
+  const raw = String(targetUser?.role || "").trim().toLowerCase();
+  return ["branchmanager", "branch_manager", "storemanager", "store_manager"].includes(raw);
 }
 
 function normalizeAllowedRoles(roles = []) {
@@ -258,6 +277,7 @@ function isAdminUser(user = null) {
 
 function getAllowedNavigationModes(user = getLoggedInUser()) {
   if (!user) return ["production", "sales"];
+  if (isBranchManagerProfile(user)) return ["sales"];
   if (isSuperAdmin(user) || isAdminUser(user)) return ["production", "sales"];
 
   const normalizedRole = getNormalizedRole(user);
@@ -677,6 +697,7 @@ function canAccessPage(pageKey, user = null) {
   const targetUser = user || getLoggedInUser();
   if (!targetUser) return false;
   if (isSuperAdmin(targetUser)) return true;
+  if (isBranchManagerProfile(targetUser)) return ERP_BRANCH_MANAGER_PAGE_KEYS.has(pageKey);
 
   const allowedRoles = ERP_PAGE_PERMISSION_MAP[pageKey];
   if (!Array.isArray(allowedRoles) || !allowedRoles.length) return true;
