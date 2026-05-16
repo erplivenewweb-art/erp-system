@@ -16572,10 +16572,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -16626,8 +16624,9 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     } = req.body;
 
     const finalCompanyId = access.companyScope;
-    const requestedBranchId = getRequestedBranchScopeValue({ ...req, body: { ...req.body, branchId: branchId ?? branch_id } });
-    const branchScope = await resolveOperationalBranchScope(connection, access, requestedBranchId);
+    const submittedBranchId = getRequestedBranchScopeValue({ ...req, body: { ...req.body, branchId: branchId ?? branch_id } });
+    const billingBranchId = access.isBranchLocked ? access.userBranchId : submittedBranchId;
+    const branchScope = await resolveOperationalBranchScope(connection, access, billingBranchId);
     if (!branchScope.ok) {
       await connection.rollback();
       return res.status(branchScope.status || 403).json({
