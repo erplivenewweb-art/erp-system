@@ -47,7 +47,10 @@ const PROTECTED_PAGES = new Set([
   "transaction-reports.html",
   "return.html",
   "admin-approval.html",
+  "company-plans.html",
+  "enforcement-qa-dashboard.html",
   "sales-history.html",
+  "branch-management.html",
   "branch-transfer.html",
   "branch-receive.html",
   "branch-transfer-history.html",
@@ -132,6 +135,7 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUserIfPresent);
+app.use(modulePreviewEnforcementMiddleware);
 
 function isOperationalMutationPath(pathname = "") {
   const cleanPath = String(pathname || "").trim().toLowerCase();
@@ -4305,6 +4309,865 @@ async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
   }
 }
 
+const ERP_MODULE_CATALOG = [
+  { key: "DASHBOARD", name: "Dashboard", category: "CORE", description: "Core ERP dashboard", sortOrder: 10 },
+  { key: "SETTINGS", name: "Settings", category: "CORE", description: "Company settings and configuration", sortOrder: 20 },
+  { key: "STAFF_MANAGEMENT", name: "Staff Management", category: "CORE", description: "Company staff management", sortOrder: 30 },
+  { key: "ADMIN_APPROVAL", name: "Admin Approval", category: "CORE", description: "Company and user approval workflows", sortOrder: 40 },
+  { key: "PRODUCTION", name: "Production", category: "PRODUCTION", description: "Production dashboard and manufacturing workspace", sortOrder: 100 },
+  { key: "PROCESS", name: "Process", category: "PRODUCTION", description: "Manufacturing process and lot tracking", sortOrder: 110 },
+  { key: "STICKER", name: "Sticker", category: "PRODUCTION", description: "Barcode sticker creation and management", sortOrder: 120 },
+  { key: "MATERIAL_STOCK", name: "Material Stock", category: "PRODUCTION", description: "Raw material stock management", sortOrder: 130 },
+  { key: "STORE", name: "Store", category: "STORE", description: "Store and sales dashboard workspace", sortOrder: 200 },
+  { key: "STOCK", name: "Stock", category: "STORE", description: "Finished goods stock management", sortOrder: 210 },
+  { key: "BILLING", name: "Billing", category: "STORE", description: "Sales billing workflows", sortOrder: 220 },
+  { key: "INVOICE", name: "Invoice", category: "STORE", description: "Invoice generation and viewing", sortOrder: 230 },
+  { key: "SALES", name: "Sales", category: "STORE", description: "Sales history and sales reports", sortOrder: 240 },
+  { key: "RETURN", name: "Return", category: "STORE", description: "Customer return workflows", sortOrder: 250 },
+  { key: "DAILY_REPORT", name: "Daily Report", category: "STORE", description: "Daily sales and store reporting", sortOrder: 260 },
+  { key: "EXPENSE", name: "Expense", category: "FINANCE", description: "Expense management", sortOrder: 300 },
+  { key: "TRANSACTION", name: "Transaction", category: "FINANCE", description: "Accounts transaction ledger", sortOrder: 310 },
+  { key: "PROFIT_REPORT", name: "Profit Report", category: "FINANCE", description: "Profit and loss reporting", sortOrder: 320 },
+  { key: "BRANCH", name: "Branch", category: "BRANCH", description: "Branch setup and branch context", sortOrder: 400 },
+  { key: "BRANCH_TRANSFER", name: "Branch Transfer", category: "BRANCH", description: "Branch stock transfer workflows", sortOrder: 410 },
+  { key: "BRANCH_RECEIVE", name: "Branch Receive", category: "BRANCH", description: "Branch receiving workflows", sortOrder: 420 },
+  { key: "BRANCH_AUDIT", name: "Branch Audit", category: "BRANCH", description: "Branch audit and reconciliation", sortOrder: 430 },
+  { key: "AUDIT", name: "Audit", category: "REPORTING", description: "ERP audit reports", sortOrder: 500 },
+  { key: "ANALYTICS", name: "Analytics", category: "REPORTING", description: "ERP analytics reports", sortOrder: 510 },
+  { key: "PURCHASE", name: "Purchase", category: "FUTURE", description: "Future purchase module", sortOrder: 900, defaultEnabled: 0 }
+];
+
+const ERP_PLAN_CATALOG = [
+  { key: "PRODUCTION_ONLY", name: "Production Only", description: "Manufacturing and production workflow access", isCustom: 0 },
+  { key: "STORE_ONLY", name: "Store Only", description: "Store, sales, billing, and invoice workflow access", isCustom: 0 },
+  { key: "BRANCH_STORE", name: "Branch Store", description: "Store workflow access with branch transfer and audit modules", isCustom: 0 },
+  { key: "FULL_ERP", name: "Full ERP", description: "All currently available ERP modules", isCustom: 0 },
+  { key: "CUSTOM", name: "Custom", description: "Company-specific module selection", isCustom: 1 }
+];
+
+const ERP_PLAN_MODULES = {
+  PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK"],
+  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
+  BRANCH_STORE: [
+    "DASHBOARD",
+    "SETTINGS",
+    "STAFF_MANAGEMENT",
+    "STORE",
+    "STOCK",
+    "BILLING",
+    "INVOICE",
+    "SALES",
+    "RETURN",
+    "DAILY_REPORT",
+    "BRANCH",
+    "BRANCH_TRANSFER",
+    "BRANCH_RECEIVE",
+    "BRANCH_AUDIT",
+    "AUDIT",
+    "ANALYTICS"
+  ],
+  FULL_ERP: ERP_MODULE_CATALOG.filter((moduleConfig) => moduleConfig.key !== "PURCHASE").map((moduleConfig) => moduleConfig.key),
+  CUSTOM: []
+};
+
+async function seedSaasModuleCatalog() {
+  let inserted = 0;
+
+  for (const moduleConfig of ERP_MODULE_CATALOG) {
+    const [result] = await pool.query(
+      `
+      INSERT INTO erp_modules
+      (module_key, module_name, category, description, is_system, default_enabled, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        module_name = VALUES(module_name),
+        category = VALUES(category),
+        description = VALUES(description),
+        is_system = VALUES(is_system),
+        default_enabled = VALUES(default_enabled),
+        sort_order = VALUES(sort_order),
+        updated_at = NOW()
+      `,
+      [
+        moduleConfig.key,
+        moduleConfig.name,
+        moduleConfig.category,
+        moduleConfig.description,
+        Number(moduleConfig.defaultEnabled ?? 1),
+        Number(moduleConfig.sortOrder || 0)
+      ]
+    );
+
+    if (Number(result?.affectedRows || 0) === 1) inserted += 1;
+  }
+
+  return inserted;
+}
+
+async function seedSaasPlans() {
+  let inserted = 0;
+
+  for (const planConfig of ERP_PLAN_CATALOG) {
+    const [result] = await pool.query(
+      `
+      INSERT INTO erp_plans
+      (plan_key, plan_name, description, is_custom, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'ACTIVE', NOW(), NOW())
+      ON DUPLICATE KEY UPDATE
+        plan_name = VALUES(plan_name),
+        description = VALUES(description),
+        is_custom = VALUES(is_custom),
+        status = VALUES(status),
+        updated_at = NOW()
+      `,
+      [planConfig.key, planConfig.name, planConfig.description, Number(planConfig.isCustom || 0)]
+    );
+
+    if (Number(result?.affectedRows || 0) === 1) inserted += 1;
+  }
+
+  return inserted;
+}
+
+async function seedSaasPlanModules() {
+  let inserted = 0;
+
+  for (const [planKey, moduleKeys] of Object.entries(ERP_PLAN_MODULES)) {
+    if (!moduleKeys.length) continue;
+
+    const [planRows] = await pool.query("SELECT id FROM erp_plans WHERE plan_key = ? LIMIT 1", [planKey]);
+    const planId = Number(planRows[0]?.id || 0);
+    if (!planId) continue;
+
+    for (const moduleKey of moduleKeys) {
+      const [result] = await pool.query(
+        `
+        INSERT INTO erp_plan_modules (plan_id, module_key, enabled, created_at, updated_at)
+        VALUES (?, ?, 1, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+          enabled = VALUES(enabled),
+          updated_at = NOW()
+        `,
+        [planId, moduleKey]
+      );
+
+      if (Number(result?.affectedRows || 0) === 1) inserted += 1;
+    }
+  }
+
+  return inserted;
+}
+
+async function backfillCompanySaasAccess() {
+  if (!(await tableExists("companies"))) {
+    return { companyCount: 0, planAssignmentsInserted: 0, moduleAccessInserted: 0 };
+  }
+
+  const [fullErpRows] = await pool.query("SELECT id FROM erp_plans WHERE plan_key = 'FULL_ERP' LIMIT 1");
+  const fullErpPlanId = Number(fullErpRows[0]?.id || 0);
+  if (!fullErpPlanId) {
+    return { companyCount: 0, planAssignmentsInserted: 0, moduleAccessInserted: 0 };
+  }
+
+  const [companyRows] = await pool.query("SELECT id FROM companies WHERE id IS NOT NULL ORDER BY id ASC");
+
+  const [assignmentResult] = await pool.query(
+    `
+    INSERT IGNORE INTO company_plan_assignments
+    (company_id, plan_id, plan_key_snapshot, effective_from, effective_until, status, assigned_by, assigned_at, updated_by, updated_at)
+    SELECT c.id, ?, 'FULL_ERP', CURDATE(), NULL, 'ACTIVE', NULL, NOW(), NULL, NOW()
+    FROM companies c
+    WHERE c.id IS NOT NULL
+    `,
+    [fullErpPlanId]
+  );
+
+  const [moduleAccessResult] = await pool.query(
+    `
+    INSERT IGNORE INTO company_module_access
+    (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+    SELECT c.id, m.module_key, 1, 'PLAN', 'Phase 1 FULL_ERP safety backfill', NULL, NOW()
+    FROM companies c
+    CROSS JOIN erp_modules m
+    WHERE c.id IS NOT NULL
+    `
+  );
+
+  return {
+    companyCount: companyRows.length,
+    planAssignmentsInserted: Number(assignmentResult?.affectedRows || 0),
+    moduleAccessInserted: Number(moduleAccessResult?.affectedRows || 0)
+  };
+}
+
+async function ensureSaasModuleAccessFoundation() {
+  const moduleInsertCount = await seedSaasModuleCatalog();
+  const planInsertCount = await seedSaasPlans();
+  const planModuleInsertCount = await seedSaasPlanModules();
+  const backfillResult = await backfillCompanySaasAccess();
+
+  console.log(
+    `SaaS module foundation ensured: ${moduleInsertCount} module(s), ${planInsertCount} plan(s), ${planModuleInsertCount} plan-module row(s) inserted; ` +
+      `${backfillResult.planAssignmentsInserted} company plan assignment(s), ${backfillResult.moduleAccessInserted} company module access row(s) backfilled across ${backfillResult.companyCount} compan${backfillResult.companyCount === 1 ? "y" : "ies"}`
+  );
+}
+
+function normalizeModuleKey(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80);
+}
+
+function normalizePlanKey(value = "") {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80);
+}
+
+async function getSaasModuleCatalogRows() {
+  const [rows] = await pool.query(
+    `
+    SELECT
+      module_key,
+      module_name,
+      category,
+      description,
+      default_enabled,
+      sort_order
+    FROM erp_modules
+    ORDER BY sort_order ASC, module_key ASC
+    `
+  );
+
+  return rows;
+}
+
+function buildFallbackModuleAccessRows(moduleRows = []) {
+  const fullErpModuleKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
+
+  return moduleRows.map((moduleRow) => {
+    const moduleKey = normalizeModuleKey(moduleRow.module_key);
+    return {
+      module_key: moduleKey,
+      enabled: fullErpModuleKeys.has(moduleKey) ? 1 : 0,
+      source: "FALLBACK",
+      reason: "FULL_ERP compatibility fallback",
+      updated_at: null
+    };
+  });
+}
+
+async function getCompanyPlanContext(companyId) {
+  const cleanCompanyId = Number(companyId || 0);
+  if (!cleanCompanyId) {
+    return {
+      company_id: null,
+      plan: null,
+      effective_from: null,
+      effective_until: null,
+      status: "",
+      is_fallback: true
+    };
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT
+      cpa.company_id,
+      cpa.effective_from,
+      cpa.effective_until,
+      cpa.status,
+      cpa.assigned_at,
+      p.plan_key,
+      p.plan_name,
+      p.description,
+      p.is_custom
+    FROM company_plan_assignments cpa
+    LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+    WHERE cpa.company_id = ?
+    LIMIT 1
+    `,
+    [cleanCompanyId]
+  );
+
+  const row = rows[0] || null;
+  if (row?.plan_key) {
+    return {
+      company_id: cleanCompanyId,
+      plan: {
+        plan_key: normalizePlanKey(row.plan_key),
+        plan_name: row.plan_name || row.plan_key,
+        description: row.description || "",
+        is_custom: Number(row.is_custom || 0)
+      },
+      effective_from: row.effective_from ?? null,
+      effective_until: row.effective_until ?? null,
+      status: row.status || "ACTIVE",
+      assigned_at: row.assigned_at ?? null,
+      is_fallback: false
+    };
+  }
+
+  const [fullErpRows] = await pool.query(
+    `
+    SELECT plan_key, plan_name, description, is_custom
+    FROM erp_plans
+    WHERE plan_key = 'FULL_ERP'
+    LIMIT 1
+    `
+  );
+  const fullErp = fullErpRows[0] || {
+    plan_key: "FULL_ERP",
+    plan_name: "Full ERP",
+    description: "Compatibility fallback",
+    is_custom: 0
+  };
+
+  return {
+    company_id: cleanCompanyId,
+    plan: {
+      plan_key: normalizePlanKey(fullErp.plan_key || "FULL_ERP"),
+      plan_name: fullErp.plan_name || "Full ERP",
+      description: fullErp.description || "",
+      is_custom: Number(fullErp.is_custom || 0)
+    },
+    effective_from: null,
+    effective_until: null,
+    status: "ACTIVE",
+    assigned_at: null,
+    is_fallback: true
+  };
+}
+
+async function getCompanyEnabledModules(companyId) {
+  const cleanCompanyId = Number(companyId || 0);
+  const moduleRows = await getSaasModuleCatalogRows();
+
+  if (!cleanCompanyId) {
+    const fallbackRows = buildFallbackModuleAccessRows(moduleRows);
+    const modules = fallbackRows.reduce((acc, row) => {
+      acc[row.module_key] = Number(row.enabled || 0) === 1;
+      return acc;
+    }, {});
+
+    return {
+      modules,
+      module_list: moduleRows.map((moduleRow) => {
+        const moduleKey = normalizeModuleKey(moduleRow.module_key);
+        return {
+          module_key: moduleKey,
+          module_name: moduleRow.module_name || moduleKey,
+          category: moduleRow.category || "",
+          enabled: Boolean(modules[moduleKey]),
+          source: "FALLBACK"
+        };
+      }),
+      raw_rows: fallbackRows,
+      is_fallback: true
+    };
+  }
+
+  const [accessRows] = await pool.query(
+    `
+    SELECT
+      module_key,
+      enabled,
+      source,
+      reason,
+      updated_at
+    FROM company_module_access
+    WHERE company_id = ?
+    ORDER BY module_key ASC
+    `,
+    [cleanCompanyId]
+  );
+
+  const rawRows = accessRows.length ? accessRows : buildFallbackModuleAccessRows(moduleRows);
+  const accessByModule = new Map(
+    rawRows.map((row) => [
+      normalizeModuleKey(row.module_key),
+      {
+        ...row,
+        module_key: normalizeModuleKey(row.module_key),
+        enabled: Number(row.enabled || 0) === 1
+      }
+    ])
+  );
+
+  const modules = {};
+  const moduleList = moduleRows.map((moduleRow) => {
+    const moduleKey = normalizeModuleKey(moduleRow.module_key);
+    const accessRow = accessByModule.get(moduleKey);
+    const enabled = accessRow ? Boolean(accessRow.enabled) : false;
+    modules[moduleKey] = enabled;
+
+    return {
+      module_key: moduleKey,
+      module_name: moduleRow.module_name || moduleKey,
+      category: moduleRow.category || "",
+      description: moduleRow.description || "",
+      enabled,
+      source: accessRow?.source || (accessRows.length ? "MISSING" : "FALLBACK"),
+      reason: accessRow?.reason || "",
+      updated_at: accessRow?.updated_at ?? null
+    };
+  });
+
+  return {
+    modules,
+    module_list: moduleList,
+    raw_rows: rawRows.map((row) => ({
+      module_key: normalizeModuleKey(row.module_key),
+      enabled: Number(row.enabled || 0) === 1,
+      source: row.source || (accessRows.length ? "PLAN" : "FALLBACK"),
+      reason: row.reason || "",
+      updated_at: row.updated_at ?? null
+    })),
+    is_fallback: !accessRows.length
+  };
+}
+
+function isSaasPlanReaderRole(role = "") {
+  const normalizedRole = normalizeRoleValue(role);
+  return normalizedRole === "OWNER" || normalizedRole === "ACCOUNTS";
+}
+
+const MODULE_PREVIEW_ROUTE_RULES = [
+  { moduleKey: "BILLING", pattern: /^\/billing(?:\.html)?$/i },
+  { moduleKey: "BILLING", pattern: /^\/saveBilling$/i },
+  { moduleKey: "BILLING", pattern: /^\/invoice-drafts(?:\/|$)/i },
+  { moduleKey: "INVOICE", pattern: /^\/invoice(?:\.html)?$/i },
+  { moduleKey: "INVOICE", pattern: /^\/saveInvoice$/i },
+  { moduleKey: "PROCESS", pattern: /^\/process(?:\.html)?$/i },
+  { moduleKey: "PROCESS", pattern: /^\/process(?:\/|$)/i },
+  { moduleKey: "STICKER", pattern: /^\/sticker(?:\.html)?$/i },
+  { moduleKey: "STICKER", pattern: /^\/(?:addSticker|updateSticker|deleteSticker|restoreSticker|getSticker)(?:\/|$)/i },
+  { moduleKey: "STOCK", pattern: /^\/stock(?:\.html)?$/i },
+  { moduleKey: "STOCK", pattern: /^\/getStock$/i },
+  { moduleKey: "BRANCH", pattern: /^\/branch-management(?:\.html)?$/i },
+  { moduleKey: "BRANCH", pattern: /^\/branches(?:\/|$)/i },
+  { moduleKey: "BRANCH", pattern: /^\/branch-stock(?:\/|$)/i },
+  { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer(?:\.html)?$/i },
+  { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer-history(?:\.html)?$/i },
+  { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfers(?:\/|$)/i },
+  { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-receive(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-audit-dashboard(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-reconciliation(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-snapshots(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-reconciliation-runs(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-exception-queue(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-audit(?:\/|$)/i },
+  { moduleKey: "ANALYTICS", pattern: /^\/branch-analytics(?:\.html|\/|$)/i },
+  { moduleKey: "ANALYTICS", pattern: /^\/transfer-ageing-report(?:\.html)?$/i },
+  { moduleKey: "ANALYTICS", pattern: /^\/shortage-analytics(?:\.html)?$/i },
+  { moduleKey: "ANALYTICS", pattern: /^\/stock-movement-ledger(?:\.html)?$/i },
+  { moduleKey: "PROFIT_REPORT", pattern: /^\/profit-report(?:\.html)?$/i },
+  { moduleKey: "TRANSACTION", pattern: /^\/transaction(?:\.html|\/|$)/i },
+  { moduleKey: "TRANSACTION", pattern: /^\/transaction-reports(?:\.html)?$/i }
+];
+
+const MODULE_ROUTE_AUDIT_CANDIDATES = [
+  ...Array.from(PROTECTED_PAGES).map((page) => ({
+    method: "GET",
+    path: `/${page}`,
+    source: "PROTECTED_PAGE",
+    risk: page.includes("dashboard") || page.includes("report") || page.includes("analytics") ? "MEDIUM" : "LOW"
+  })),
+  { method: "*", path: "/getDailyReport", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/expenses", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/materialStock", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/saveReturn", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/getReturns", source: "KNOWN_API", risk: "LOW" },
+  { method: "*", path: "/getReturnSummary", source: "KNOWN_API", risk: "LOW" },
+  { method: "*", path: "/sales-history", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/getSalesHistory", source: "KNOWN_API", risk: "MEDIUM" },
+  { method: "*", path: "/api/dashboard", source: "KNOWN_API", risk: "LOW" },
+  { method: "*", path: "/api/smart-dashboard", source: "KNOWN_API", risk: "LOW" }
+];
+
+function getRegisteredModuleRouteMappings() {
+  return MODULE_PREVIEW_ROUTE_RULES.map((rule, index) => ({
+    id: index + 1,
+    module_key: normalizeModuleKey(rule.moduleKey),
+    method: rule.method || "*",
+    pattern: String(rule.pattern || ""),
+    status: "MAPPED"
+  }));
+}
+
+function isRoutePathMapped(pathname = "") {
+  const cleanPath = String(pathname || "").trim();
+  if (!cleanPath) return false;
+  return MODULE_PREVIEW_ROUTE_RULES.some((rule) => rule.pattern.test(cleanPath));
+}
+
+function getRouteModuleKey(req) {
+  const requestPath = String(req.path || "").trim();
+  if (!requestPath) return "";
+
+  const matchedRule = MODULE_PREVIEW_ROUTE_RULES.find((rule) => rule.pattern.test(requestPath));
+  return normalizeModuleKey(matchedRule?.moduleKey || "");
+}
+
+function getPreviewPageKey(req) {
+  const requestPath = String(req.path || "").trim();
+  if (!requestPath.toLowerCase().endsWith(".html")) return null;
+  return path.basename(requestPath);
+}
+
+function normalizeEnforcementMode(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  if (clean === "HARD_ENFORCEMENT") return "HARD_ENFORCEMENT";
+  return "REPORT_ONLY";
+}
+
+async function getGlobalEnforcementMode() {
+  const [rows] = await pool.query(
+    `
+    SELECT enforcement_mode, reason, updated_by, updated_at
+    FROM module_enforcement_settings
+    WHERE scope_type = 'GLOBAL'
+    ORDER BY id ASC
+    LIMIT 1
+    `
+  );
+
+  const row = rows[0] || null;
+  return {
+    enforcement_mode: normalizeEnforcementMode(row?.enforcement_mode || "REPORT_ONLY"),
+    reason: row?.reason || "",
+    updated_by: row?.updated_by ?? null,
+    updated_at: row?.updated_at ?? null,
+    is_default: !row
+  };
+}
+
+async function getCompanyEnforcementMode(companyId) {
+  const cleanCompanyId = Number(companyId || 0);
+  if (!cleanCompanyId) {
+    return null;
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT enforcement_mode, reason, updated_by, updated_at
+    FROM module_enforcement_settings
+    WHERE scope_type = 'COMPANY'
+      AND company_id = ?
+    LIMIT 1
+    `,
+    [cleanCompanyId]
+  );
+
+  const row = rows[0] || null;
+  if (!row) return null;
+
+  return {
+    company_id: cleanCompanyId,
+    enforcement_mode: normalizeEnforcementMode(row.enforcement_mode),
+    reason: row.reason || "",
+    updated_by: row.updated_by ?? null,
+    updated_at: row.updated_at ?? null
+  };
+}
+
+async function getEffectiveEnforcementMode(companyId) {
+  const companyMode = await getCompanyEnforcementMode(companyId);
+  if (companyMode) {
+    return {
+      enforcement_mode: companyMode.enforcement_mode,
+      source: "COMPANY",
+      company_override: companyMode
+    };
+  }
+
+  const globalMode = await getGlobalEnforcementMode();
+  return {
+    enforcement_mode: globalMode.enforcement_mode,
+    source: globalMode.is_default ? "DEFAULT" : "GLOBAL",
+    global: globalMode
+  };
+}
+
+async function isHardEnforcementEnabled(companyId) {
+  const effectiveMode = await getEffectiveEnforcementMode(companyId);
+  return effectiveMode.enforcement_mode === "HARD_ENFORCEMENT";
+}
+
+function getRequestCompanyIdForModulePreview(req) {
+  const requestedCompanyId = getRequestedCompanyId(req);
+  if (requestedCompanyId !== null) return requestedCompanyId;
+
+  const tokenCompanyId = req.user?.companyId ?? req.user?.company_id ?? null;
+  if (tokenCompanyId === null || tokenCompanyId === undefined || tokenCompanyId === "") return null;
+
+  const parsed = Number(tokenCompanyId);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+}
+
+async function isCompanyModuleEnabled(companyId, moduleKey) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanModuleKey = normalizeModuleKey(moduleKey);
+  if (!cleanCompanyId || !cleanModuleKey) return true;
+
+  const moduleContext = await getCompanyEnabledModules(cleanCompanyId);
+  if (!moduleContext?.modules || !Object.prototype.hasOwnProperty.call(moduleContext.modules, cleanModuleKey)) {
+    return true;
+  }
+
+  return moduleContext.modules[cleanModuleKey] !== false;
+}
+
+async function logWouldBlockModuleAccess({
+  req,
+  companyId,
+  userId,
+  role,
+  moduleKey,
+  pageKey = null
+}) {
+  await pool.query(
+    `
+    INSERT INTO module_access_violation_logs
+    (
+      company_id,
+      user_id,
+      role,
+      module_key,
+      request_method,
+      request_path,
+      page_key,
+      would_block,
+      request_ip,
+      user_agent,
+      query_json,
+      body_json,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, NOW())
+    `,
+    [
+      companyId ?? null,
+      userId ?? null,
+      String(role || "").trim().slice(0, 80),
+      normalizeModuleKey(moduleKey),
+      String(req.method || "").trim().toUpperCase().slice(0, 16),
+      String(req.originalUrl || req.path || "").trim().slice(0, 255),
+      pageKey ? String(pageKey).trim().slice(0, 120) : null,
+      getRequestIpAddress(req),
+      String(req.headers["user-agent"] || "").slice(0, 1000),
+      safeJsonStringify(sanitizeAuditPayload(req.query || {})),
+      safeJsonStringify(sanitizeAuditPayload(req.body || {}))
+    ]
+  );
+}
+
+async function logModuleEnforcementEvent({
+  req,
+  companyId,
+  userId,
+  role,
+  moduleKey,
+  enforcementMode,
+  eventType
+}) {
+  await pool.query(
+    `
+    INSERT INTO module_access_enforcement_events
+    (
+      company_id,
+      user_id,
+      role,
+      module_key,
+      request_method,
+      request_path,
+      enforcement_mode,
+      event_type,
+      request_ip,
+      user_agent,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `,
+    [
+      companyId ?? null,
+      userId ?? null,
+      String(role || "").trim().slice(0, 80),
+      normalizeModuleKey(moduleKey),
+      String(req.method || "").trim().toUpperCase().slice(0, 16),
+      String(req.originalUrl || req.path || "").trim().slice(0, 255),
+      normalizeEnforcementMode(enforcementMode),
+      String(eventType || "WOULD_BLOCK").trim().toUpperCase() === "HARD_BLOCK" ? "HARD_BLOCK" : "WOULD_BLOCK",
+      getRequestIpAddress(req),
+      String(req.headers["user-agent"] || "").slice(0, 1000)
+    ]
+  );
+}
+
+async function modulePreviewEnforcementMiddleware(req, res, next) {
+  try {
+    if (!req.user) return next();
+
+    const moduleKey = getRouteModuleKey(req);
+    if (!moduleKey) return next();
+
+    const companyId = getRequestCompanyIdForModulePreview(req);
+    if (!companyId) return next();
+
+    const enabled = await isCompanyModuleEnabled(companyId, moduleKey);
+    if (enabled) return next();
+
+    req.modulePreviewWarning = true;
+    req.modulePreviewModule = moduleKey;
+    res.setHeader("X-Module-Preview-Warning", "MODULE_DISABLED_PREVIEW");
+    const effectiveMode = await getEffectiveEnforcementMode(companyId);
+    const enforcementMode = normalizeEnforcementMode(effectiveMode.enforcement_mode);
+    const eventType = enforcementMode === "HARD_ENFORCEMENT" ? "HARD_BLOCK" : "WOULD_BLOCK";
+
+    await logWouldBlockModuleAccess({
+      req,
+      companyId,
+      userId: getRequestedUserId(req),
+      role: req.user?.role || "",
+      moduleKey,
+      pageKey: getPreviewPageKey(req)
+    });
+    await logModuleEnforcementEvent({
+      req,
+      companyId,
+      userId: getRequestedUserId(req),
+      role: req.user?.role || "",
+      moduleKey,
+      enforcementMode,
+      eventType
+    });
+
+    if (enforcementMode === "HARD_ENFORCEMENT") {
+      return res.status(403).json({
+        success: false,
+        message: "This module is not enabled for your company",
+        module: moduleKey,
+        enforcement_mode: "HARD_ENFORCEMENT"
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error("Module preview middleware failed open:", error);
+    return next();
+  }
+}
+
+async function getCompanyForPlanManagement(connection, companyId) {
+  const [rows] = await connection.query(
+    `
+    SELECT id, company_name, status, access_status
+    FROM companies
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [companyId]
+  );
+
+  return rows[0] || null;
+}
+
+async function getPlanForAssignment(connection, planKey) {
+  const [rows] = await connection.query(
+    `
+    SELECT id, plan_key, plan_name, is_custom, status
+    FROM erp_plans
+    WHERE plan_key = ?
+      AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+    LIMIT 1
+    `,
+    [normalizePlanKey(planKey)]
+  );
+
+  return rows[0] || null;
+}
+
+async function getPlanModuleKeySet(connection, planId) {
+  const [rows] = await connection.query(
+    `
+    SELECT module_key
+    FROM erp_plan_modules
+    WHERE plan_id = ?
+      AND COALESCE(enabled, 0) = 1
+    `,
+    [planId]
+  );
+
+  return new Set(rows.map((row) => normalizeModuleKey(row.module_key)).filter(Boolean));
+}
+
+async function getCompanyModuleAccessMap(connection, companyId) {
+  const [rows] = await connection.query(
+    `
+    SELECT module_key, enabled, source, reason, updated_at
+    FROM company_module_access
+    WHERE company_id = ?
+    `,
+    [companyId]
+  );
+
+  return new Map(
+    rows.map((row) => [
+      normalizeModuleKey(row.module_key),
+      {
+        ...row,
+        module_key: normalizeModuleKey(row.module_key),
+        enabled: Number(row.enabled || 0) === 1
+      }
+    ])
+  );
+}
+
+async function writeCompanyModuleAccessAudit(connection, {
+  companyId,
+  moduleKey,
+  oldEnabled = null,
+  newEnabled = null,
+  oldPlanKey = "",
+  newPlanKey = "",
+  changedBy = null,
+  reason = ""
+}) {
+  await connection.query(
+    `
+    INSERT INTO company_module_access_audit
+    (
+      company_id,
+      module_key,
+      old_enabled,
+      new_enabled,
+      old_plan_key,
+      new_plan_key,
+      changed_by,
+      change_reason,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `,
+    [
+      companyId,
+      normalizeModuleKey(moduleKey),
+      oldEnabled === null || oldEnabled === undefined ? null : Number(Boolean(oldEnabled)),
+      newEnabled === null || newEnabled === undefined ? null : Number(Boolean(newEnabled)),
+      oldPlanKey ? normalizePlanKey(oldPlanKey) : null,
+      newPlanKey ? normalizePlanKey(newPlanKey) : null,
+      changedBy ?? null,
+      String(reason || "").trim() || null
+    ]
+  );
+}
+
 async function warnIfSchemaPiecesMissing(tableName, columnNames = [], indexNames = []) {
   if (!(await tableExists(tableName))) {
     console.warn(`[SCHEMA WARNING] Table ${tableName} is missing. Startup will continue, but related features may not work until migrations run.`);
@@ -5759,6 +6622,154 @@ async function ensureSchema() {
   await addIndexIfMissing("audit_log", "idx_audit_user_created", "(user_id, created_at)");
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS erp_modules (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      module_key VARCHAR(80) NOT NULL,
+      module_name VARCHAR(150) NOT NULL,
+      category VARCHAR(80) DEFAULT '',
+      description TEXT DEFAULT NULL,
+      is_system TINYINT(1) DEFAULT 0,
+      default_enabled TINYINT(1) DEFAULT 1,
+      sort_order INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_erp_modules_key (module_key),
+      INDEX idx_erp_modules_key (module_key)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS erp_plans (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      plan_key VARCHAR(80) NOT NULL,
+      plan_name VARCHAR(150) NOT NULL,
+      description TEXT DEFAULT NULL,
+      is_custom TINYINT(1) DEFAULT 0,
+      status VARCHAR(30) DEFAULT 'ACTIVE',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_erp_plans_key (plan_key),
+      INDEX idx_erp_plans_key (plan_key)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS erp_plan_modules (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      plan_id INT NOT NULL,
+      module_key VARCHAR(80) NOT NULL,
+      enabled TINYINT(1) DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_erp_plan_modules_plan_module (plan_id, module_key),
+      INDEX idx_erp_plan_modules_plan_module (plan_id, module_key)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS company_plan_assignments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      plan_id INT NOT NULL,
+      plan_key_snapshot VARCHAR(80) NOT NULL,
+      effective_from DATE NOT NULL,
+      effective_until DATE DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'ACTIVE',
+      assigned_by INT DEFAULT NULL,
+      assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_by INT DEFAULT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_company_plan_assignments_company (company_id),
+      INDEX idx_company_plan_assignments_company (company_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS company_module_access (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      module_key VARCHAR(80) NOT NULL,
+      enabled TINYINT(1) DEFAULT 1,
+      source VARCHAR(30) DEFAULT 'PLAN',
+      reason TEXT DEFAULT NULL,
+      updated_by INT DEFAULT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_company_module_access_company_module (company_id, module_key),
+      INDEX idx_company_module_access_company_module (company_id, module_key)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS company_module_access_audit (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      module_key VARCHAR(80) NOT NULL,
+      old_enabled TINYINT(1) DEFAULT NULL,
+      new_enabled TINYINT(1) DEFAULT NULL,
+      old_plan_key VARCHAR(80) DEFAULT NULL,
+      new_plan_key VARCHAR(80) DEFAULT NULL,
+      changed_by INT DEFAULT NULL,
+      change_reason TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_company_module_access_audit_company_module (company_id, module_key)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS module_access_violation_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      user_id INT DEFAULT NULL,
+      role VARCHAR(80) DEFAULT '',
+      module_key VARCHAR(80) NOT NULL,
+      request_method VARCHAR(16) DEFAULT '',
+      request_path VARCHAR(255) DEFAULT '',
+      page_key VARCHAR(120) DEFAULT NULL,
+      would_block TINYINT(1) DEFAULT 1,
+      request_ip VARCHAR(120) DEFAULT '',
+      user_agent TEXT DEFAULT NULL,
+      query_json JSON DEFAULT NULL,
+      body_json JSON DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_module_access_violation_company_module (company_id, module_key),
+      INDEX idx_module_access_violation_created (created_at)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS module_enforcement_settings (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      scope_type VARCHAR(30) NOT NULL,
+      company_id INT DEFAULT NULL,
+      enforcement_mode VARCHAR(40) NOT NULL DEFAULT 'REPORT_ONLY',
+      reason TEXT DEFAULT NULL,
+      updated_by INT DEFAULT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_module_enforcement_scope_company (scope_type, company_id),
+      INDEX idx_module_enforcement_company (company_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS module_access_enforcement_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      user_id INT DEFAULT NULL,
+      role VARCHAR(80) DEFAULT '',
+      module_key VARCHAR(80) NOT NULL,
+      request_method VARCHAR(16) DEFAULT '',
+      request_path VARCHAR(255) DEFAULT '',
+      enforcement_mode VARCHAR(40) DEFAULT 'REPORT_ONLY',
+      event_type VARCHAR(30) NOT NULL,
+      request_ip VARCHAR(120) DEFAULT '',
+      user_agent TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_module_enforcement_events_company_module (company_id, module_key),
+      INDEX idx_module_enforcement_events_type_created (event_type, created_at)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS otp_verifications (
       id INT AUTO_INCREMENT PRIMARY KEY,
       email VARCHAR(255) NOT NULL,
@@ -6643,6 +7654,7 @@ async function ensureSchema() {
   await seedDefaultProcessTemplatesForCompanies();
   await backfillSolderingAdditiveTemplateMetadata();
   await seedInvoiceSequencesFromSalesHistory();
+  await ensureSaasModuleAccessFoundation();
   await warnForRecentSchemaSafety();
 
   console.log("Schema ensured ✅");
@@ -17228,6 +18240,1413 @@ app.get("/superadmin/deleted-companies", authMiddleware, checkRole(["SUPERADMIN"
   }
 });
 
+app.get("/company-module-context", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) return sendAccessError(res, access);
+
+    const companyId = Number(access.companyScope || 0);
+    const planContext = await getCompanyPlanContext(companyId);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+
+    return res.json({
+      success: true,
+      company_id: companyId,
+      plan: planContext.plan,
+      modules: moduleContext.modules,
+      module_list: moduleContext.module_list,
+      is_fallback: Boolean(planContext.is_fallback || moduleContext.is_fallback)
+    });
+  } catch (error) {
+    console.error("Company module context error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company module context fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/erp-modules", authMiddleware, async (_req, res) => {
+  try {
+    const modules = await getSaasModuleCatalogRows();
+
+    return res.json({
+      success: true,
+      modules
+    });
+  } catch (error) {
+    console.error("ERP modules fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "ERP modules fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/erp-plans", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) return sendAccessError(res, access);
+
+    const role = normalizeRoleValue(access.actingUser?.role || "");
+    if (!access.isSuperAdmin && role !== "OWNER") {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to view ERP plans"
+      });
+    }
+
+    const [plans] = await pool.query(
+      `
+      SELECT
+        plan_key,
+        plan_name,
+        description,
+        is_custom,
+        status
+      FROM erp_plans
+      ORDER BY is_custom ASC, id ASC
+      `
+    );
+
+    return res.json({
+      success: true,
+      plans
+    });
+  } catch (error) {
+    console.error("ERP plans fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "ERP plans fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/company-plan", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) return sendAccessError(res, access);
+
+    const companyId = Number(access.companyScope || 0);
+    const planContext = await getCompanyPlanContext(companyId);
+
+    return res.json({
+      success: true,
+      company_id: companyId,
+      plan: planContext.plan,
+      effective_from: planContext.effective_from,
+      effective_until: planContext.effective_until,
+      status: planContext.status,
+      assigned_at: planContext.assigned_at ?? null,
+      is_fallback: Boolean(planContext.is_fallback)
+    });
+  } catch (error) {
+    console.error("Company plan fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company plan fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/company-module-access", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) return sendAccessError(res, access);
+
+    const role = normalizeRoleValue(access.actingUser?.role || "");
+    if (!access.isSuperAdmin && !isSaasPlanReaderRole(role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to view company module access"
+      });
+    }
+
+    const companyId = Number(access.companyScope || 0);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+
+    return res.json({
+      success: true,
+      company_id: companyId,
+      rows: moduleContext.raw_rows,
+      is_fallback: Boolean(moduleContext.is_fallback)
+    });
+  } catch (error) {
+    console.error("Company module access fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company module access fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/company-plans", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const fullErpModuleCount = ERP_PLAN_MODULES.FULL_ERP.length;
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        c.id AS company_id,
+        c.company_name,
+        c.status,
+        c.access_status,
+        cpa.assigned_at,
+        cpa.status AS assignment_status,
+        p.plan_key,
+        p.plan_name,
+        COUNT(cma.id) AS module_row_count,
+        COALESCE(SUM(CASE WHEN COALESCE(cma.enabled, 0) = 1 THEN 1 ELSE 0 END), 0) AS enabled_module_count
+      FROM companies c
+      LEFT JOIN company_plan_assignments cpa ON cpa.company_id = c.id
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      LEFT JOIN company_module_access cma ON cma.company_id = c.id
+      WHERE c.deleted_at IS NULL
+        AND UPPER(COALESCE(c.access_status, 'ACTIVE')) <> 'SOFT_DELETED'
+      GROUP BY
+        c.id,
+        c.company_name,
+        c.status,
+        c.access_status,
+        cpa.assigned_at,
+        cpa.status,
+        p.plan_key,
+        p.plan_name
+      ORDER BY c.id DESC
+      ${pagination.sql}
+      `
+    );
+
+    setPaginationHeaders(res, pagination);
+
+    return res.json({
+      success: true,
+      companies: rows.map((row) => ({
+        company_id: row.company_id,
+        company_name: row.company_name || "",
+        current_plan: row.plan_key
+          ? {
+              plan_key: normalizePlanKey(row.plan_key),
+              plan_name: row.plan_name || row.plan_key
+            }
+          : {
+              plan_key: "FULL_ERP",
+              plan_name: "Full ERP"
+            },
+        enabled_module_count: Number(row.module_row_count || 0) ? Number(row.enabled_module_count || 0) : fullErpModuleCount,
+        status: row.access_status || row.status || "",
+        assigned_at: row.assigned_at ?? null,
+        assignment_status: row.assignment_status || (row.plan_key ? "ACTIVE" : "FALLBACK"),
+        is_fallback: !row.plan_key || !Number(row.module_row_count || 0)
+      })),
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin company plans fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "SuperAdmin company plans fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/company-plans/:companyId", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: "Company id is required"
+      });
+    }
+
+    const [companyRows] = await pool.query(
+      `
+      SELECT
+        id AS company_id,
+        company_name,
+        owner_name,
+        owner_email,
+        status,
+        access_status,
+        login_status,
+        created_at
+      FROM companies
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [companyId]
+    );
+
+    if (!companyRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Company not found"
+      });
+    }
+
+    const planContext = await getCompanyPlanContext(companyId);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+    const planKey = normalizePlanKey(planContext.plan?.plan_key || "FULL_ERP");
+
+    const [planModuleRows] = await pool.query(
+      `
+      SELECT
+        epm.module_key,
+        m.module_name,
+        m.category,
+        epm.enabled
+      FROM erp_plans p
+      JOIN erp_plan_modules epm ON epm.plan_id = p.id
+      LEFT JOIN erp_modules m ON m.module_key = epm.module_key
+      WHERE p.plan_key = ?
+      ORDER BY m.sort_order ASC, epm.module_key ASC
+      `,
+      [planKey]
+    );
+
+    const moduleAccessRows = moduleContext.raw_rows;
+    const overrideRows = moduleAccessRows.filter((row) => String(row.source || "").trim().toUpperCase() === "OVERRIDE");
+    const enabledModuleCount = moduleContext.module_list.filter((row) => row.enabled).length;
+
+    return res.json({
+      success: true,
+      company: companyRows[0],
+      assigned_plan: {
+        ...planContext,
+        is_fallback: Boolean(planContext.is_fallback)
+      },
+      module_rows: moduleContext.module_list,
+      plan_modules: planModuleRows.map((row) => ({
+        module_key: normalizeModuleKey(row.module_key),
+        module_name: row.module_name || row.module_key,
+        category: row.category || "",
+        enabled: Number(row.enabled || 0) === 1
+      })),
+      module_access_rows: moduleAccessRows,
+      override_rows: overrideRows,
+      summary: {
+        total_modules: moduleContext.module_list.length,
+        enabled_module_count: enabledModuleCount,
+        disabled_module_count: Math.max(0, moduleContext.module_list.length - enabledModuleCount),
+        plan_module_count: planModuleRows.length,
+        override_row_count: overrideRows.length,
+        is_fallback: Boolean(planContext.is_fallback || moduleContext.is_fallback)
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin company plan detail fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "SuperAdmin company plan detail fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/superadmin/company-plans/:companyId/assign", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    const planKey = normalizePlanKey(req.body?.plan_key ?? req.body?.planKey);
+    const reason = String(req.body?.reason || "").trim();
+    const effectiveFrom = String(req.body?.effective_from || req.body?.effectiveFrom || "").trim() || null;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: "Company id is required" });
+    }
+
+    if (!planKey) {
+      return res.status(400).json({ success: false, message: "plan_key is required" });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const company = await getCompanyForPlanManagement(connection, companyId);
+    if (!company) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    const plan = await getPlanForAssignment(connection, planKey);
+    if (!plan) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Plan was not found or is inactive" });
+    }
+
+    const [currentAssignmentRows] = await connection.query(
+      `
+      SELECT cpa.*, p.plan_key AS current_plan_key
+      FROM company_plan_assignments cpa
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      WHERE cpa.company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [companyId]
+    );
+    const currentAssignment = currentAssignmentRows[0] || null;
+    const oldPlanKey = normalizePlanKey(currentAssignment?.current_plan_key || currentAssignment?.plan_key_snapshot || "FULL_ERP");
+    const oldAccessMap = await getCompanyModuleAccessMap(connection, companyId);
+
+    await connection.query(
+      `
+      INSERT INTO company_plan_assignments
+      (
+        company_id,
+        plan_id,
+        plan_key_snapshot,
+        effective_from,
+        effective_until,
+        status,
+        assigned_by,
+        assigned_at,
+        updated_by,
+        updated_at
+      )
+      VALUES (?, ?, ?, COALESCE(?, CURDATE()), NULL, 'ACTIVE', ?, NOW(), ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        plan_id = VALUES(plan_id),
+        plan_key_snapshot = VALUES(plan_key_snapshot),
+        effective_from = VALUES(effective_from),
+        effective_until = VALUES(effective_until),
+        status = VALUES(status),
+        updated_by = VALUES(updated_by),
+        updated_at = NOW()
+      `,
+      [companyId, plan.id, plan.plan_key, effectiveFrom, access.actingUserId ?? null, access.actingUserId ?? null]
+    );
+
+    const [moduleRows] = await connection.query(
+      `
+      SELECT module_key
+      FROM erp_modules
+      ORDER BY sort_order ASC, module_key ASC
+      `
+    );
+
+    let updatedModuleCount = 0;
+    let auditRowCount = 0;
+
+    if (Number(plan.is_custom || 0) === 1) {
+      if (!oldAccessMap.size) {
+        const fallbackKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
+
+        for (const moduleRow of moduleRows) {
+          const moduleKey = normalizeModuleKey(moduleRow.module_key);
+          const enabled = fallbackKeys.has(moduleKey);
+          await connection.query(
+            `
+            INSERT INTO company_module_access
+            (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+            VALUES (?, ?, ?, 'OVERRIDE', ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE
+              enabled = VALUES(enabled),
+              source = VALUES(source),
+              reason = VALUES(reason),
+              updated_by = VALUES(updated_by),
+              updated_at = NOW()
+            `,
+            [companyId, moduleKey, Number(enabled), reason || "CUSTOM plan initial FULL_ERP compatibility defaults", access.actingUserId ?? null]
+          );
+          updatedModuleCount += 1;
+          await writeCompanyModuleAccessAudit(connection, {
+            companyId,
+            moduleKey,
+            oldEnabled: null,
+            newEnabled: enabled,
+            oldPlanKey,
+            newPlanKey: plan.plan_key,
+            changedBy: access.actingUserId,
+            reason: reason || "CUSTOM plan assigned"
+          });
+          auditRowCount += 1;
+        }
+      }
+    } else {
+      const planModuleKeys = await getPlanModuleKeySet(connection, plan.id);
+
+      for (const moduleRow of moduleRows) {
+        const moduleKey = normalizeModuleKey(moduleRow.module_key);
+        const oldAccess = oldAccessMap.get(moduleKey);
+        const nextEnabled = planModuleKeys.has(moduleKey);
+        await connection.query(
+          `
+          INSERT INTO company_module_access
+          (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+          VALUES (?, ?, ?, 'PLAN', ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE
+            enabled = VALUES(enabled),
+            source = VALUES(source),
+            reason = VALUES(reason),
+            updated_by = VALUES(updated_by),
+            updated_at = NOW()
+          `,
+          [companyId, moduleKey, Number(nextEnabled), reason || `Plan changed to ${plan.plan_key}`, access.actingUserId ?? null]
+        );
+        updatedModuleCount += 1;
+
+        const shouldAudit = !oldAccess || oldAccess.enabled !== nextEnabled || String(oldAccess.source || "").toUpperCase() !== "PLAN" || oldPlanKey !== plan.plan_key;
+        if (shouldAudit) {
+          await writeCompanyModuleAccessAudit(connection, {
+            companyId,
+            moduleKey,
+            oldEnabled: oldAccess ? oldAccess.enabled : null,
+            newEnabled: nextEnabled,
+            oldPlanKey,
+            newPlanKey: plan.plan_key,
+            changedBy: access.actingUserId,
+            reason: reason || `Plan changed to ${plan.plan_key}`
+          });
+          auditRowCount += 1;
+        }
+      }
+    }
+
+    if (oldPlanKey !== plan.plan_key) {
+      await writeCompanyModuleAccessAudit(connection, {
+        companyId,
+        moduleKey: "PLAN_ASSIGNMENT",
+        oldEnabled: null,
+        newEnabled: null,
+        oldPlanKey,
+        newPlanKey: plan.plan_key,
+        changedBy: access.actingUserId,
+        reason: reason || `Plan changed to ${plan.plan_key}`
+      });
+      auditRowCount += 1;
+    }
+
+    await logActivitySafe(connection, req, access, {
+      companyId,
+      actionType: "ASSIGN_PLAN",
+      entityType: "COMPANY_PLAN",
+      entityId: String(companyId),
+      moduleName: "company-plans",
+      status: "success",
+      message: "Company plan assigned",
+      beforeData: { plan_key: oldPlanKey },
+      afterData: { plan_key: plan.plan_key, updatedModuleCount, auditRowCount }
+    });
+
+    await connection.commit();
+
+    const planContext = await getCompanyPlanContext(companyId);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+
+    return res.json({
+      success: true,
+      message: "Company plan assigned successfully",
+      company_id: companyId,
+      plan: planContext.plan,
+      updated_module_count: updatedModuleCount,
+      audit_row_count: auditRowCount,
+      enabled_module_count: moduleContext.module_list.filter((row) => row.enabled).length
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("SuperAdmin company plan assign error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company plan assignment failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/superadmin/company-plans/:companyId/modules", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    if (!companyId) return res.status(400).json({ success: false, message: "Company id is required" });
+
+    const [companyRows] = await pool.query("SELECT id, company_name FROM companies WHERE id = ? LIMIT 1", [companyId]);
+    if (!companyRows.length) return res.status(404).json({ success: false, message: "Company not found" });
+
+    const planContext = await getCompanyPlanContext(companyId);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+    const planKey = normalizePlanKey(planContext.plan?.plan_key || "FULL_ERP");
+    const [planModuleRows] = await pool.query(
+      `
+      SELECT epm.module_key, epm.enabled
+      FROM erp_plans p
+      JOIN erp_plan_modules epm ON epm.plan_id = p.id
+      WHERE p.plan_key = ?
+      `,
+      [planKey]
+    );
+    const planEnabledSet = new Set(planModuleRows.filter((row) => Number(row.enabled || 0) === 1).map((row) => normalizeModuleKey(row.module_key)));
+
+    return res.json({
+      success: true,
+      company: companyRows[0],
+      assigned_plan: planContext,
+      modules: moduleContext.module_list.map((moduleRow) => ({
+        ...moduleRow,
+        plan_enabled: planEnabledSet.has(normalizeModuleKey(moduleRow.module_key)),
+        is_override: String(moduleRow.source || "").toUpperCase() === "OVERRIDE"
+      })),
+      summary: {
+        total_modules: moduleContext.module_list.length,
+        enabled_module_count: moduleContext.module_list.filter((row) => row.enabled).length,
+        override_count: moduleContext.module_list.filter((row) => String(row.source || "").toUpperCase() === "OVERRIDE").length
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin company modules fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company module details fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/superadmin/company-plans/:companyId/modules/:moduleKey", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    const moduleKey = normalizeModuleKey(req.params.moduleKey);
+    const enabled = Boolean(req.body?.enabled);
+    const reason = String(req.body?.reason || "").trim();
+
+    if (!companyId) return res.status(400).json({ success: false, message: "Company id is required" });
+    if (!moduleKey) return res.status(400).json({ success: false, message: "Module key is required" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const company = await getCompanyForPlanManagement(connection, companyId);
+    if (!company) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    const [moduleRows] = await connection.query("SELECT module_key FROM erp_modules WHERE module_key = ? LIMIT 1", [moduleKey]);
+    if (!moduleRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Module not found" });
+    }
+
+    const oldAccessMap = await getCompanyModuleAccessMap(connection, companyId);
+    const oldAccess = oldAccessMap.get(moduleKey);
+    const [planRows] = await connection.query(
+      `
+      SELECT COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP') AS plan_key
+      FROM company_plan_assignments cpa
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      WHERE cpa.company_id = ?
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    const planKey = normalizePlanKey(planRows[0]?.plan_key || "FULL_ERP");
+
+    let oldEnabled = oldAccess?.enabled;
+    if (oldEnabled === undefined) {
+      const fallback = await getCompanyEnabledModules(companyId);
+      oldEnabled = Boolean(fallback.modules[moduleKey]);
+    }
+
+    await connection.query(
+      `
+      INSERT INTO company_module_access
+      (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+      VALUES (?, ?, ?, 'OVERRIDE', ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        enabled = VALUES(enabled),
+        source = VALUES(source),
+        reason = VALUES(reason),
+        updated_by = VALUES(updated_by),
+        updated_at = NOW()
+      `,
+      [companyId, moduleKey, Number(enabled), reason || "SuperAdmin module override", access.actingUserId ?? null]
+    );
+
+    await writeCompanyModuleAccessAudit(connection, {
+      companyId,
+      moduleKey,
+      oldEnabled,
+      newEnabled: enabled,
+      oldPlanKey: planKey,
+      newPlanKey: planKey,
+      changedBy: access.actingUserId,
+      reason: reason || "SuperAdmin module override"
+    });
+
+    await logActivitySafe(connection, req, access, {
+      companyId,
+      actionType: "MODULE_OVERRIDE",
+      entityType: "COMPANY_MODULE",
+      entityId: `${companyId}:${moduleKey}`,
+      moduleName: "company-plans",
+      status: "success",
+      message: "Company module override updated",
+      beforeData: { module_key: moduleKey, enabled: oldEnabled },
+      afterData: { module_key: moduleKey, enabled, source: "OVERRIDE" }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Module override saved",
+      company_id: companyId,
+      module_key: moduleKey,
+      enabled,
+      source: "OVERRIDE"
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("SuperAdmin module override error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module override failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/superadmin/company-plans/:companyId/audit", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    if (!companyId) return res.status(400).json({ success: false, message: "Company id is required" });
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const [rows] = await pool.query(
+      `
+      SELECT
+        a.id,
+        a.company_id,
+        a.module_key,
+        a.old_enabled,
+        a.new_enabled,
+        a.old_plan_key,
+        a.new_plan_key,
+        a.changed_by,
+        u.name AS changed_by_name,
+        u.email AS changed_by_email,
+        a.change_reason,
+        a.created_at
+      FROM company_module_access_audit a
+      LEFT JOIN users u ON u.id = a.changed_by
+      WHERE a.company_id = ?
+      ORDER BY a.created_at DESC, a.id DESC
+      ${pagination.sql}
+      `,
+      [companyId]
+    );
+
+    setPaginationHeaders(res, pagination);
+
+    return res.json({
+      success: true,
+      company_id: companyId,
+      audit: rows,
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin company plan audit fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company plan audit fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-preview-violations", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const companyId = parsePositiveInteger(req.query.companyId ?? req.query.company_id);
+    const moduleKey = normalizeModuleKey(req.query.moduleKey ?? req.query.module_key);
+    const fromDate = String(req.query.fromDate ?? req.query.from_date ?? "").trim();
+    const toDate = String(req.query.toDate ?? req.query.to_date ?? "").trim();
+    const whereParts = ["1 = 1"];
+    const params = [];
+
+    if (companyId) {
+      whereParts.push("v.company_id = ?");
+      params.push(companyId);
+    }
+
+    if (moduleKey) {
+      whereParts.push("v.module_key = ?");
+      params.push(moduleKey);
+    }
+
+    if (fromDate) {
+      whereParts.push("v.created_at >= ?");
+      params.push(fromDate);
+    }
+
+    if (toDate) {
+      whereParts.push("v.created_at < DATE_ADD(?, INTERVAL 1 DAY)");
+      params.push(toDate);
+    }
+
+    const whereSql = `WHERE ${whereParts.join(" AND ")}`;
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        v.id,
+        v.company_id,
+        c.company_name,
+        v.user_id,
+        u.name AS user_name,
+        u.email AS user_email,
+        v.role,
+        v.module_key,
+        v.request_method,
+        v.request_path,
+        v.page_key,
+        v.would_block,
+        v.request_ip,
+        v.user_agent,
+        v.created_at
+      FROM module_access_violation_logs v
+      LEFT JOIN companies c ON c.id = v.company_id
+      LEFT JOIN users u ON u.id = v.user_id
+      ${whereSql}
+      ORDER BY v.created_at DESC, v.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+
+    const [moduleSummaryRows] = await pool.query(
+      `
+      SELECT v.module_key, COUNT(*) AS total
+      FROM module_access_violation_logs v
+      ${whereSql}
+      GROUP BY v.module_key
+      ORDER BY total DESC, v.module_key ASC
+      `,
+      params
+    );
+
+    const [companySummaryRows] = await pool.query(
+      `
+      SELECT v.company_id, c.company_name, COUNT(*) AS total
+      FROM module_access_violation_logs v
+      LEFT JOIN companies c ON c.id = v.company_id
+      ${whereSql}
+      GROUP BY v.company_id, c.company_name
+      ORDER BY total DESC, v.company_id ASC
+      `,
+      params
+    );
+
+    const [totalRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM module_access_violation_logs v
+      ${whereSql}
+      `,
+      params
+    );
+
+    setPaginationHeaders(res, pagination);
+
+    return res.json({
+      success: true,
+      violations: rows,
+      summary: {
+        total: Number(totalRows[0]?.total || 0),
+        by_module: moduleSummaryRows.map((row) => ({
+          module_key: row.module_key,
+          total: Number(row.total || 0)
+        })),
+        by_company: companySummaryRows.map((row) => ({
+          company_id: row.company_id,
+          company_name: row.company_name || "",
+          total: Number(row.total || 0)
+        }))
+      },
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin module preview violations fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module preview violations fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-enforcement", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const globalMode = await getGlobalEnforcementMode();
+    const [overrideRows] = await pool.query(
+      `
+      SELECT
+        mes.company_id,
+        c.company_name,
+        mes.enforcement_mode,
+        mes.reason,
+        mes.updated_by,
+        u.name AS updated_by_name,
+        u.email AS updated_by_email,
+        mes.updated_at
+      FROM module_enforcement_settings mes
+      LEFT JOIN companies c ON c.id = mes.company_id
+      LEFT JOIN users u ON u.id = mes.updated_by
+      WHERE mes.scope_type = 'COMPANY'
+      ORDER BY mes.updated_at DESC, mes.company_id ASC
+      `
+    );
+
+    const [countRows] = await pool.query(
+      `
+      SELECT enforcement_mode, COUNT(*) AS total
+      FROM module_enforcement_settings
+      WHERE scope_type = 'COMPANY'
+      GROUP BY enforcement_mode
+      `
+    );
+
+    return res.json({
+      success: true,
+      global: globalMode,
+      company_overrides: overrideRows.map((row) => ({
+        company_id: row.company_id,
+        company_name: row.company_name || "",
+        enforcement_mode: normalizeEnforcementMode(row.enforcement_mode),
+        reason: row.reason || "",
+        updated_by: row.updated_by ?? null,
+        updated_by_name: row.updated_by_name || "",
+        updated_by_email: row.updated_by_email || "",
+        updated_at: row.updated_at ?? null
+      })),
+      counts: {
+        company_override_count: overrideRows.length,
+        by_mode: countRows.reduce((acc, row) => {
+          acc[normalizeEnforcementMode(row.enforcement_mode)] = Number(row.total || 0);
+          return acc;
+        }, {})
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin module enforcement fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module enforcement settings fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/superadmin/module-enforcement/global", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const mode = normalizeEnforcementMode(req.body?.mode ?? req.body?.enforcement_mode);
+    const reason = String(req.body?.reason || "").trim();
+
+    await pool.query(
+      `
+      INSERT INTO module_enforcement_settings
+      (scope_type, company_id, enforcement_mode, reason, updated_by, updated_at)
+      VALUES ('GLOBAL', 0, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        enforcement_mode = VALUES(enforcement_mode),
+        reason = VALUES(reason),
+        updated_by = VALUES(updated_by),
+        updated_at = NOW()
+      `,
+      [mode, reason || null, access.actingUserId ?? null]
+    );
+
+    await logActivitySafe(pool, req, access, {
+      actionType: "UPDATE_ENFORCEMENT",
+      entityType: "MODULE_ENFORCEMENT",
+      entityId: "GLOBAL",
+      moduleName: "company-plans",
+      status: "success",
+      message: "Global module enforcement updated",
+      afterData: { enforcement_mode: mode, reason }
+    });
+
+    return res.json({
+      success: true,
+      message: "Global enforcement mode updated",
+      global: await getGlobalEnforcementMode()
+    });
+  } catch (error) {
+    console.error("SuperAdmin global enforcement update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Global enforcement update failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/superadmin/module-enforcement/company/:companyId", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    const mode = normalizeEnforcementMode(req.body?.mode ?? req.body?.enforcement_mode);
+    const reason = String(req.body?.reason || "").trim();
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: "Company id is required" });
+    }
+
+    const [companyRows] = await pool.query("SELECT id FROM companies WHERE id = ? LIMIT 1", [companyId]);
+    if (!companyRows.length) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    await pool.query(
+      `
+      INSERT INTO module_enforcement_settings
+      (scope_type, company_id, enforcement_mode, reason, updated_by, updated_at)
+      VALUES ('COMPANY', ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        enforcement_mode = VALUES(enforcement_mode),
+        reason = VALUES(reason),
+        updated_by = VALUES(updated_by),
+        updated_at = NOW()
+      `,
+      [companyId, mode, reason || null, access.actingUserId ?? null]
+    );
+
+    await logActivitySafe(pool, req, access, {
+      companyId,
+      actionType: "UPDATE_ENFORCEMENT",
+      entityType: "MODULE_ENFORCEMENT",
+      entityId: String(companyId),
+      moduleName: "company-plans",
+      status: "success",
+      message: "Company module enforcement override updated",
+      afterData: { company_id: companyId, enforcement_mode: mode, reason }
+    });
+
+    return res.json({
+      success: true,
+      message: "Company enforcement override updated",
+      company_override: await getCompanyEnforcementMode(companyId),
+      effective: await getEffectiveEnforcementMode(companyId)
+    });
+  } catch (error) {
+    console.error("SuperAdmin company enforcement update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company enforcement update failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.delete("/superadmin/module-enforcement/company/:companyId", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: "Company id is required" });
+    }
+
+    await pool.query(
+      `
+      DELETE FROM module_enforcement_settings
+      WHERE scope_type = 'COMPANY'
+        AND company_id = ?
+      `,
+      [companyId]
+    );
+
+    await logActivitySafe(pool, req, access, {
+      companyId,
+      actionType: "DELETE_ENFORCEMENT_OVERRIDE",
+      entityType: "MODULE_ENFORCEMENT",
+      entityId: String(companyId),
+      moduleName: "company-plans",
+      status: "success",
+      message: "Company module enforcement override removed"
+    });
+
+    return res.json({
+      success: true,
+      message: "Company enforcement override removed",
+      effective: await getEffectiveEnforcementMode(companyId)
+    });
+  } catch (error) {
+    console.error("SuperAdmin company enforcement delete error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company enforcement override removal failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-route-map", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const mappings = getRegisteredModuleRouteMappings();
+    const countsByModule = mappings.reduce((acc, mapping) => {
+      acc[mapping.module_key] = (acc[mapping.module_key] || 0) + 1;
+      return acc;
+    }, {});
+
+    return res.json({
+      success: true,
+      mappings,
+      summary: {
+        total_mappings: mappings.length,
+        counts_by_module: countsByModule
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin module route map fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module route map fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-enforcement-events", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 500 });
+    const companyId = parsePositiveInteger(req.query.companyId ?? req.query.company_id);
+    const moduleKey = normalizeModuleKey(req.query.moduleKey ?? req.query.module_key);
+    const eventType = String(req.query.eventType ?? req.query.event_type ?? "").trim().toUpperCase();
+    const fromDate = String(req.query.fromDate ?? req.query.from_date ?? "").trim();
+    const toDate = String(req.query.toDate ?? req.query.to_date ?? "").trim();
+    const whereParts = ["1 = 1"];
+    const params = [];
+
+    if (companyId) {
+      whereParts.push("e.company_id = ?");
+      params.push(companyId);
+    }
+    if (moduleKey) {
+      whereParts.push("e.module_key = ?");
+      params.push(moduleKey);
+    }
+    if (["WOULD_BLOCK", "HARD_BLOCK"].includes(eventType)) {
+      whereParts.push("e.event_type = ?");
+      params.push(eventType);
+    }
+    if (fromDate) {
+      whereParts.push("e.created_at >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("e.created_at < DATE_ADD(?, INTERVAL 1 DAY)");
+      params.push(toDate);
+    }
+
+    const whereSql = `WHERE ${whereParts.join(" AND ")}`;
+    const [rows] = await pool.query(
+      `
+      SELECT
+        e.id,
+        e.company_id,
+        c.company_name,
+        e.user_id,
+        u.name AS user_name,
+        u.email AS user_email,
+        e.role,
+        e.module_key,
+        e.request_method,
+        e.request_path,
+        e.enforcement_mode,
+        e.event_type,
+        e.request_ip,
+        e.created_at
+      FROM module_access_enforcement_events e
+      LEFT JOIN companies c ON c.id = e.company_id
+      LEFT JOIN users u ON u.id = e.user_id
+      ${whereSql}
+      ORDER BY e.created_at DESC, e.id DESC
+      ${pagination.sql}
+      `,
+      params
+    );
+
+    const [summaryRows] = await pool.query(
+      `
+      SELECT event_type, COUNT(*) AS total
+      FROM module_access_enforcement_events e
+      ${whereSql}
+      GROUP BY event_type
+      `,
+      params
+    );
+    const [moduleRows] = await pool.query(
+      `
+      SELECT module_key, COUNT(*) AS total
+      FROM module_access_enforcement_events e
+      ${whereSql}
+      GROUP BY module_key
+      ORDER BY total DESC, module_key ASC
+      LIMIT 20
+      `,
+      params
+    );
+    const [routeRows] = await pool.query(
+      `
+      SELECT request_path, COUNT(*) AS total
+      FROM module_access_enforcement_events e
+      ${whereSql}
+      GROUP BY request_path
+      ORDER BY total DESC, request_path ASC
+      LIMIT 20
+      `,
+      params
+    );
+
+    setPaginationHeaders(res, pagination);
+
+    return res.json({
+      success: true,
+      events: rows,
+      summary: {
+        by_event_type: summaryRows.reduce((acc, row) => {
+          acc[row.event_type] = Number(row.total || 0);
+          return acc;
+        }, {}),
+        top_modules: moduleRows.map((row) => ({ module_key: row.module_key, total: Number(row.total || 0) })),
+        top_routes: routeRows.map((row) => ({ request_path: row.request_path, total: Number(row.total || 0) }))
+      },
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin module enforcement events fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module enforcement events fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-enforcement-readiness", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const requestedCompanyId = parsePositiveInteger(req.query.companyId ?? req.query.company_id);
+    const companyWhere = requestedCompanyId ? "WHERE c.id = ?" : "WHERE c.deleted_at IS NULL";
+    const companyParams = requestedCompanyId ? [requestedCompanyId] : [];
+    const [companyRows] = await pool.query(
+      `
+      SELECT
+        c.id AS company_id,
+        c.company_name,
+        COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP') AS plan_key
+      FROM companies c
+      LEFT JOIN company_plan_assignments cpa ON cpa.company_id = c.id
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      ${companyWhere}
+      ORDER BY c.id DESC
+      LIMIT 500
+      `,
+      companyParams
+    );
+
+    const unmappedRoutes = MODULE_ROUTE_AUDIT_CANDIDATES.filter((candidate) => !isRoutePathMapped(candidate.path));
+    const results = [];
+
+    for (const company of companyRows) {
+      const companyId = Number(company.company_id || 0);
+      const effectiveMode = await getEffectiveEnforcementMode(companyId);
+      const [eventRows] = await pool.query(
+        `
+        SELECT
+          SUM(CASE WHEN event_type = 'WOULD_BLOCK' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS would_7,
+          SUM(CASE WHEN event_type = 'WOULD_BLOCK' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS would_30,
+          SUM(CASE WHEN event_type = 'HARD_BLOCK' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS hard_7,
+          SUM(CASE WHEN event_type = 'HARD_BLOCK' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS hard_30
+        FROM module_access_enforcement_events
+        WHERE company_id = ?
+        `,
+        [companyId]
+      );
+      const [moduleRows] = await pool.query(
+        `
+        SELECT module_key, COUNT(*) AS total
+        FROM module_access_enforcement_events
+        WHERE company_id = ?
+          AND event_type = 'WOULD_BLOCK'
+          AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY module_key
+        ORDER BY total DESC, module_key ASC
+        LIMIT 10
+        `,
+        [companyId]
+      );
+
+      const would7 = Number(eventRows[0]?.would_7 || 0);
+      const would30 = Number(eventRows[0]?.would_30 || 0);
+      const hard7 = Number(eventRows[0]?.hard_7 || 0);
+      const hard30 = Number(eventRows[0]?.hard_30 || 0);
+      const unmappedRouteRisk = unmappedRoutes.length > 8 ? "MEDIUM" : "LOW";
+      const riskScore = Math.min(100, (would7 * 8) + (would30 * 2) + (hard7 * 15) + (unmappedRouteRisk === "MEDIUM" ? 10 : 0));
+
+      results.push({
+        company_id: companyId,
+        company_name: company.company_name || "",
+        plan: normalizePlanKey(company.plan_key || "FULL_ERP"),
+        effective_mode: effectiveMode.enforcement_mode,
+        enforcement_source: effectiveMode.source,
+        would_block_last_7_days: would7,
+        would_block_last_30_days: would30,
+        hard_block_last_7_days: hard7,
+        hard_block_last_30_days: hard30,
+        risky_modules: moduleRows.map((row) => ({ module_key: row.module_key, total: Number(row.total || 0) })),
+        unmapped_route_risk: unmappedRouteRisk,
+        recommended_ready: riskScore <= 20 && would7 === 0,
+        risk_score: riskScore
+      });
+    }
+
+    return res.json({
+      success: true,
+      readiness: results,
+      company: requestedCompanyId ? results[0] || null : undefined,
+      summary: {
+        company_count: results.length,
+        recommended_ready_count: results.filter((row) => row.recommended_ready).length,
+        hard_enforcement_count: results.filter((row) => row.effective_mode === "HARD_ENFORCEMENT").length
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin enforcement readiness fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Module enforcement readiness fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/superadmin/module-unmapped-routes", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const unmapped = MODULE_ROUTE_AUDIT_CANDIDATES
+      .filter((candidate) => !isRoutePathMapped(candidate.path))
+      .map((candidate) => ({
+        ...candidate,
+        recommendation: candidate.risk === "MEDIUM" ? "Review before broad HARD_ENFORCEMENT rollout" : "Low priority mapping review"
+      }));
+
+    return res.json({
+      success: true,
+      unmapped_routes: unmapped,
+      summary: {
+        total: unmapped.length,
+        medium_risk: unmapped.filter((route) => route.risk === "MEDIUM").length,
+        low_risk: unmapped.filter((route) => route.risk === "LOW").length
+      }
+    });
+  } catch (error) {
+    console.error("SuperAdmin unmapped route fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Unmapped route audit fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.get("/branch-context", authMiddleware, async (req, res) => {
   try {
     const access = await resolveBranchAccessContext(req, {
@@ -21659,6 +24078,70 @@ app.post("/branches/:id/users", authMiddleware, async (req, res) => {
 /* =========================
    USERS / STAFF
 ========================= */
+app.get("/branch-users", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (!access.isSuperAdmin && !isBranchManagerRole(access.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to view branch users"
+      });
+    }
+
+    if (access.companyScope === null) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a company to view branch users"
+      });
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        u.branch_id,
+        b.branch_name,
+        b.branch_code
+      FROM users u
+      LEFT JOIN branches b
+        ON b.id = u.branch_id
+       AND b.company_id = u.company_id
+      WHERE u.company_id = ?
+        AND UPPER(COALESCE(u.role, '')) <> 'SUPERADMIN'
+        AND u.deleted_at IS NULL
+      ORDER BY
+        FIELD(UPPER(COALESCE(u.role, '')), 'OWNER', 'ADMIN', 'ACCOUNTS', 'STAFF'),
+        u.name ASC,
+        u.email ASC,
+        u.id ASC
+      `,
+      [access.companyScope]
+    );
+
+    return res.json({
+      success: true,
+      users: rows
+    });
+  } catch (error) {
+    console.error("Branch users fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch users fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.get("/companyUsers", authMiddleware, async (req, res) => {
   try {
     const access = await resolveAccessContext(req, {

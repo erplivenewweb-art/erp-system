@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Company Plans</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .plans-grid { display: grid; grid-template-columns: minmax(320px, 430px) 1fr; gap: 18px; align-items: start; }
+    .panel { background: #fff; border: 1px solid #eadfce; border-radius: 16px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,0.06); margin-bottom: 18px; }
+    .panel h3 { margin: 0; color: #2f2a21; display: flex; gap: 10px; align-items: center; }
+    .panel-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .filters { display: grid; grid-template-columns: 1fr 180px 150px; gap: 10px; margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; font-weight: 800; color: #5f6b7e; margin-bottom: 6px; text-transform: uppercase; }
+    .field input, .field select, .field textarea { width: 100%; border: 1px solid #e3d7c7; border-radius: 12px; padding: 11px 12px; background: #fffdf8; }
+    .field textarea { min-height: 76px; resize: vertical; }
+    .btn { border: 0; border-radius: 12px; padding: 10px 13px; cursor: pointer; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; }
+    .btn.primary { background: linear-gradient(180deg, #d9ae67, #bb8134); color: #fff; }
+    .btn.dark { background: #172033; color: #fff; }
+    .btn.ghost { background: #fffaf2; color: #2f2a21; border: 1px solid #eadfce; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .table-wrap { overflow-x: auto; border: 1px solid #edf2f7; border-radius: 14px; background: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    .data-table th, .data-table td { padding: 11px 12px; border-bottom: 1px solid #f1f5f9; text-align: left; font-size: 14px; vertical-align: top; }
+    .data-table th { background: #f8fafc; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: .3px; }
+    .data-table tr.active-row td { background: #fffaf2; }
+    .badge { display: inline-flex; border-radius: 999px; padding: 7px 10px; font-size: 12px; font-weight: 900; white-space: nowrap; background: #eef2ff; color: #3730a3; }
+    .badge.plan { background: #fff7e7; color: #92400e; }
+    .badge.override { background: #ecfbf3; color: #166534; }
+    .badge.off { background: #fff1f1; color: #b42318; }
+    .badge.hard { background: #fff1f1; color: #b42318; }
+    .badge.report { background: #eef2ff; color: #3730a3; }
+    .muted { color: #64748b; font-size: 13px; }
+    .selected-company { padding: 13px; border: 1px solid #eadfce; background: #fffaf2; border-radius: 12px; margin-bottom: 14px; }
+    .preview-note { padding: 12px 13px; border: 1px solid #f6c453; background: #fff8df; color: #7a4b00; border-radius: 12px; font-size: 13px; font-weight: 800; margin-bottom: 14px; display: flex; gap: 9px; align-items: flex-start; }
+    .assignment-form { display: grid; gap: 12px; }
+    .category-section { border: 1px solid #edf2f7; border-radius: 14px; overflow: hidden; margin-bottom: 12px; }
+    .category-title { background: #f8fafc; padding: 11px 12px; font-weight: 900; color: #334155; }
+    .module-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 12px; border-top: 1px solid #f1f5f9; }
+    .switch { position: relative; width: 48px; height: 28px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: #cbd5e1; border-radius: 999px; transition: .18s; }
+    .slider:before { content: ""; position: absolute; height: 22px; width: 22px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .18s; box-shadow: 0 2px 6px rgba(15,23,42,.2); }
+    .switch input:checked + .slider { background: #1f8a53; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .audit-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+    .audit-item { border: 1px solid #edf2f7; border-radius: 12px; padding: 11px 12px; background: #fff; }
+    .empty-state { padding: 22px; color: #64748b; text-align: center; }
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    @media (max-width: 1080px) { .plans-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 760px) { .filters { grid-template-columns: 1fr; } .module-row { grid-template-columns: 1fr; } .btn { width: 100%; } .data-table { min-width: 640px; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings" aria-label="Open settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>SuperAdmin</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Company Plans</h1><p>Manage SaaS plans and module overrides</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadPage(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+
+      <section class="page active">
+        <div class="plans-grid">
+          <div>
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-building"></i> Company Plan Overview</h3><span id="companyCount" class="muted">Loading...</span></div>
+              <div class="filters">
+                <div class="field"><label for="searchInput">Search</label><input id="searchInput" placeholder="Company name" oninput="renderCompanies()"></div>
+                <div class="field"><label for="planFilter">Plan</label><select id="planFilter" onchange="renderCompanies()"><option value="">All plans</option></select></div>
+                <div class="field"><label for="statusFilter">Status</label><select id="statusFilter" onchange="renderCompanies()"><option value="">All</option><option>ACTIVE</option><option>SUSPENDED</option><option>DEACTIVATED</option></select></div>
+              </div>
+              <div class="table-wrap"><table class="data-table"><thead><tr><th>Company</th><th>Plan</th><th>Modules</th><th>Status</th><th>Action</th></tr></thead><tbody id="companyRows"><tr><td colspan="5"><div class="empty-state">Loading companies...</div></td></tr></tbody></table></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-shield-halved"></i> Enforcement Controls</h3><span id="effectiveModeBadge" class="badge report">REPORT_ONLY</span></div>
+              <div class="preview-note"><i class="fas fa-circle-info"></i><span>Default is REPORT_ONLY. HARD_ENFORCEMENT may block disabled module pages and APIs.</span></div>
+              <div class="assignment-form">
+                <div class="field"><label for="globalModeSelect">Global Mode</label><select id="globalModeSelect"><option>REPORT_ONLY</option><option>HARD_ENFORCEMENT</option></select></div>
+                <div class="field"><label for="globalModeReason">Global Reason</label><textarea id="globalModeReason" placeholder="Initial rollout"></textarea></div>
+                <div class="action-row"><button class="btn dark" type="button" onclick="saveGlobalEnforcement()"><i class="fas fa-earth-asia"></i> Save Global Mode</button></div>
+                <hr style="border:0;border-top:1px solid #edf2f7;margin:6px 0;">
+                <div class="field"><label for="companyModeSelect">Selected Company Override</label><select id="companyModeSelect"><option>REPORT_ONLY</option><option>HARD_ENFORCEMENT</option></select></div>
+                <div class="field"><label for="companyModeReason">Override Reason</label><textarea id="companyModeReason" placeholder="Company fully migrated"></textarea></div>
+                <div class="action-row">
+                  <button id="saveCompanyModeBtn" class="btn primary" type="button" onclick="saveCompanyEnforcement()" disabled><i class="fas fa-floppy-disk"></i> Save Override</button>
+                  <button id="clearCompanyModeBtn" class="btn ghost" type="button" onclick="clearCompanyEnforcement()" disabled><i class="fas fa-rotate-left"></i> Use Global</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-layer-group"></i> Plan Assignment</h3><span id="selectedPlanBadge" class="badge plan">No company selected</span></div>
+              <div class="preview-note"><i class="fas fa-triangle-exclamation"></i><span>Preview mode: plan and module settings are visible for testing, but ERP access is not blocked yet.</span></div>
+              <div id="selectedCompany" class="selected-company muted">Select a company to manage its plan and modules.</div>
+              <div class="assignment-form">
+                <div class="field"><label for="planSelect">Plan</label><select id="planSelect"></select></div>
+                <div class="field"><label for="planReason">Reason</label><textarea id="planReason" placeholder="Client purchased store plan"></textarea></div>
+                <div class="action-row"><button id="savePlanBtn" class="btn primary" type="button" onclick="assignPlan()" disabled><i class="fas fa-floppy-disk"></i> Save Plan</button></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-toggle-on"></i> Module Toggles</h3><span id="moduleSummary" class="muted">Select company</span></div>
+              <div id="moduleGroups"><div class="empty-state">Select a company to view module access.</div></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-clock-rotate-left"></i> Audit History</h3><button class="btn ghost" type="button" onclick="loadAudit()"><i class="fas fa-rotate"></i> Reload</button></div>
+              <div id="auditList" class="audit-list"><div class="empty-state">Select a company to view audit history.</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/toast.js"></script>
+  <script>
+    let companies = [];
+    let plans = [];
+    let enforcementSettings = { global: { enforcement_mode: "REPORT_ONLY" }, company_overrides: [] };
+    let activeCompany = null;
+    let activeModules = [];
+
+    function notify(message, type = "info") { if (window.showToast) showToast(message, type); else alert(message); }
+    function api(path, options = {}) { return fetch(path, { credentials: "include", cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } }); }
+    async function readJson(response) { const data = await response.json().catch(() => ({})); if (!response.ok || data.success === false) throw new Error(data.message || "Request failed"); return data; }
+    function esc(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    function fmtDate(value) { if (!value) return "-"; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+    function currentPlanKey(company) { return company?.current_plan?.plan_key || "FULL_ERP"; }
+    function modeBadge(mode) { const clean = String(mode || "REPORT_ONLY").toUpperCase(); return `<span class="badge ${clean === "HARD_ENFORCEMENT" ? "hard" : "report"}">${esc(clean)}</span>`; }
+    function getCompanyOverride(companyId) { return (enforcementSettings.company_overrides || []).find((row) => Number(row.company_id) === Number(companyId)) || null; }
+    function getEffectiveMode(companyId) { return getCompanyOverride(companyId)?.enforcement_mode || enforcementSettings.global?.enforcement_mode || "REPORT_ONLY"; }
+
+    async function loadPage(showToastOnSuccess = false) {
+      try {
+        const [planData, companyData, enforcementData] = await Promise.all([
+          readJson(await api("/erp-plans")),
+          readJson(await api("/superadmin/company-plans?limit=500")),
+          readJson(await api("/superadmin/module-enforcement"))
+        ]);
+        plans = planData.plans || [];
+        companies = companyData.companies || [];
+        enforcementSettings = enforcementData || enforcementSettings;
+        if (activeCompany) {
+          activeCompany = companies.find((company) => Number(company.company_id) === Number(activeCompany.company_id)) || activeCompany;
+        }
+        renderPlanControls();
+        renderEnforcementControls();
+        renderCompanies();
+        renderSelectedEnforcement();
+        if (showToastOnSuccess) notify("Company plans refreshed", "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function renderPlanControls() {
+      const options = plans.map((plan) => `<option value="${esc(plan.plan_key)}">${esc(plan.plan_name)} (${esc(plan.plan_key)})</option>`).join("");
+      document.getElementById("planSelect").innerHTML = options;
+      document.getElementById("planFilter").innerHTML = `<option value="">All plans</option>${plans.map((plan) => `<option value="${esc(plan.plan_key)}">${esc(plan.plan_name)}</option>`).join("")}`;
+    }
+
+    function renderCompanies() {
+      const search = document.getElementById("searchInput").value.trim().toLowerCase();
+      const planFilter = document.getElementById("planFilter").value;
+      const statusFilter = document.getElementById("statusFilter").value;
+      const filtered = companies.filter((company) => {
+        const matchesSearch = !search || String(company.company_name || "").toLowerCase().includes(search);
+        const matchesPlan = !planFilter || currentPlanKey(company) === planFilter;
+        const matchesStatus = !statusFilter || String(company.status || "").toUpperCase() === statusFilter;
+        return matchesSearch && matchesPlan && matchesStatus;
+      });
+      document.getElementById("companyCount").textContent = `${filtered.length} compan${filtered.length === 1 ? "y" : "ies"}`;
+      document.getElementById("companyRows").innerHTML = filtered.length ? filtered.map((company) => `
+        <tr class="${activeCompany && Number(activeCompany.company_id) === Number(company.company_id) ? "active-row" : ""}">
+          <td><strong>${esc(company.company_name || "-")}</strong><br><span class="muted">ID ${Number(company.company_id)}</span></td>
+          <td><span class="badge plan">${esc(currentPlanKey(company))}</span>${company.is_fallback ? `<br><span class="muted">Fallback</span>` : ""}</td>
+          <td>${Number(company.enabled_module_count || 0)}</td>
+          <td>${esc(company.status || "-")}<br>${modeBadge(getEffectiveMode(company.company_id))}</td>
+          <td><button class="btn primary" type="button" onclick="manageCompany(${Number(company.company_id)})"><i class="fas fa-sliders"></i> Manage</button></td>
+        </tr>
+      `).join("") : `<tr><td colspan="5"><div class="empty-state">No companies match the filters.</div></td></tr>`;
+    }
+
+    function renderEnforcementControls() {
+      const globalMode = enforcementSettings.global?.enforcement_mode || "REPORT_ONLY";
+      document.getElementById("globalModeSelect").value = globalMode;
+      document.getElementById("globalModeReason").value = enforcementSettings.global?.reason || "";
+      renderSelectedEnforcement();
+    }
+
+    function renderSelectedEnforcement() {
+      const companyId = activeCompany?.company_id || null;
+      const override = companyId ? getCompanyOverride(companyId) : null;
+      const effectiveMode = companyId ? getEffectiveMode(companyId) : (enforcementSettings.global?.enforcement_mode || "REPORT_ONLY");
+      const badge = document.getElementById("effectiveModeBadge");
+      badge.textContent = effectiveMode;
+      badge.className = `badge ${effectiveMode === "HARD_ENFORCEMENT" ? "hard" : "report"}`;
+      document.getElementById("companyModeSelect").value = override?.enforcement_mode || effectiveMode;
+      document.getElementById("companyModeReason").value = override?.reason || "";
+      document.getElementById("saveCompanyModeBtn").disabled = !companyId;
+      document.getElementById("clearCompanyModeBtn").disabled = !companyId || !override;
+    }
+
+    async function manageCompany(companyId) {
+      activeCompany = companies.find((company) => Number(company.company_id) === Number(companyId)) || null;
+      if (!activeCompany) return;
+      renderCompanies();
+      document.getElementById("selectedCompany").innerHTML = `<strong>${esc(activeCompany.company_name || "-")}</strong><br><span class="muted">Company ID ${Number(activeCompany.company_id)}</span>`;
+      document.getElementById("selectedPlanBadge").textContent = currentPlanKey(activeCompany);
+      document.getElementById("planSelect").value = currentPlanKey(activeCompany);
+      document.getElementById("planReason").value = "";
+      document.getElementById("savePlanBtn").disabled = false;
+      renderSelectedEnforcement();
+      await Promise.all([loadModules(), loadAudit()]);
+    }
+
+    function confirmHardMode(scopeLabel) {
+      return window.confirm(`This may block disabled module pages and APIs for ${scopeLabel}. Continue?`);
+    }
+
+    async function saveGlobalEnforcement() {
+      const mode = document.getElementById("globalModeSelect").value;
+      const reason = document.getElementById("globalModeReason").value.trim();
+      if (mode === "HARD_ENFORCEMENT" && !confirmHardMode("all companies without overrides")) return;
+      try {
+        await readJson(await api("/superadmin/module-enforcement/global", {
+          method: "POST",
+          body: JSON.stringify({ mode, reason })
+        }));
+        notify("Global enforcement mode saved", "success");
+        await loadPage();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function saveCompanyEnforcement() {
+      if (!activeCompany) return;
+      const mode = document.getElementById("companyModeSelect").value;
+      const reason = document.getElementById("companyModeReason").value.trim();
+      if (mode === "HARD_ENFORCEMENT" && !confirmHardMode(activeCompany.company_name || `company ${activeCompany.company_id}`)) return;
+      try {
+        await readJson(await api(`/superadmin/module-enforcement/company/${activeCompany.company_id}`, {
+          method: "POST",
+          body: JSON.stringify({ mode, reason })
+        }));
+        notify("Company enforcement override saved", "success");
+        await loadPage();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function clearCompanyEnforcement() {
+      if (!activeCompany) return;
+      try {
+        await readJson(await api(`/superadmin/module-enforcement/company/${activeCompany.company_id}`, {
+          method: "DELETE"
+        }));
+        notify("Company override removed", "success");
+        await loadPage();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function loadModules() {
+      if (!activeCompany) return;
+      try {
+        const data = await readJson(await api(`/superadmin/company-plans/${activeCompany.company_id}/modules`));
+        activeModules = data.modules || [];
+        document.getElementById("moduleSummary").textContent = `${data.summary?.enabled_module_count || 0} enabled, ${data.summary?.override_count || 0} overrides`;
+        renderModules();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function renderModules() {
+      const grouped = activeModules.reduce((acc, module) => {
+        const category = module.category || "OTHER";
+        if (!acc[category]) acc[category] = [];
+        acc[category].push(module);
+        return acc;
+      }, {});
+      const order = ["CORE", "PRODUCTION", "STORE", "BRANCH", "REPORTING", "FINANCE", "FUTURE", "OTHER"];
+      document.getElementById("moduleGroups").innerHTML = order.filter((category) => grouped[category]?.length).map((category) => `
+        <div class="category-section">
+          <div class="category-title">${esc(category)}</div>
+          ${grouped[category].map((module) => `
+            <div class="module-row">
+              <div><strong>${esc(module.module_name || module.module_key)}</strong><br><span class="muted">${esc(module.description || module.module_key)}</span></div>
+              <span class="badge ${module.is_override ? "override" : "plan"}">${module.is_override ? "OVERRIDE" : "PLAN"}</span>
+              <label class="switch" title="Toggle module override">
+                <input type="checkbox" ${module.enabled ? "checked" : ""} onchange="overrideModule('${esc(module.module_key)}', this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+          `).join("")}
+        </div>
+      `).join("") || `<div class="empty-state">No modules found.</div>`;
+    }
+
+    async function assignPlan() {
+      if (!activeCompany) return;
+      const planKey = document.getElementById("planSelect").value;
+      const reason = document.getElementById("planReason").value.trim();
+      try {
+        const data = await readJson(await api(`/superadmin/company-plans/${activeCompany.company_id}/assign`, {
+          method: "POST",
+          body: JSON.stringify({ plan_key: planKey, reason })
+        }));
+        notify("Plan assigned", "success");
+        activeCompany.current_plan = data.plan;
+        activeCompany.enabled_module_count = data.enabled_module_count;
+        activeCompany.is_fallback = false;
+        document.getElementById("selectedPlanBadge").textContent = planKey;
+        await loadModules();
+        await loadAudit();
+        await loadPage();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function overrideModule(moduleKey, enabled) {
+      if (!activeCompany) return;
+      const reason = window.prompt("Reason for module override", "Custom enterprise package") || "";
+      try {
+        await readJson(await api(`/superadmin/company-plans/${activeCompany.company_id}/modules/${encodeURIComponent(moduleKey)}`, {
+          method: "POST",
+          body: JSON.stringify({ enabled, reason })
+        }));
+        notify("Module override saved", "success");
+        await loadModules();
+        await loadAudit();
+      } catch (error) {
+        notify(error.message, "error");
+        await loadModules();
+      }
+    }
+
+    async function loadAudit() {
+      if (!activeCompany) return;
+      try {
+        const data = await readJson(await api(`/superadmin/company-plans/${activeCompany.company_id}/audit?limit=100`));
+        const audit = data.audit || [];
+        document.getElementById("auditList").innerHTML = audit.length ? audit.map((row) => `
+          <div class="audit-item">
+            <strong>${esc(row.module_key)}</strong> <span class="muted">${fmtDate(row.created_at)}</span><br>
+            <span class="muted">By ${esc(row.changed_by_name || row.changed_by_email || row.changed_by || "SuperAdmin")}</span><br>
+            <span>Enabled: ${row.old_enabled === null ? "-" : Number(row.old_enabled) ? "ON" : "OFF"} to ${row.new_enabled === null ? "-" : Number(row.new_enabled) ? "ON" : "OFF"}</span><br>
+            <span class="muted">Plan: ${esc(row.old_plan_key || "-")} to ${esc(row.new_plan_key || "-")}</span>
+            ${row.change_reason ? `<br><span>${esc(row.change_reason)}</span>` : ""}
+          </div>
+        `).join("") : `<div class="empty-state">No audit history yet.</div>`;
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function toggleSidebar() { document.getElementById("sidebar")?.classList.toggle("collapsed"); }
+    function logoutUser() { if (window.clearAuthSession) clearAuthSession(); location.href = "login.html"; }
+
+    document.addEventListener("DOMContentLoaded", loadPage);
+  </script>
+</body>
+</html>

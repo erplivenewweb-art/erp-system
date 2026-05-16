@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enforcement QA Dashboard</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .qa-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .qa-card, .panel { background: #fff; border: 1px solid #eadfce; border-radius: 16px; padding: 16px; box-shadow: 0 10px 24px rgba(15,23,42,0.06); }
+    .qa-card span { display: block; color: #64748b; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    .qa-card strong { display: block; margin-top: 8px; font-size: 28px; color: #172033; }
+    .panel { margin-bottom: 18px; }
+    .panel-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .panel h3 { margin: 0; display: flex; align-items: center; gap: 10px; color: #2f2a21; }
+    .filters { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; font-weight: 800; color: #5f6b7e; margin-bottom: 6px; text-transform: uppercase; }
+    .field input, .field select { width: 100%; border: 1px solid #e3d7c7; border-radius: 12px; padding: 10px 11px; background: #fffdf8; }
+    .btn { border: 0; border-radius: 12px; padding: 10px 13px; cursor: pointer; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; }
+    .btn.primary { background: linear-gradient(180deg, #d9ae67, #bb8134); color: #fff; }
+    .btn.ghost { background: #fffaf2; color: #2f2a21; border: 1px solid #eadfce; }
+    .table-wrap { overflow-x: auto; border: 1px solid #edf2f7; border-radius: 14px; background: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; min-width: 860px; }
+    .data-table th, .data-table td { padding: 11px 12px; border-bottom: 1px solid #f1f5f9; text-align: left; font-size: 14px; vertical-align: top; }
+    .data-table th { background: #f8fafc; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: .3px; }
+    .badge { display: inline-flex; border-radius: 999px; padding: 6px 9px; font-size: 12px; font-weight: 900; white-space: nowrap; background: #eef2ff; color: #3730a3; }
+    .badge.hard, .badge.high { background: #fff1f1; color: #b42318; }
+    .badge.ready, .badge.low { background: #ecfbf3; color: #166534; }
+    .badge.medium { background: #fff7e7; color: #92400e; }
+    .muted { color: #64748b; font-size: 13px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .empty-state { padding: 22px; color: #64748b; text-align: center; }
+    @media (max-width: 1100px) { .qa-grid { grid-template-columns: repeat(2, 1fr); } .split { grid-template-columns: 1fr; } .filters { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 680px) { .qa-grid, .filters { grid-template-columns: 1fr; } .btn { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>SuperAdmin</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Enforcement QA</h1><p>Monitor module enforcement readiness and route coverage</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadDashboard(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+      <section class="page active">
+        <div class="qa-grid">
+          <div class="qa-card"><span>Report-only companies</span><strong id="reportOnlyCount">0</strong></div>
+          <div class="qa-card"><span>Hard enforcement companies</span><strong id="hardCount">0</strong></div>
+          <div class="qa-card"><span>Would-block 24h</span><strong id="would24">0</strong></div>
+          <div class="qa-card"><span>Hard-block 24h</span><strong id="hard24">0</strong></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3><i class="fas fa-building-shield"></i> Company Readiness</h3><span id="readinessSummary" class="muted">Loading...</span></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Company</th><th>Plan</th><th>Mode</th><th>Would Block</th><th>Hard Block</th><th>Risk</th><th>Ready</th></tr></thead><tbody id="readinessRows"></tbody></table></div>
+        </div>
+
+        <div class="split">
+          <div class="panel">
+            <div class="panel-head"><h3><i class="fas fa-route"></i> Route Map Viewer</h3><span id="routeMapSummary" class="muted">Loading...</span></div>
+            <div class="filters">
+              <div class="field"><label>Module</label><select id="routeModuleFilter" onchange="renderRouteMap()"><option value="">All</option></select></div>
+              <div class="field"><label>Search</label><input id="routeSearch" oninput="renderRouteMap()" placeholder="Pattern"></div>
+            </div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>Module</th><th>Method</th><th>Pattern</th><th>Status</th></tr></thead><tbody id="routeRows"></tbody></table></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3><i class="fas fa-triangle-exclamation"></i> Unmapped Route Risk</h3><span id="unmappedSummary" class="muted">Loading...</span></div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>Route</th><th>Source</th><th>Risk</th><th>Note</th></tr></thead><tbody id="unmappedRows"></tbody></table></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3><i class="fas fa-list-check"></i> Enforcement Events</h3><button class="btn ghost" type="button" onclick="loadEvents()"><i class="fas fa-rotate"></i> Reload Events</button></div>
+          <div class="filters">
+            <div class="field"><label>Company ID</label><input id="eventCompanyId" placeholder="Optional"></div>
+            <div class="field"><label>Module</label><select id="eventModuleKey"><option value="">All</option></select></div>
+            <div class="field"><label>Event</label><select id="eventType"><option value="">All</option><option>WOULD_BLOCK</option><option>HARD_BLOCK</option></select></div>
+            <div class="field"><label>From</label><input id="eventFromDate" type="date"></div>
+            <div class="field"><label>To</label><input id="eventToDate" type="date"></div>
+          </div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Company</th><th>User</th><th>Role</th><th>Module</th><th>Event</th><th>Route</th><th>Time</th></tr></thead><tbody id="eventRows"></tbody></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="js/auth.js"></script>
+  <script src="js/toast.js"></script>
+  <script>
+    let routeMappings = [];
+    let readiness = [];
+    let events = [];
+    let unmappedRoutes = [];
+
+    function notify(message, type = "info") { if (window.showToast) showToast(message, type); else alert(message); }
+    function api(path) { return fetch(path, { credentials: "include", cache: "no-store" }); }
+    async function readJson(response) { const data = await response.json().catch(() => ({})); if (!response.ok || data.success === false) throw new Error(data.message || "Request failed"); return data; }
+    function esc(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    function fmt(value) { if (!value) return "-"; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); }
+    function badge(value, cls = "") { return `<span class="badge ${cls}">${esc(value)}</span>`; }
+
+    async function loadDashboard(showToastOnSuccess = false) {
+      try {
+        const [routeData, readinessData, unmappedData] = await Promise.all([
+          readJson(await api("/superadmin/module-route-map")),
+          readJson(await api("/superadmin/module-enforcement-readiness")),
+          readJson(await api("/superadmin/module-unmapped-routes"))
+        ]);
+        routeMappings = routeData.mappings || [];
+        readiness = readinessData.readiness || [];
+        unmappedRoutes = unmappedData.unmapped_routes || [];
+        renderOverview();
+        renderReadiness();
+        renderRouteFilters();
+        renderRouteMap();
+        renderUnmapped();
+        await loadEvents();
+        await loadEventOverview();
+        if (showToastOnSuccess) notify("Enforcement QA refreshed", "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function renderOverview() {
+      document.getElementById("reportOnlyCount").textContent = readiness.filter((row) => row.effective_mode !== "HARD_ENFORCEMENT").length;
+      document.getElementById("hardCount").textContent = readiness.filter((row) => row.effective_mode === "HARD_ENFORCEMENT").length;
+    }
+
+    function renderReadiness() {
+      document.getElementById("readinessSummary").textContent = `${readiness.length} companies`;
+      document.getElementById("readinessRows").innerHTML = readiness.length ? readiness.map((row) => `
+        <tr>
+          <td><strong>${esc(row.company_name || "-")}</strong><br><span class="muted">ID ${Number(row.company_id)}</span></td>
+          <td>${badge(row.plan || "-")}</td>
+          <td>${badge(row.effective_mode, row.effective_mode === "HARD_ENFORCEMENT" ? "hard" : "")}<br><span class="muted">${esc(row.enforcement_source || "")}</span></td>
+          <td>${Number(row.would_block_last_7_days || 0)} / 7d<br><span class="muted">${Number(row.would_block_last_30_days || 0)} / 30d</span></td>
+          <td>${Number(row.hard_block_last_7_days || 0)} / 7d<br><span class="muted">${Number(row.hard_block_last_30_days || 0)} / 30d</span></td>
+          <td>${badge(row.risk_score, row.risk_score > 50 ? "high" : row.risk_score > 20 ? "medium" : "low")}</td>
+          <td>${row.recommended_ready ? badge("YES", "ready") : badge("NO", "hard")}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="7"><div class="empty-state">No readiness data.</div></td></tr>`;
+    }
+
+    function renderRouteFilters() {
+      const modules = [...new Set(routeMappings.map((row) => row.module_key).filter(Boolean))].sort();
+      const options = modules.map((moduleKey) => `<option>${esc(moduleKey)}</option>`).join("");
+      document.getElementById("routeModuleFilter").innerHTML = `<option value="">All</option>${options}`;
+      document.getElementById("eventModuleKey").innerHTML = `<option value="">All</option>${options}`;
+    }
+
+    function renderRouteMap() {
+      const moduleFilter = document.getElementById("routeModuleFilter").value;
+      const search = document.getElementById("routeSearch").value.trim().toLowerCase();
+      const rows = routeMappings.filter((row) => (!moduleFilter || row.module_key === moduleFilter) && (!search || String(row.pattern || "").toLowerCase().includes(search)));
+      document.getElementById("routeMapSummary").textContent = `${rows.length} mapped routes`;
+      document.getElementById("routeRows").innerHTML = rows.length ? rows.map((row) => `
+        <tr><td>${badge(row.module_key)}</td><td>${esc(row.method)}</td><td><code>${esc(row.pattern)}</code></td><td>${badge(row.status, "ready")}</td></tr>
+      `).join("") : `<tr><td colspan="4"><div class="empty-state">No route mappings.</div></td></tr>`;
+    }
+
+    function renderUnmapped() {
+      document.getElementById("unmappedSummary").textContent = `${unmappedRoutes.length} suspected unmapped`;
+      document.getElementById("unmappedRows").innerHTML = unmappedRoutes.length ? unmappedRoutes.map((row) => `
+        <tr><td><code>${esc(row.path)}</code><br><span class="muted">${esc(row.method)}</span></td><td>${esc(row.source)}</td><td>${badge(row.risk, String(row.risk).toLowerCase())}</td><td>${esc(row.recommendation)}</td></tr>
+      `).join("") : `<tr><td colspan="4"><div class="empty-state">No suspected unmapped routes.</div></td></tr>`;
+    }
+
+    async function loadEvents() {
+      const params = new URLSearchParams({ limit: "100" });
+      if (eventCompanyId.value.trim()) params.set("companyId", eventCompanyId.value.trim());
+      if (eventModuleKey.value) params.set("moduleKey", eventModuleKey.value);
+      if (eventType.value) params.set("eventType", eventType.value);
+      if (eventFromDate.value) params.set("fromDate", eventFromDate.value);
+      if (eventToDate.value) params.set("toDate", eventToDate.value);
+      try {
+        const data = await readJson(await api(`/superadmin/module-enforcement-events?${params.toString()}`));
+        events = data.events || [];
+        renderEvents();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function loadEventOverview() {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      try {
+        const data = await readJson(await api(`/superadmin/module-enforcement-events?limit=1&fromDate=${since}`));
+        document.getElementById("would24").textContent = data.summary?.by_event_type?.WOULD_BLOCK || 0;
+        document.getElementById("hard24").textContent = data.summary?.by_event_type?.HARD_BLOCK || 0;
+      } catch (_) {}
+    }
+
+    function renderEvents() {
+      document.getElementById("eventRows").innerHTML = events.length ? events.map((row) => `
+        <tr>
+          <td>${esc(row.company_name || "-")}<br><span class="muted">ID ${row.company_id || "-"}</span></td>
+          <td>${esc(row.user_name || row.user_email || row.user_id || "-")}</td>
+          <td>${esc(row.role || "-")}</td>
+          <td>${badge(row.module_key)}</td>
+          <td>${badge(row.event_type, row.event_type === "HARD_BLOCK" ? "hard" : "medium")}</td>
+          <td><code>${esc(row.request_method)} ${esc(row.request_path)}</code></td>
+          <td>${fmt(row.created_at)}</td>
+        </tr>
+      `).join("") : `<tr><td colspan="7"><div class="empty-state">No enforcement events found.</div></td></tr>`;
+    }
+
+    function toggleSidebar() { document.getElementById("sidebar")?.classList.toggle("collapsed"); }
+    function logoutUser() { if (window.clearAuthSession) clearAuthSession(); location.href = "login.html"; }
+
+    document.addEventListener("DOMContentLoaded", loadDashboard);
+  </script>
+</body>
+</html>

@@ -7,6 +7,8 @@ const ERP_PAGE_PERMISSION_MAP = {
   "production-dashboard": ["SUPERADMIN", "OWNER", "STAFF"],
   "sales-dashboard": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "admin-approval": ["SUPERADMIN", "OWNER"],
+  "company-plans": ["SUPERADMIN"],
+  "enforcement-qa-dashboard": ["SUPERADMIN"],
   sticker: ["SUPERADMIN", "OWNER", "STAFF"],
   stock: ["SUPERADMIN", "OWNER", "STAFF"],
   "material-stock": ["SUPERADMIN", "OWNER", "STAFF"],
@@ -22,6 +24,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "profit-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "branch-transfer": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-management": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "branch-receive": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "branch-transfer-history": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "branch-shortage-report": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
@@ -42,6 +45,8 @@ const ERP_MENU_PAGE_BY_HREF = {
   "production-dashboard.html": "production-dashboard",
   "sales-dashboard.html": "sales-dashboard",
   "admin-approval.html": "admin-approval",
+  "company-plans.html": "company-plans",
+  "enforcement-qa-dashboard.html": "enforcement-qa-dashboard",
   "sticker.html": "sticker",
   "stock.html": "stock",
   "material-stock.html": "material-stock",
@@ -57,6 +62,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "transaction-reports.html": "transaction-reports",
   "profit-report.html": "profit-report",
   "branch-transfer.html": "branch-transfer",
+  "branch-management.html": "branch-management",
   "branch-receive.html": "branch-receive",
   "branch-transfer-history.html": "branch-transfer-history",
   "branch-shortage-report.html": "branch-shortage-report",
@@ -76,8 +82,11 @@ const ERP_AUTH_TOKEN_STORAGE_KEY = "erpAuthToken";
 const ERP_SELECTED_COMPANY_STORAGE_KEY = "selectedCompanyId";
 const ERP_NAVIGATION_MODE_STORAGE_KEY = "erpNavigationMode";
 const ERP_ALL_COMPANIES_VALUE = "__ALL__";
+const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
+const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
-const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction"]);
+const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "enforcement-qa-dashboard"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management"]);
 const ERP_NAVIGATION_MODES = {
   production: {
     label: "Production",
@@ -88,39 +97,47 @@ const ERP_NAVIGATION_MODES = {
     defaultHref: "sales-dashboard.html"
   }
 };
+const ERP_NAVIGATION_GROUPS = {
+  branch: {
+    label: "Branch",
+    icon: "fas fa-code-branch"
+  }
+};
 const ERP_NAVIGATION_ITEMS = [
-  { mode: "production", pageKey: "production-dashboard", href: "production-dashboard.html", label: "Production Dashboard", icon: "fas fa-chart-pie" },
-  { mode: "production", pageKey: "process", href: "process.html", label: "Process", icon: "fas fa-screwdriver-wrench" },
-  { mode: "production", pageKey: "sticker", href: "sticker.html", label: "Sticker", icon: "fas fa-barcode" },
-  { mode: "production", pageKey: "material-stock", href: "material-stock.html", label: "Material Stock", icon: "fas fa-box-open" },
-  { mode: "production", pageKey: "staff-management", href: "staff-management.html", label: "Staff Management", icon: "fas fa-users" },
-  { mode: "production", pageKey: "expense-manager", href: "expense-manager.html", label: "Expense Manager", icon: "fas fa-wallet" },
-  { mode: "production", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear" },
-  { mode: "production", pageKey: "admin-approval", href: "admin-approval.html", label: "Admin Approval", icon: "fas fa-user-check" },
-  { mode: "sales", pageKey: "sales-dashboard", href: "sales-dashboard.html", label: "Store Dashboard", icon: "fas fa-store" },
-  { mode: "sales", pageKey: "stock", href: "stock.html", label: "Stock", icon: "fas fa-boxes-stacked" },
-  { mode: "sales", pageKey: "billing", href: "billing.html", label: "Billing", icon: "fas fa-money-bill-wave" },
-  { mode: "sales", pageKey: "invoice", href: "invoice.html", label: "Invoice", icon: "fas fa-file-invoice" },
-  { mode: "sales", pageKey: "return", href: "return.html", label: "Return", icon: "fas fa-rotate-left" },
-  { mode: "sales", pageKey: "sales-history", href: "sales-history.html", label: "Sales History", icon: "fas fa-clock-rotate-left" },
-  { mode: "sales", pageKey: "daily-report", href: "daily-report.html", label: "Daily Report", icon: "fas fa-chart-line" },
-  { mode: "sales", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left" },
-  { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines" },
-  { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins" },
-  { mode: "sales", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box" },
-  { mode: "sales", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode" },
-  { mode: "sales", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route" },
-  { mode: "sales", pageKey: "branch-shortage-report", href: "branch-shortage-report.html", label: "Shortage Report", icon: "fas fa-triangle-exclamation" },
-  { mode: "sales", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple" },
-  { mode: "sales", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half" },
-  { mode: "sales", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation" },
-  { mode: "sales", pageKey: "stock-movement-ledger", href: "stock-movement-ledger.html", label: "Movement Ledger", icon: "fas fa-timeline" },
-  { mode: "sales", pageKey: "branch-reconciliation", href: "branch-reconciliation.html", label: "Reconciliation", icon: "fas fa-scale-balanced" },
-  { mode: "sales", pageKey: "branch-audit-dashboard", href: "branch-audit-dashboard.html", label: "Audit Dashboard", icon: "fas fa-shield-halved" },
-  { mode: "sales", pageKey: "branch-snapshots", href: "branch-snapshots.html", label: "Stock Snapshots", icon: "fas fa-camera-retro" },
-  { mode: "sales", pageKey: "branch-reconciliation-runs", href: "branch-reconciliation-runs.html", label: "Audit Runs", icon: "fas fa-clipboard-check" },
-  { mode: "sales", pageKey: "branch-exception-queue", href: "branch-exception-queue.html", label: "Exception Queue", icon: "fas fa-list-check" },
-  { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear" }
+  { mode: "production", pageKey: "production-dashboard", href: "production-dashboard.html", label: "Production Dashboard", icon: "fas fa-chart-pie", moduleKey: "PRODUCTION" },
+  { mode: "production", pageKey: "process", href: "process.html", label: "Process", icon: "fas fa-screwdriver-wrench", moduleKey: "PROCESS" },
+  { mode: "production", pageKey: "sticker", href: "sticker.html", label: "Sticker", icon: "fas fa-barcode", moduleKey: "STICKER" },
+  { mode: "production", pageKey: "material-stock", href: "material-stock.html", label: "Material Stock", icon: "fas fa-box-open", moduleKey: "MATERIAL_STOCK" },
+  { mode: "production", pageKey: "staff-management", href: "staff-management.html", label: "Staff Management", icon: "fas fa-users", moduleKey: "STAFF_MANAGEMENT" },
+  { mode: "production", pageKey: "expense-manager", href: "expense-manager.html", label: "Expense Manager", icon: "fas fa-wallet", moduleKey: "EXPENSE" },
+  { mode: "production", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" },
+  { mode: "production", pageKey: "admin-approval", href: "admin-approval.html", label: "Admin Approval", icon: "fas fa-user-check", moduleKey: "ADMIN_APPROVAL" },
+  { mode: "production", pageKey: "company-plans", href: "company-plans.html", label: "Company Plans", icon: "fas fa-layer-group", moduleKey: "ADMIN_APPROVAL" },
+  { mode: "production", pageKey: "enforcement-qa-dashboard", href: "enforcement-qa-dashboard.html", label: "Enforcement QA", icon: "fas fa-shield-halved", moduleKey: "ADMIN_APPROVAL" },
+  { mode: "sales", pageKey: "sales-dashboard", href: "sales-dashboard.html", label: "Store Dashboard", icon: "fas fa-store", moduleKey: "STORE" },
+  { mode: "sales", pageKey: "stock", href: "stock.html", label: "Stock", icon: "fas fa-boxes-stacked", moduleKey: "STOCK" },
+  { mode: "sales", pageKey: "billing", href: "billing.html", label: "Billing", icon: "fas fa-money-bill-wave", moduleKey: "BILLING" },
+  { mode: "sales", pageKey: "invoice", href: "invoice.html", label: "Invoice", icon: "fas fa-file-invoice", moduleKey: "INVOICE" },
+  { mode: "sales", pageKey: "return", href: "return.html", label: "Return", icon: "fas fa-rotate-left", moduleKey: "RETURN" },
+  { mode: "sales", pageKey: "sales-history", href: "sales-history.html", label: "Sales History", icon: "fas fa-clock-rotate-left", moduleKey: "SALES" },
+  { mode: "sales", pageKey: "daily-report", href: "daily-report.html", label: "Daily Report", icon: "fas fa-chart-line", moduleKey: "DAILY_REPORT" },
+  { mode: "sales", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left", moduleKey: "TRANSACTION" },
+  { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION" },
+  { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
+  { mode: "sales", group: "branch", pageKey: "branch-management", href: "branch-management.html", label: "Branch Management", icon: "fas fa-code-branch", moduleKey: "BRANCH" },
+  { mode: "sales", group: "branch", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box", moduleKey: "BRANCH_TRANSFER" },
+  { mode: "sales", group: "branch", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode", moduleKey: "BRANCH_RECEIVE" },
+  { mode: "sales", group: "branch", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route", moduleKey: "BRANCH_TRANSFER" },
+  { mode: "sales", group: "branch", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple", moduleKey: "ANALYTICS" },
+  { mode: "sales", group: "branch", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half", moduleKey: "ANALYTICS" },
+  { mode: "sales", group: "branch", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation", moduleKey: "ANALYTICS" },
+  { mode: "sales", group: "branch", pageKey: "stock-movement-ledger", href: "stock-movement-ledger.html", label: "Stock Movement Ledger", icon: "fas fa-timeline", moduleKey: "ANALYTICS" },
+  { mode: "sales", group: "branch", pageKey: "branch-reconciliation", href: "branch-reconciliation.html", label: "Branch Reconciliation", icon: "fas fa-scale-balanced", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "branch-audit-dashboard", href: "branch-audit-dashboard.html", label: "Branch Audit Dashboard", icon: "fas fa-shield-halved", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "branch-snapshots", href: "branch-snapshots.html", label: "Branch Snapshots", icon: "fas fa-camera-retro", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "branch-reconciliation-runs", href: "branch-reconciliation-runs.html", label: "Reconciliation Runs", icon: "fas fa-clipboard-check", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "branch-exception-queue", href: "branch-exception-queue.html", label: "Exception Queue", icon: "fas fa-list-check", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" }
 ];
 
 function getLoggedInUser() {
@@ -667,6 +684,196 @@ function canAccessPage(pageKey, user = null) {
   return normalizeAllowedRoles(allowedRoles).includes(getNormalizedRole(targetUser));
 }
 
+function normalizeErpModuleKey(moduleKey = "") {
+  return String(moduleKey || "").trim().toUpperCase();
+}
+
+function getCompanyModulePreviewContext() {
+  return window.__erpCompanyModuleContext || null;
+}
+
+async function loadCompanyModuleContext({ force = false } = {}) {
+  if (!force && window.__erpCompanyModuleContextLoaded) {
+    return getCompanyModulePreviewContext();
+  }
+
+  window.__erpCompanyModuleContextLoaded = true;
+
+  try {
+    const response = await fetch(`${window.ERP_API_BASE}/company-module-context`, {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.message || "Module context unavailable");
+    }
+
+    window.__erpCompanyModuleContext = {
+      plan: data.plan || null,
+      modules: data.modules || {},
+      moduleList: data.module_list || [],
+      isFallback: Boolean(data.is_fallback)
+    };
+
+    window.dispatchEvent(new CustomEvent(ERP_MODULE_PREVIEW_EVENT, {
+      detail: window.__erpCompanyModuleContext
+    }));
+
+    return window.__erpCompanyModuleContext;
+  } catch (error) {
+    window.__erpCompanyModuleContext = null;
+    window.__erpCompanyModuleContextError = error;
+    return null;
+  }
+}
+
+function isModuleEnabled(moduleKey) {
+  const normalizedModuleKey = normalizeErpModuleKey(moduleKey);
+  if (!normalizedModuleKey) return true;
+
+  const context = getCompanyModulePreviewContext();
+  if (!context || !context.modules) return true;
+  if (!Object.prototype.hasOwnProperty.call(context.modules, normalizedModuleKey)) return true;
+
+  return context.modules[normalizedModuleKey] !== false;
+}
+
+function isModulePreviewDebugMode() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("modulePreview") === "1") return true;
+  } catch (_) {}
+
+  return window.ERP_MODULE_PREVIEW_MODE === true || document.body?.dataset?.modulePreview === "1";
+}
+
+function canShowNavigationItem(item, user = null) {
+  if (!item || !canAccessPage(item.pageKey, user)) return false;
+  if (!item.moduleKey) return true;
+  if (isModuleEnabled(item.moduleKey)) return true;
+  if (isModulePreviewDebugMode()) return true;
+  if (isSuperAdmin(user) && ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES.has(item.pageKey)) return true;
+  return false;
+}
+
+function getCurrentPageModuleKey() {
+  const currentPage = getCurrentPageKey();
+  const item = ERP_NAVIGATION_ITEMS.find((navItem) => navItem.pageKey === currentPage);
+  return item?.moduleKey || "";
+}
+
+function renderModulePreviewWarningIfNeeded() {
+  const moduleKey = getCurrentPageModuleKey();
+  const existing = document.getElementById("erpModulePreviewWarning");
+  if (!moduleKey || isModuleEnabled(moduleKey)) {
+    existing?.remove();
+    return;
+  }
+
+  if (existing) return;
+
+  const warning = document.createElement("div");
+  warning.id = "erpModulePreviewWarning";
+  warning.className = "erp-module-preview-warning";
+  warning.innerHTML = `
+    <i class="fas fa-triangle-exclamation"></i>
+    <span>This module is not enabled for your company plan.</span>
+  `;
+
+  const topbar = document.querySelector(".topbar");
+  const main = document.querySelector(".main");
+  if (topbar?.parentElement) {
+    topbar.insertAdjacentElement("afterend", warning);
+  } else if (main) {
+    main.prepend(warning);
+  } else {
+    document.body.prepend(warning);
+  }
+}
+
+function getModuleDisplayName(moduleKey = "") {
+  const normalizedModuleKey = normalizeErpModuleKey(moduleKey);
+  if (!normalizedModuleKey) return "";
+
+  const navItem = ERP_NAVIGATION_ITEMS.find((item) => normalizeErpModuleKey(item.moduleKey) === normalizedModuleKey);
+  if (navItem?.label) return navItem.label;
+
+  const contextItem = getCompanyModulePreviewContext()?.moduleList?.find(
+    (item) => normalizeErpModuleKey(item.module_key) === normalizedModuleKey
+  );
+  if (contextItem?.module_name) return contextItem.module_name;
+
+  return normalizedModuleKey.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getCurrentPlanKey() {
+  const plan = getCompanyModulePreviewContext()?.plan || {};
+  return String(plan.plan_key || plan.planKey || "").trim();
+}
+
+function getModuleBlockedPageUrl(payload = {}) {
+  const params = new URLSearchParams();
+  const moduleKey = normalizeErpModuleKey(payload.module || payload.module_key || "");
+  const planKey = String(payload.plan || payload.plan_key || getCurrentPlanKey() || "").trim();
+  const enforcementMode = String(payload.enforcement_mode || payload.enforcementMode || "").trim();
+
+  if (moduleKey) params.set("module", moduleKey);
+  if (planKey) params.set("plan", planKey);
+  if (enforcementMode) params.set("mode", enforcementMode);
+
+  const query = params.toString();
+  return `module-access-blocked.html${query ? `?${query}` : ""}`;
+}
+
+function handleModuleAccessBlockedResponse(response, data = {}) {
+  try {
+    if (!response || Number(response.status) !== 403) return false;
+
+    const moduleKey = normalizeErpModuleKey(data.module || data.module_key || "");
+    const enforcementMode = String(data.enforcement_mode || data.enforcementMode || "").trim().toUpperCase();
+    if (!moduleKey || enforcementMode !== "HARD_ENFORCEMENT") return false;
+
+    const currentPage = String(window.location.pathname || "").split("/").pop().toLowerCase();
+    if (currentPage === "module-access-blocked.html") return true;
+
+    const payload = {
+      module: moduleKey,
+      moduleName: getModuleDisplayName(moduleKey),
+      plan: data.plan || data.plan_key || getCurrentPlanKey() || "",
+      enforcement_mode: enforcementMode,
+      message: data.message || "This module is not enabled for your company",
+      companyName: getSelectedCompanyName() || getLoggedInUser()?.company_name || getLoggedInUser()?.companyName || "",
+      isSuperAdmin: isSuperAdmin()
+    };
+
+    try {
+      sessionStorage.setItem(ERP_MODULE_BLOCKED_STORAGE_KEY, JSON.stringify(payload));
+    } catch (_) {}
+
+    window.location.assign(getModuleBlockedPageUrl(payload));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function decorateDisabledModuleNavItems() {
+  document.querySelectorAll(".menu a[data-module-key]").forEach((link) => {
+    const moduleKey = link.dataset.moduleKey || "";
+    const disabled = Boolean(isModulePreviewDebugMode() && moduleKey && !isModuleEnabled(moduleKey));
+    link.classList.toggle("erp-module-preview-disabled", disabled);
+    link.querySelector(".erp-module-disabled-badge")?.remove();
+
+    if (disabled) {
+      const badge = document.createElement("span");
+      badge.className = "erp-module-disabled-badge";
+      badge.textContent = "Disabled";
+      link.appendChild(badge);
+    }
+  });
+}
+
 function requirePageAccess(pageKey) {
   if (!requireLogin()) return false;
 
@@ -719,8 +926,89 @@ function injectNavigationModeStyles() {
       border-left: 4px solid var(--erp-mode-accent);
     }
     body.erp-mode-production .menu a:hover,
-    body.erp-mode-sales .menu a:hover {
+    body.erp-mode-sales .menu a:hover,
+    body.erp-mode-sales .menu .erp-nav-group-toggle:hover {
       background: rgba(255, 255, 255, 0.12);
+    }
+    .menu .erp-nav-group {
+      margin: 4px 0;
+    }
+    .menu .erp-nav-group-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+      text-align: left;
+      padding: 12px 18px;
+      border-radius: 0;
+    }
+    .menu .erp-nav-group-toggle i:first-child {
+      width: 20px;
+      text-align: center;
+    }
+    .menu .erp-nav-group-toggle .erp-nav-group-title {
+      flex: 1;
+      font-weight: 800;
+    }
+    .menu .erp-nav-group-toggle .erp-nav-group-chevron {
+      font-size: 12px;
+      transition: transform 0.18s ease;
+    }
+    .menu .erp-nav-group.open .erp-nav-group-chevron {
+      transform: rotate(90deg);
+    }
+    .menu .erp-nav-submenu {
+      display: none;
+      list-style: none;
+      margin: 0;
+      padding: 0 0 6px 0;
+    }
+    .menu .erp-nav-group.open .erp-nav-submenu {
+      display: block;
+    }
+    .menu .erp-nav-submenu a {
+      padding-left: 38px;
+      font-size: 13px;
+    }
+    .menu .erp-nav-group.has-active > .erp-nav-group-toggle {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .menu a.erp-module-preview-disabled {
+      opacity: 0.62;
+    }
+    .erp-module-disabled-badge {
+      margin-left: auto;
+      border-radius: 999px;
+      padding: 3px 7px;
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 1;
+      color: #b42318;
+      background: #fff1f1;
+      border: 1px solid rgba(180, 35, 24, 0.18);
+      white-space: nowrap;
+    }
+    .erp-module-preview-warning {
+      margin: 0 20px 16px;
+      border: 1px solid #f6c453;
+      background: #fff8df;
+      color: #7a4b00;
+      border-radius: 14px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      font-weight: 800;
+      box-shadow: 0 8px 22px rgba(146, 97, 15, 0.08);
+    }
+    .erp-module-preview-warning i {
+      color: #b7791f;
     }
     .sidebar .erp-mode-switch {
       display: none !important;
@@ -766,6 +1054,10 @@ function injectNavigationModeStyles() {
       .erp-mode-btn {
         min-height: 38px;
       }
+      .erp-module-preview-warning {
+        margin: 0 12px 14px;
+        align-items: flex-start;
+      }
     }
   `;
   document.head.appendChild(style);
@@ -808,19 +1100,81 @@ function updateSidebarModeLabel(mode) {
   brandText.textContent = mode === "sales" ? "Store Mode" : "Production Mode";
 }
 
+function getNavGroupStorageKey(groupKey) {
+  return `erpNavGroup:${groupKey}`;
+}
+
+function isNavGroupOpen(groupKey, groupItems, currentPage) {
+  if (groupItems.some((item) => item.pageKey === currentPage)) return true;
+  return false;
+}
+
+function toggleErpNavGroup(groupKey) {
+  const group = document.querySelector(`[data-erp-nav-group="${groupKey}"]`);
+  if (!group) return;
+
+  const willOpen = !group.classList.contains("open");
+  group.classList.toggle("open", willOpen);
+  localStorage.setItem(getNavGroupStorageKey(groupKey), willOpen ? "open" : "closed");
+}
+
+function renderNavigationItem(item, currentPage) {
+  const disabled = Boolean(isModulePreviewDebugMode() && item.moduleKey && !isModuleEnabled(item.moduleKey));
+  return `
+    <li>
+      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""} ${disabled ? "erp-module-preview-disabled" : ""}" data-module-key="${item.moduleKey || ""}">
+        <i class="${item.icon}"></i> ${item.label}
+        ${disabled ? `<span class="erp-module-disabled-badge">Disabled</span>` : ""}
+      </a>
+    </li>
+  `;
+}
+
+function renderNavigationGroup(groupKey, groupItems, currentPage) {
+  const group = ERP_NAVIGATION_GROUPS[groupKey] || {
+    label: groupKey,
+    icon: "fas fa-folder"
+  };
+  const hasActive = groupItems.some((item) => item.pageKey === currentPage);
+  const isOpen = isNavGroupOpen(groupKey, groupItems, currentPage);
+
+  return `
+    <li class="erp-nav-group ${isOpen ? "open" : ""} ${hasActive ? "has-active" : ""}" data-erp-nav-group="${groupKey}">
+      <button class="erp-nav-group-toggle" type="button" onclick="toggleErpNavGroup('${groupKey}')" aria-expanded="${isOpen ? "true" : "false"}">
+        <i class="${group.icon}"></i>
+        <span class="erp-nav-group-title">${group.label}</span>
+        <i class="fas fa-chevron-right erp-nav-group-chevron"></i>
+      </button>
+      <ul class="erp-nav-submenu">
+        ${groupItems.map((item) => renderNavigationItem(item, currentPage)).join("")}
+      </ul>
+    </li>
+  `;
+}
+
 function renderModeAwareMenu(menu, user, mode, allowedModes) {
   const currentPage = getCurrentPageKey();
   const items = ERP_NAVIGATION_ITEMS.filter((item) =>
-    item.mode === mode && allowedModes.includes(item.mode) && canAccessPage(item.pageKey, user)
+    item.mode === mode && allowedModes.includes(item.mode) && canShowNavigationItem(item, user)
   );
 
-  menu.innerHTML = items.map((item) => `
-    <li>
-      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""}">
-        <i class="${item.icon}"></i> ${item.label}
-      </a>
-    </li>
-  `).join("");
+  const html = [];
+  const renderedGroups = new Set();
+
+  items.forEach((item) => {
+    if (!item.group) {
+      html.push(renderNavigationItem(item, currentPage));
+      return;
+    }
+
+    if (renderedGroups.has(item.group)) return;
+
+    const groupItems = items.filter((candidate) => candidate.group === item.group);
+    html.push(renderNavigationGroup(item.group, groupItems, currentPage));
+    renderedGroups.add(item.group);
+  });
+
+  menu.innerHTML = html.join("");
 }
 
 function filterSidebarMenuByRole() {
@@ -842,6 +1196,7 @@ function filterSidebarMenuByRole() {
     menus.forEach((menu) => {
       renderModeAwareMenu(menu, user, mode, allowedModes);
     });
+    decorateDisabledModuleNavItems();
   }
 
   roleAwareElements.forEach((element) => {
@@ -850,8 +1205,11 @@ function filterSidebarMenuByRole() {
     const pageKey = String(element.dataset.pageKey || "").trim();
     if (!pageKey) return;
 
-    element.style.display = !user || canAccessPage(pageKey, user) ? "" : "none";
+    const navItem = ERP_NAVIGATION_ITEMS.find((item) => item.pageKey === pageKey);
+    element.style.display = !user || (navItem ? canShowNavigationItem(navItem, user) : canAccessPage(pageKey, user)) ? "" : "none";
   });
+
+  renderModulePreviewWarningIfNeeded();
 }
 
 function patchFetchWithAuthHeader() {
@@ -917,11 +1275,54 @@ function patchFetchWithAuthHeader() {
       ...init,
       credentials: init.credentials || (isApiRequest ? "include" : "same-origin"),
       headers
+    }).then((response) => {
+      if (isApiRequest && response?.status === 403) {
+        response.clone().json()
+          .then((data) => handleModuleAccessBlockedResponse(response, data))
+          .catch(() => {});
+      }
+      return response;
     });
   };
 
   window.__erpFetchAuthPatched = true;
 }
 
+window.handleModuleAccessBlockedResponse = handleModuleAccessBlockedResponse;
+window.getModuleDisplayName = getModuleDisplayName;
+
+function bootstrapSidebarNavigation() {
+  const run = () => filterSidebarMenuByRole();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run);
+  } else {
+    run();
+  }
+}
+
+function bootstrapModulePreviewAwareness() {
+  const run = () => {
+    loadCompanyModuleContext()
+      .then(() => {
+        filterSidebarMenuByRole();
+        renderModulePreviewWarningIfNeeded();
+      })
+      .catch(() => {});
+  };
+
+  window.addEventListener(ERP_MODULE_PREVIEW_EVENT, () => {
+    filterSidebarMenuByRole();
+    renderModulePreviewWarningIfNeeded();
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run);
+  } else {
+    run();
+  }
+}
+
 patchFetchWithAuthHeader();
+bootstrapSidebarNavigation();
+bootstrapModulePreviewAwareness();
 bootstrapSuperAdminCompanyContext();

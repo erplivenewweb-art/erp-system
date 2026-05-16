@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Management</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .branch-shell { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 18px; align-items: start; }
+    .panel { background: #fff; border: 1px solid #eadfce; border-radius: 16px; padding: 18px; box-shadow: 0 10px 24px rgba(15,23,42,0.06); margin-bottom: 18px; }
+    .panel h3 { margin: 0 0 12px; color: #2f2a21; display: flex; gap: 10px; align-items: center; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .form-grid { display: grid; gap: 12px; }
+    .field label { display: block; font-size: 12px; font-weight: 800; color: #5f6b7e; margin-bottom: 6px; text-transform: uppercase; }
+    .field input, .field select, .field textarea { width: 100%; border: 1px solid #e3d7c7; border-radius: 12px; padding: 11px 12px; background: #fffdf8; }
+    .field textarea { min-height: 84px; resize: vertical; }
+    .action-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .btn { border: 0; border-radius: 12px; padding: 10px 13px; cursor: pointer; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; }
+    .btn.primary { background: linear-gradient(180deg, #d9ae67, #bb8134); color: #fff; }
+    .btn.dark { background: #172033; color: #fff; }
+    .btn.ghost { background: #fffaf2; color: #2f2a21; border: 1px solid #eadfce; }
+    .btn.danger { background: #fff1f1; color: #b42318; border: 1px solid #fecaca; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .table-wrap { overflow-x: auto; border: 1px solid #edf2f7; border-radius: 14px; background: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; min-width: 860px; }
+    .data-table th, .data-table td { padding: 11px 12px; border-bottom: 1px solid #f1f5f9; text-align: left; font-size: 14px; vertical-align: top; }
+    .data-table th { background: #f8fafc; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: .3px; }
+    .data-table tr:last-child td { border-bottom: 0; }
+    .status-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 7px 10px; font-size: 12px; font-weight: 900; background: #eef2ff; color: #3730a3; white-space: nowrap; }
+    .status-badge.active { background: #ecfbf3; color: #166534; }
+    .status-badge.inactive { background: #fff1f1; color: #b42318; }
+    .type-badge { display: inline-flex; border-radius: 999px; padding: 7px 10px; font-size: 12px; font-weight: 900; background: #fff7e7; color: #92400e; white-space: nowrap; }
+    .muted { color: #64748b; font-size: 13px; }
+    .soft-note { background: #fffaf2; border: 1px solid #eadfce; border-radius: 12px; padding: 11px 12px; color: #5f6b7e; font-size: 13px; margin-bottom: 12px; }
+    .assignment-grid { display: grid; grid-template-columns: minmax(230px, 320px) 1fr; gap: 14px; align-items: end; margin-bottom: 14px; }
+    .empty-state { padding: 22px; color: #64748b; text-align: center; }
+    @media (max-width: 1040px) { .branch-shell { grid-template-columns: 1fr; } }
+    @media (max-width: 700px) { .assignment-grid { grid-template-columns: 1fr; } .top-right { width: 100%; } .top-right button { flex: 1; } .btn { width: 100%; } .data-table { min-width: 760px; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings" aria-label="Open settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>Store Mode</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Branch Management</h1><p>Create company branches and assign staff access</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadPageData(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+
+      <section class="page active">
+        <div class="branch-shell">
+          <div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3><i class="fas fa-code-branch"></i> Branch Setup</h3>
+                <span id="modeBadge" class="status-badge active">Create</span>
+              </div>
+              <div id="permissionNote" class="soft-note" hidden></div>
+              <form id="branchForm" onsubmit="saveBranch(event)">
+                <div class="form-grid">
+                  <div class="field"><label for="branchName">Branch Name</label><input id="branchName" required placeholder="Cuttack"></div>
+                  <div class="field"><label for="branchCode">Branch Code</label><input id="branchCode" required placeholder="CTC"></div>
+                  <div class="field"><label for="branchType">Branch Type</label><select id="branchType"><option>MAIN</option><option selected>STORE</option><option>WAREHOUSE</option><option>OFFICE</option></select></div>
+                  <div class="field"><label for="branchAddress">Address</label><textarea id="branchAddress" placeholder="Branch address"></textarea></div>
+                  <div class="field"><label for="contactName">Contact Name</label><input id="contactName" placeholder="Manager name"></div>
+                  <div class="field"><label for="contactPhone">Contact Phone</label><input id="contactPhone" placeholder="Phone number"></div>
+                  <div class="field"><label for="branchStatus">Status</label><select id="branchStatus"><option>ACTIVE</option><option>INACTIVE</option></select></div>
+                </div>
+                <div class="action-row">
+                  <button id="saveBranchBtn" class="btn primary" type="submit"><i class="fas fa-floppy-disk"></i> Create Branch</button>
+                  <button class="btn ghost" type="button" onclick="resetBranchForm()"><i class="fas fa-rotate-left"></i> Clear</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3><i class="fas fa-list"></i> Branch List</h3>
+                <span id="branchCount" class="muted">Loading...</span>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Address</th><th>Contact</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+                  <tbody id="branchRows"><tr><td colspan="8"><div class="empty-state">Loading branches...</div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h3><i class="fas fa-users-gear"></i> Staff Assignment</h3>
+                <span id="staffCount" class="muted">Loading...</span>
+              </div>
+              <div class="assignment-grid">
+                <div class="field"><label for="selectedBranch">Selected Branch</label><select id="selectedBranch" onchange="renderUsers()"><option value="">Select a branch</option></select></div>
+                <div class="soft-note" id="assignmentNote">Choose a branch, then assign company users to it.</div>
+              </div>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead><tr><th>User</th><th>Role</th><th>Current Branch</th><th>Assign</th></tr></thead>
+                  <tbody id="userRows"><tr><td colspan="4"><div class="empty-state">Loading users...</div></td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/toast.js"></script>
+  <script>
+    let branches = [];
+    let users = [];
+    let editingBranchId = null;
+    let canMutate = false;
+
+    const branchFields = ["branchName", "branchCode", "branchType", "branchAddress", "contactName", "contactPhone", "branchStatus"];
+
+    function notify(message, type = "info") {
+      if (window.showToast) showToast(message, type);
+      else alert(message);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function api(path, options = {}) {
+      return fetch(path, {
+        credentials: "include",
+        cache: "no-store",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+    }
+
+    async function readJson(response) {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) throw new Error(data.message || "Request failed");
+      return data;
+    }
+
+    function normalizeRole(role) {
+      const clean = String(role || "").trim().toUpperCase();
+      if (clean === "ADMIN") return "OWNER";
+      if (["BILLING", "INVOICE", "STICKER", "STOCK", "PROCESS"].includes(clean)) return "STAFF";
+      if (["TRANSACTION", "EXPENSE"].includes(clean)) return "ACCOUNTS";
+      return clean;
+    }
+
+    function computePermissions() {
+      const user = typeof getLoggedInUser === "function" ? getLoggedInUser() : null;
+      const role = normalizeRole(user?.role || "");
+      canMutate = ["OWNER", "ACCOUNTS"].includes(role);
+      const note = document.getElementById("permissionNote");
+      if (!canMutate) {
+        note.hidden = false;
+        note.textContent = role === "SUPERADMIN"
+          ? "SuperAdmin can review branch setup, but operational branch changes stay with the company Owner/Admin."
+          : "Your role can view this page, but cannot create branches or assign users.";
+      }
+      branchFields.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !canMutate;
+      });
+      document.getElementById("saveBranchBtn").disabled = !canMutate;
+    }
+
+    function getBranchPayload() {
+      return {
+        branch_name: document.getElementById("branchName").value.trim(),
+        branch_code: document.getElementById("branchCode").value.trim(),
+        branch_type: document.getElementById("branchType").value,
+        address: document.getElementById("branchAddress").value.trim(),
+        contact_name: document.getElementById("contactName").value.trim(),
+        contact_phone: document.getElementById("contactPhone").value.trim(),
+        status: document.getElementById("branchStatus").value
+      };
+    }
+
+    function branchLabel(branch) {
+      return `${branch.branch_name || "-"} (${branch.branch_code || "-"})`;
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value).slice(0, 10) || "-";
+      return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    }
+
+    function renderBranches() {
+      document.getElementById("branchCount").textContent = `${branches.length} branch${branches.length === 1 ? "" : "es"}`;
+      document.getElementById("selectedBranch").innerHTML = `<option value="">Select a branch</option>${branches.map((branch) => `<option value="${branch.id}">${escapeHtml(branchLabel(branch))}</option>`).join("")}`;
+      document.getElementById("branchRows").innerHTML = branches.length ? branches.map((branch) => {
+        const status = String(branch.status || "ACTIVE").toUpperCase();
+        const nextStatus = status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+        const contact = [branch.contact_name, branch.contact_phone].filter(Boolean).map(escapeHtml).join("<br>");
+        return `
+          <tr>
+            <td><strong>${escapeHtml(branch.branch_code)}</strong></td>
+            <td>${escapeHtml(branch.branch_name)}</td>
+            <td><span class="type-badge">${escapeHtml(branch.branch_type || "-")}</span></td>
+            <td>${escapeHtml(branch.address || "-")}</td>
+            <td>${contact || "-"}</td>
+            <td><span class="status-badge ${status.toLowerCase()}">${status}</span></td>
+            <td>${formatDate(branch.created_at)}</td>
+            <td>
+              <div class="action-row" style="margin:0;">
+                <button class="btn ghost" type="button" onclick="editBranch(${Number(branch.id)})"><i class="fas fa-pen"></i> Edit</button>
+                <button class="btn ${status === "ACTIVE" ? "danger" : "dark"}" type="button" ${canMutate ? "" : "disabled"} onclick="toggleBranchStatus(${Number(branch.id)}, '${nextStatus}')"><i class="fas ${status === "ACTIVE" ? "fa-ban" : "fa-circle-check"}"></i> ${nextStatus === "ACTIVE" ? "Activate" : "Deactivate"}</button>
+                <button class="btn primary" type="button" onclick="selectBranchForAssignment(${Number(branch.id)})"><i class="fas fa-user-plus"></i> Assign Staff</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("") : `<tr><td colspan="8"><div class="empty-state">No branches found. Create the first branch from setup.</div></td></tr>`;
+    }
+
+    function renderUsers() {
+      const selectedBranchId = Number(document.getElementById("selectedBranch").value || 0);
+      document.getElementById("staffCount").textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
+      document.getElementById("assignmentNote").textContent = selectedBranchId
+        ? `Assignments will move selected users into ${branchLabel(branches.find((item) => Number(item.id) === selectedBranchId) || {})}.`
+        : "Choose a branch, then assign company users to it.";
+
+      document.getElementById("userRows").innerHTML = users.length ? users.map((user) => {
+        const currentBranch = user.branch_name ? `${user.branch_name} (${user.branch_code || "-"})` : "Not assigned";
+        const alreadyAssigned = selectedBranchId && Number(user.branch_id || 0) === selectedBranchId;
+        return `
+          <tr>
+            <td><strong>${escapeHtml(user.name || "-")}</strong><br><span class="muted">${escapeHtml(user.email || "-")}</span></td>
+            <td>${escapeHtml(user.role || "-")}</td>
+            <td>${escapeHtml(currentBranch)}</td>
+            <td><button class="btn primary" type="button" ${canMutate && selectedBranchId && !alreadyAssigned ? "" : "disabled"} onclick="assignUser(${Number(user.id)})"><i class="fas fa-user-check"></i> ${alreadyAssigned ? "Assigned" : "Assign"}</button></td>
+          </tr>
+        `;
+      }).join("") : `<tr><td colspan="4"><div class="empty-state">No company users available for branch assignment.</div></td></tr>`;
+    }
+
+    async function loadBranches() {
+      const data = await readJson(await api("/branches"));
+      branches = Array.isArray(data.branches) ? data.branches : [];
+      renderBranches();
+    }
+
+    async function loadUsers() {
+      try {
+        const data = await readJson(await api("/branch-users"));
+        users = Array.isArray(data.users) ? data.users : [];
+      } catch (error) {
+        users = [];
+        notify(error.message || "Branch user list is not available", "error");
+      }
+      renderUsers();
+    }
+
+    async function loadPageData(showSuccess = false) {
+      try {
+        await loadBranches();
+        await loadUsers();
+        if (showSuccess) notify("Branch management refreshed", "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function saveBranch(event) {
+      event.preventDefault();
+      if (!canMutate) return notify("Your role cannot save branches", "error");
+      const payload = getBranchPayload();
+      if (!payload.branch_name || !payload.branch_code) return notify("Branch name and code are required", "warning");
+
+      try {
+        const path = editingBranchId ? `/branches/${editingBranchId}` : "/branches";
+        await readJson(await api(path, {
+          method: editingBranchId ? "PUT" : "POST",
+          body: JSON.stringify(payload)
+        }));
+        notify(editingBranchId ? "Branch updated" : "Branch created", "success");
+        resetBranchForm();
+        await loadBranches();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function editBranch(id) {
+      const branch = branches.find((item) => Number(item.id) === Number(id));
+      if (!branch) return;
+      editingBranchId = branch.id;
+      document.getElementById("branchName").value = branch.branch_name || "";
+      document.getElementById("branchCode").value = branch.branch_code || "";
+      document.getElementById("branchType").value = branch.branch_type || "STORE";
+      document.getElementById("branchAddress").value = branch.address || "";
+      document.getElementById("contactName").value = branch.contact_name || "";
+      document.getElementById("contactPhone").value = branch.contact_phone || "";
+      document.getElementById("branchStatus").value = String(branch.status || "ACTIVE").toUpperCase();
+      document.getElementById("modeBadge").textContent = "Edit";
+      document.getElementById("saveBranchBtn").innerHTML = `<i class="fas fa-floppy-disk"></i> Edit Branch`;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetBranchForm() {
+      editingBranchId = null;
+      document.getElementById("branchForm").reset();
+      document.getElementById("branchType").value = "STORE";
+      document.getElementById("branchStatus").value = "ACTIVE";
+      document.getElementById("modeBadge").textContent = "Create";
+      document.getElementById("saveBranchBtn").innerHTML = `<i class="fas fa-floppy-disk"></i> Create Branch`;
+    }
+
+    async function toggleBranchStatus(id, status) {
+      if (!canMutate) return notify("Your role cannot change branch status", "error");
+      try {
+        await readJson(await api(`/branches/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ status })
+        }));
+        notify(`Branch ${String(status).toLowerCase()}`, "success");
+        await loadBranches();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function selectBranchForAssignment(id) {
+      document.getElementById("selectedBranch").value = String(id);
+      renderUsers();
+      document.getElementById("selectedBranch").scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    async function assignUser(userId) {
+      const branchId = Number(document.getElementById("selectedBranch").value || 0);
+      if (!canMutate) return notify("Your role cannot assign users", "error");
+      if (!branchId) return notify("Select a branch first", "warning");
+
+      try {
+        const data = await readJson(await api(`/branches/${branchId}/users`, {
+          method: "POST",
+          body: JSON.stringify({ userId })
+        }));
+        const skipped = Array.isArray(data.skippedUsers) ? data.skippedUsers.length : 0;
+        notify(skipped ? "Assignment completed with skipped users" : "User assigned to branch", skipped ? "warning" : "success");
+        await loadUsers();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function toggleSidebar() {
+      document.getElementById("sidebar")?.classList.toggle("collapsed");
+    }
+
+    function logoutUser() {
+      if (window.clearAuthSession) clearAuthSession();
+      location.href = "login.html";
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      computePermissions();
+      loadPageData();
+    });
+  </script>
+</body>
+</html>
