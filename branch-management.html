@@ -38,6 +38,11 @@
     .type-badge { display: inline-flex; border-radius: 999px; padding: 7px 10px; font-size: 12px; font-weight: 900; background: #fff7e7; color: #92400e; white-space: nowrap; }
     .muted { color: #64748b; font-size: 13px; }
     .soft-note { background: #fffaf2; border: 1px solid #eadfce; border-radius: 12px; padding: 11px 12px; color: #5f6b7e; font-size: 13px; margin-bottom: 12px; }
+    .optional-login { border: 1px solid #eadfce; border-radius: 14px; padding: 12px; background: #fffdf8; margin-top: 14px; }
+    .optional-login-toggle { display: flex; align-items: center; gap: 10px; font-weight: 900; color: #2f2a21; cursor: pointer; user-select: none; }
+    .optional-login-toggle input { width: 18px; height: 18px; accent-color: #bb8134; }
+    .optional-login-fields { display: none; margin-top: 12px; }
+    .optional-login-fields.show { display: grid; }
     .assignment-grid { display: grid; grid-template-columns: minmax(230px, 320px) 1fr; gap: 14px; align-items: end; margin-bottom: 14px; }
     .empty-state { padding: 22px; color: #64748b; text-align: center; }
     @media (max-width: 1040px) { .branch-shell { grid-template-columns: 1fr; } }
@@ -71,6 +76,28 @@
                   <div class="field"><label for="contactName">Contact Name</label><input id="contactName" placeholder="Manager name"></div>
                   <div class="field"><label for="contactPhone">Contact Phone</label><input id="contactPhone" placeholder="Phone number"></div>
                   <div class="field"><label for="branchStatus">Status</label><select id="branchStatus"><option>ACTIVE</option><option>INACTIVE</option></select></div>
+                </div>
+                <div class="optional-login" id="branchLoginPanel">
+                  <label class="optional-login-toggle" for="createBranchLogin">
+                    <input id="createBranchLogin" type="checkbox" onchange="toggleBranchLoginSection()">
+                    <span>Create Branch Login</span>
+                  </label>
+                  <div class="optional-login-fields form-grid" id="branchLoginFields">
+                    <div class="field"><label for="branchLoginName">Staff Name</label><input id="branchLoginName" placeholder="Staff name"></div>
+                    <div class="field"><label for="branchLoginEmail">Email</label><input id="branchLoginEmail" type="email" placeholder="staff@example.com"></div>
+                    <div class="field"><label for="branchLoginPassword">Password</label><input id="branchLoginPassword" type="password" placeholder="Create password"></div>
+                    <div class="field">
+                      <label for="branchLoginRole">Role</label>
+                      <select id="branchLoginRole">
+                        <option value="">Select role</option>
+                        <option>Billing</option>
+                        <option>Stock</option>
+                        <option>Sticker</option>
+                        <option>Process</option>
+                        <option>Invoice</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <div class="action-row">
                   <button id="saveBranchBtn" class="btn primary" type="submit"><i class="fas fa-floppy-disk"></i> Create Branch</button>
@@ -125,6 +152,8 @@
     let canMutate = false;
 
     const branchFields = ["branchName", "branchCode", "branchType", "branchAddress", "contactName", "contactPhone", "branchStatus"];
+    const branchLoginFields = ["createBranchLogin", "branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginRole"];
+    const quickBranchLoginRoles = ["Billing", "Stock", "Sticker", "Process", "Invoice"];
 
     function notify(message, type = "info") {
       if (window.showToast) showToast(message, type);
@@ -182,6 +211,10 @@
         const el = document.getElementById(id);
         if (el) el.disabled = !canMutate;
       });
+      branchLoginFields.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !canMutate;
+      });
       document.getElementById("saveBranchBtn").disabled = !canMutate;
     }
 
@@ -195,6 +228,44 @@
         contact_phone: document.getElementById("contactPhone").value.trim(),
         status: document.getElementById("branchStatus").value
       };
+    }
+
+    function isBranchLoginEnabled() {
+      return !editingBranchId && Boolean(document.getElementById("createBranchLogin")?.checked);
+    }
+
+    function getBranchLoginPayload() {
+      return {
+        staff_name: document.getElementById("branchLoginName").value.trim(),
+        email: document.getElementById("branchLoginEmail").value.trim().toLowerCase(),
+        password: document.getElementById("branchLoginPassword").value.trim(),
+        role: document.getElementById("branchLoginRole").value
+      };
+    }
+
+    function toggleBranchLoginSection() {
+      const enabled = isBranchLoginEnabled();
+      const fields = document.getElementById("branchLoginFields");
+      if (fields) fields.classList.toggle("show", enabled);
+      ["branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginRole"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !canMutate || !enabled;
+      });
+      const saveBtn = document.getElementById("saveBranchBtn");
+      if (saveBtn && !editingBranchId) {
+        saveBtn.innerHTML = enabled
+          ? `<i class="fas fa-user-plus"></i> Create Branch & Login`
+          : `<i class="fas fa-floppy-disk"></i> Create Branch`;
+      }
+    }
+
+    function resetBranchLoginForm() {
+      document.getElementById("createBranchLogin").checked = false;
+      document.getElementById("branchLoginName").value = "";
+      document.getElementById("branchLoginEmail").value = "";
+      document.getElementById("branchLoginPassword").value = "";
+      document.getElementById("branchLoginRole").value = "";
+      toggleBranchLoginSection();
     }
 
     function branchLabel(branch) {
@@ -291,14 +362,27 @@
       if (!payload.branch_name || !payload.branch_code) return notify("Branch name and code are required", "warning");
 
       try {
-        const path = editingBranchId ? `/branches/${editingBranchId}` : "/branches";
+        const createLogin = isBranchLoginEnabled();
+        if (createLogin) {
+          const login = getBranchLoginPayload();
+          if (!login.staff_name || !login.email || !login.password || !login.role) {
+            return notify("Staff name, email, password, and role are required", "warning");
+          }
+          if (!quickBranchLoginRoles.includes(login.role)) {
+            return notify("Only Billing, Stock, Sticker, Process, or Invoice roles are allowed here", "error");
+          }
+          payload.login = login;
+        }
+
+        const path = editingBranchId ? `/branches/${editingBranchId}` : createLogin ? "/branches/create-with-login" : "/branches";
         await readJson(await api(path, {
           method: editingBranchId ? "PUT" : "POST",
           body: JSON.stringify(payload)
         }));
-        notify(editingBranchId ? "Branch updated" : "Branch created", "success");
+        notify(editingBranchId ? "Branch updated" : createLogin ? "Branch and login created" : "Branch created", "success");
         resetBranchForm();
         await loadBranches();
+        await loadUsers();
       } catch (error) {
         notify(error.message, "error");
       }
@@ -317,6 +401,8 @@
       document.getElementById("branchStatus").value = String(branch.status || "ACTIVE").toUpperCase();
       document.getElementById("modeBadge").textContent = "Edit";
       document.getElementById("saveBranchBtn").innerHTML = `<i class="fas fa-floppy-disk"></i> Edit Branch`;
+      document.getElementById("branchLoginPanel").hidden = true;
+      resetBranchLoginForm();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -327,6 +413,8 @@
       document.getElementById("branchStatus").value = "ACTIVE";
       document.getElementById("modeBadge").textContent = "Create";
       document.getElementById("saveBranchBtn").innerHTML = `<i class="fas fa-floppy-disk"></i> Create Branch`;
+      document.getElementById("branchLoginPanel").hidden = false;
+      resetBranchLoginForm();
     }
 
     async function toggleBranchStatus(id, status) {
@@ -378,6 +466,7 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       computePermissions();
+      toggleBranchLoginSection();
       loadPageData();
     });
   </script>

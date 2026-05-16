@@ -2538,6 +2538,13 @@ function validateBranchPayload(body = {}, { partial = false } = {}) {
   };
 }
 
+const QUICK_BRANCH_LOGIN_ROLES = new Set(["Billing", "Stock", "Sticker", "Process", "Invoice"]);
+
+function normalizeQuickBranchLoginRole(value = "") {
+  const clean = String(value || "").trim().toLowerCase();
+  return [...QUICK_BRANCH_LOGIN_ROLES].find((role) => role.toLowerCase() === clean) || "";
+}
+
 function getRequestedBranchId(req) {
   const raw = req.query.branchId ?? req.query.branch_id ?? req.body?.branchId ?? req.body?.branch_id ?? null;
   if (raw === null || raw === undefined || raw === "") return null;
@@ -23745,6 +23752,216 @@ app.post("/branches", authMiddleware, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Branch create failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/branches/create-with-login", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    if (!access.canManageBranches) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to manage branches"
+      });
+    }
+
+    const validation = validateBranchPayload(req.body);
+    if (!validation.ok) {
+      return res.status(400).json({
+        success: false,
+        message: validation.message
+      });
+    }
+
+    const loginInput = req.body?.login && typeof req.body.login === "object" ? req.body.login : req.body;
+    const cleanName = String(loginInput.staff_name ?? loginInput.staffName ?? loginInput.name ?? "").trim();
+    const cleanEmail = normalizeEmail(loginInput.email);
+    const cleanPassword = String(loginInput.password || "").trim();
+    const cleanRole = normalizeQuickBranchLoginRole(loginInput.role);
+
+    if (!cleanName || !cleanEmail || !cleanPassword || !cleanRole) {
+      return res.status(400).json({
+        success: false,
+        message: "Staff name, email, password, and a valid role are required"
+      });
+    }
+
+    const branch = validation.branch;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [duplicateBranchRows] = await connection.query(
+      `
+      SELECT id
+      FROM branches
+      WHERE company_id = ?
+        AND UPPER(TRIM(branch_code)) = ?
+      LIMIT 1
+      `,
+      [access.companyScope, branch.branchCode]
+    );
+
+    if (duplicateBranchRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "branch_code already exists in this company"
+      });
+    }
+
+    const [duplicateUserRows] = await connection.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = LOWER(?)
+      LIMIT 1
+      `,
+      [cleanEmail]
+    );
+
+    if (duplicateUserRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered"
+      });
+    }
+
+    const [branchInsert] = await connection.query(
+      `
+      INSERT INTO branches
+      (
+        company_id,
+        branch_code,
+        branch_name,
+        branch_type,
+        address,
+        contact_name,
+        contact_phone,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      `,
+      [
+        access.companyScope,
+        branch.branchCode,
+        branch.branchName,
+        branch.branchType,
+        branch.address || null,
+        branch.contactName || null,
+        branch.contactPhone || null,
+        branch.status,
+        access.actingUserId ?? null
+      ]
+    );
+
+    const branchId = branchInsert.insertId;
+    const passwordHash = await hashPassword(cleanPassword);
+
+    const [userInsert] = await connection.query(
+      `
+      INSERT INTO users
+      (
+        name,
+        mobile,
+        email,
+        password,
+        role,
+        status,
+        company_id,
+        branch_id,
+        updated_by,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, ?, NOW(), NOW())
+      `,
+      [
+        cleanName,
+        "",
+        cleanEmail,
+        passwordHash,
+        cleanRole,
+        access.companyScope,
+        branchId,
+        access.actingUserId ?? null
+      ]
+    );
+
+    const [createdBranchRows] = await connection.query(
+      `
+      SELECT *
+      FROM branches
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [branchId, access.companyScope]
+    );
+    const createdBranch = createdBranchRows[0] || null;
+
+    const [createdUserRows] = await connection.query(
+      `
+      SELECT id, name, mobile, email, role, status, company_id, branch_id, created_at
+      FROM users
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [userInsert.insertId, access.companyScope]
+    );
+    const createdUser = createdUserRows[0] || null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "CREATE_WITH_LOGIN",
+      entityType: "BRANCH",
+      entityId: String(branchId),
+      moduleName: "branch-management",
+      status: "success",
+      message: "Branch and login created",
+      afterData: {
+        branch: createdBranch,
+        user: createdUser
+      }
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Branch and login created successfully",
+      branch: createdBranch,
+      user: createdUser
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Branch create with login error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch create with login failed",
       error: getErrorDetail(error)
     });
   } finally {
