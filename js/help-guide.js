@@ -1,27 +1,57 @@
 (function () {
   const HELP_DATA = {
     "dashboard.html": {
-      title: "Dashboard",
-      intro: "Use this page to quickly understand today's business position.",
+      title: "ERP Dashboard",
+      intro: "ERP me two main modes hain: Production aur Store/Sales. Dashboard se aap daily business position aur correct mode ka summary dekh sakte hain.",
       steps: [
-        "Review the summary cards for sales, stock, and important counts.",
-        "Check low-stock or warning sections before starting daily work.",
-        "Open the required module from the menu when you need to take action.",
-        "Refresh the page if you have just saved new entries and want the latest summary."
+        "Production mode manufacturing, process, sticker, lot aur karigar work ke liye hai.",
+        "Store/Sales mode stock, billing, invoice, sales, return aur branch operations ke liye hai.",
+        "Login ke baad sidebar/top mode switch se Production ya Store mode choose karein.",
+        "Store mode me Store/Sales dashboard sections hi use karein. Production mode me production analytics hi use karein.",
+        "Agar module sidebar me nahi dikh raha hai, company plan/module access check karein.",
+        "Refresh tabhi karein jab new entry save karne ke baad latest numbers dekhne ho."
       ],
       warnings: [
-        "Dashboard numbers are for review. Changes are made inside the related pages."
+        "Dashboard review ke liye hai. Actual entry Billing, Process, Stock, Branch, ya related page se hoti hai."
+      ]
+    },
+    "production-dashboard.html": {
+      title: "Production Dashboard",
+      intro: "Production dashboard manufacturing aur karigar performance ka focused view hai.",
+      steps: [
+        "Date select karke production summary dekhein.",
+        "Today Production Weight aur Qty se daily output check karein.",
+        "Process loss, high loss alerts aur karigar summary review karein.",
+        "Completed lots ko Sticker page par barcode stock banane ke liye bhejein.",
+        "Production vs Sales chart ko planning ke liye use karein, lekin billing entry Store/Sales side se hi hoti hai."
+      ],
+      warnings: [
+        "Production dashboard me sales billing ka kaam na karein. Billing/Invoice Store/Sales mode me hota hai."
+      ]
+    },
+    "sales-dashboard.html": {
+      title: "Store Dashboard",
+      intro: "Store dashboard stock, billing, invoice, return aur sales performance ka focused view hai.",
+      steps: [
+        "Date select karke store/sales summary dekhein.",
+        "Available stock, sold items, return aur sales amount review karein.",
+        "Recent sales aur recent stock table se daily movement verify karein.",
+        "Low stock ya mismatch dikhe to Stock, Billing, Return ya Branch page me detail check karein.",
+        "Branch company me staff apne assigned branch ka data hi dekhega."
+      ],
+      warnings: [
+        "Wrong branch barcode, IN_TRANSIT item, ya TRANSFER_SHORTAGE item billing me use nahi hoga."
       ]
     },
     "sticker.html": {
       title: "Sticker",
-      intro: "Use this page to create product stickers and barcodes for stock items.",
+      intro: "Completed production lots se barcode stock banane ke liye Sticker page use hota hai.",
       steps: [
-        "Enter product details such as product name, purity, SKU, size, and metal type.",
-        "Enter the correct lot number so the item is linked to the right production lot.",
-        "Enter weight and quantity carefully before saving.",
-        "Generate or confirm the barcode.",
-        "Save the sticker item, then print the sticker when ready."
+        "Process/lot complete hone ke baad hi sticker create karein.",
+        "Product name, purity, SKU, size, metal type aur lot number sahi bharein.",
+        "Weight aur quantity carefully check karein.",
+        "Barcode generate/confirm karein.",
+        "Save karke sticker print karein. Ye item Stock me available hoga."
       ],
       warnings: [
         "Do not reuse a barcode.",
@@ -30,15 +60,16 @@
     },
     "stock.html": {
       title: "Stock",
-      intro: "Use this page to view and manage finished item stock.",
+      intro: "Finished barcode stock dekhne aur verify karne ke liye Stock page use karein.",
       steps: [
         "Search by barcode, product, SKU, size, or lot number.",
-        "Check item status before editing or deleting any stock item.",
-        "Use filters to find available, sold, or deleted items when available.",
-        "Review stock totals before billing or reporting."
+        "Status check karein: available, sold, deleted, IN_TRANSIT, ya shortage.",
+        "Branch staff ko apne assigned branch ka stock hi dikhna chahiye.",
+        "Billing se pehle barcode ka branch aur status verify karein.",
+        "Owner/Admin all branches ka stock review kar sakte hain."
       ],
       warnings: [
-        "Sold or deleted items should not be treated as available stock."
+        "Sold, deleted, IN_TRANSIT, TRANSFER_SHORTAGE, ya wrong branch item ko available stock mat maaney."
       ]
     },
     "material-stock.html": {
@@ -57,14 +88,14 @@
     },
     "process.html": {
       title: "Process",
-      intro: "Use this page to track lot-wise processing, output, loss, and karigar work.",
+      intro: "Process page lot-wise manufacturing, karigar work, output aur loss tracking ke liye hai.",
       steps: [
-        "Create or select a lot with raw weight and expected quantity.",
-        "Add the first process step and choose the process/karigar details.",
-        "Enter output weight and quantity after work is completed.",
-        "Complete the step before starting the next process step.",
-        "Complete the lot after all process steps are finished.",
-        "Create stickers only after the lot is completed."
+        "Raw weight aur expected quantity ke saath lot create/select karein.",
+        "Process step aur karigar choose karein.",
+        "Kaam complete hone ke baad output weight aur quantity enter karein.",
+        "Next step start karne se pehle current step complete karein.",
+        "Sab steps complete hone ke baad lot complete karein.",
+        "Completed lot ke baad Sticker page se barcode stock banayein."
       ],
       warnings: [
         "Output weight should not be greater than input weight.",
@@ -73,30 +104,30 @@
     },
     "invoice.html": {
       title: "Invoice",
-      intro: "Use this page to prepare and print customer invoices.",
+      intro: "Customer invoice prepare, save aur print/share karne ke liye Invoice page use hota hai.",
       steps: [
         "Enter or select customer details.",
-        "Add items by barcode or item selection.",
+        "Barcode scan/add karein. Branch staff sirf apne assigned branch stock ka barcode bill kar sakta hai.",
         "Check rate, making charge, GST type, and discount.",
         "Review the invoice total and payment details.",
         "Save the invoice, then print or share it."
       ],
       warnings: [
-        "Check GST and rate before saving because invoice totals depend on them."
+        "IN_TRANSIT, TRANSFER_SHORTAGE, sold, deleted, ya wrong branch barcode invoice me use nahi hoga."
       ]
     },
     "billing.html": {
       title: "Billing",
-      intro: "Use this page to create sales bills and collect payment.",
+      intro: "Sales bill banane, payment collect karne aur stock ko sold mark karne ke liye Billing page use hota hai.",
       steps: [
         "Enter customer details such as name and mobile number.",
-        "Scan or add the items being sold.",
+        "Barcode scan/add karein. Branch staff ke liye item usi assigned branch ka hona chahiye.",
         "Check rate, making charge, discount, and GST settings.",
         "Enter payment amount and payment mode.",
         "Save the bill and print the customer copy."
       ],
       warnings: [
-        "Billing can change item status and sales records. Review details before saving."
+        "IN_TRANSIT, TRANSFER_SHORTAGE, sold, deleted, ya wrong branch barcode block hoga. Save se pehle totals zaroor check karein."
       ]
     },
     "sales-history.html": {
@@ -114,7 +145,7 @@
     },
     "return.html": {
       title: "Return",
-      intro: "Use this page to record customer returns or damaged returns.",
+      intro: "Customer return ya damaged return record karne ke liye Return page use hota hai.",
       steps: [
         "Search the original invoice or barcode.",
         "Select the item being returned.",
@@ -156,11 +187,12 @@
     },
     "staff-management.html": {
       title: "Staff Management",
-      intro: "Use this page to create staff users and manage access.",
+      intro: "Staff login create karne aur role access manage karne ke liye Staff Management page use karein.",
       steps: [
         "Enter staff name, mobile number, and login details.",
         "Select the correct role for the staff member.",
         "Set the staff status as active or inactive.",
+        "Branch staff ke liye Branch Management page se branch assignment bhi karein.",
         "Save the staff record.",
         "Disable access when a staff member leaves."
       ],
@@ -170,43 +202,93 @@
     },
     "settings.html": {
       title: "Settings",
-      intro: "Use this page to set company details, invoice settings, GST, and default rates.",
+      intro: "Company details, invoice settings, GST aur default rates set karne ke liye Settings page use hota hai.",
       steps: [
-        "Enter company name, address, GSTIN, and contact details.",
+        "First setup: SuperAdmin company approve karta hai, phir Owner/Admin login karke settings complete karta hai.",
+        "Company name, address, GSTIN, and contact details bharein.",
         "Set default bill type, tax type, and business state.",
         "Enter default gold/silver rates or making charge settings if used.",
-        "Save settings.",
+        "Settings save karne ke liye Send Code OTP required ho sakta hai.",
+        "Send Code ke liye SMTP setup required hai: SMTP_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM.",
+        "Gmail use kar rahe hain to Gmail App Password use karein, normal password nahi.",
         "Create a test invoice to confirm the print format."
       ],
       warnings: [
-        "Wrong GSTIN, state, or rate can affect billing and invoice totals."
+        "Email service not configured aaye to SMTP disabled/missing hai. Secrets kabhi guide ya chat me share na karein."
       ]
     },
     "admin-approval.html": {
       title: "Company Approval",
-      intro: "Use this page to review and approve company signup requests.",
+      intro: "SuperAdmin company signup requests approve/reject karta hai. Company approval SuperAdmin ka kaam hai.",
       steps: [
         "Review the company name, owner details, and contact information.",
         "Check whether the request looks genuine.",
         "Approve valid companies or reject invalid requests.",
-        "Ask the owner to log in after approval."
+        "Approval ke baad Owner/Admin login karega.",
+        "Company approve hone ke baad SaaS plan/module access Company Plans page se assign kiya ja sakta hai."
       ],
       warnings: [
         "Approve only verified company requests."
       ]
     },
+    "company-plans.html": {
+      title: "Company Plans",
+      intro: "SuperAdmin yahan se company ka SaaS plan aur module access manage karta hai.",
+      steps: [
+        "Company list me company select karein.",
+        "Plan assign karein: PRODUCTION_ONLY, STORE_ONLY, BRANCH_STORE, FULL_ERP, ya CUSTOM.",
+        "Plan ke modules review karein aur zarurat ho to individual module override karein.",
+        "Disabled modules normal company users ke sidebar se hide ho jaate hain.",
+        "HARD_ENFORCEMENT enabled ho to disabled module open karne par Module Not Included page dikhega.",
+        "Audit history me plan/module changes verify karein."
+      ],
+      warnings: [
+        "Module access role permissions ke upar apply hota hai. Role permission remove nahi hoti, module disabled ho to page hidden/blocked ho sakta hai."
+      ]
+    },
+    "enforcement-qa-dashboard.html": {
+      title: "Enforcement QA",
+      intro: "SuperAdmin is dashboard se SaaS module enforcement rollout safely monitor karta hai.",
+      steps: [
+        "REPORT_ONLY aur HARD_ENFORCEMENT company counts dekhein.",
+        "WOULD_BLOCK events se samjhein kaunse disabled modules use ho rahe hain.",
+        "HARD_BLOCK events se actual blocked access verify karein.",
+        "Company readiness table se HARD_ENFORCEMENT safe hai ya nahi estimate karein.",
+        "Route map viewer me mapped/unmapped routes audit karein.",
+        "Unmapped route risk section ko rollout se pehle review karein."
+      ],
+      warnings: [
+        "QA dashboard monitoring ke liye hai. Business stock/billing/process data yahan se change nahi hota."
+      ]
+    },
+    "module-access-blocked.html": {
+      title: "Module Not Included",
+      intro: "Ye page tab dikhta hai jab company plan me module enabled nahi hai aur hard enforcement active hai.",
+      steps: [
+        "Current Plan aur Required Module dekhein.",
+        "Agar module chahiye, Owner/Admin ya SuperAdmin se contact karein.",
+        "Go To Dashboard se allowed modules par wapas jaayein.",
+        "SuperAdmin Company Plans page se plan/module enable kar sakta hai.",
+        "Module enable hone ke baad page refresh ya login again karein."
+      ],
+      warnings: [
+        "Disabled module hidden ya blocked hona expected behavior hai. Company plan/module access check karein."
+      ]
+    },
     "login.html": {
       title: "Login and Forgot Password",
-      intro: "Use this page to sign in, create a company request, or reset a forgotten password.",
+      intro: "ERP me login, company request aur forgot password flow yahan se start hota hai.",
       steps: [
         "Enter your registered mobile number or email and password to log in.",
+        "First setup me SuperAdmin company approve karega, phir Owner/Admin login karega.",
+        "Owner/Admin login ke baad Settings me company details complete karein.",
         "For forgot password, send OTP to the registered account.",
         "Verify the OTP.",
         "Set a new password.",
         "Return to login and sign in again."
       ],
       warnings: [
-        "OTP may expire. Request a new OTP if verification fails."
+        "OTP may expire. Email service not configured aaye to SMTP setup check karein."
       ]
     },
     "daily-report.html": {
@@ -220,6 +302,196 @@
       ],
       warnings: [
         "Choose the correct date before checking totals."
+      ]
+    },
+    "branch-management.html": {
+      title: "Branch Management",
+      intro: "Owner/Admin yahan real branches create karta hai aur staff ko branch assign karta hai.",
+      steps: [
+        "Branch > Branch Management open karein.",
+        "Branch name jaise Bhubaneswar, Cuttack, Puri enter karein.",
+        "Branch code, type MAIN/STORE/WAREHOUSE/OFFICE, address, contact name, contact phone aur status fill karein.",
+        "Create Branch par click karein. Galti ho to Edit se update karein.",
+        "Assign Staff button se staff user ko selected branch assign karein.",
+        "Example: Cuttack branch create karein, Raju ko Cuttack assign karein, Raju Cuttack PC/mobile se login karega.",
+        "Raju ko Cuttack stock, billing aur receive hi dikhna chahiye; Owner/Admin all branches dekh sakta hai.",
+        "Staff kisi bhi branch PC/laptop/mobile se same ERP URL par login karega.",
+        "System staff ko uske assigned branch par automatically lock karega."
+      ],
+      warnings: [
+        "Owner/Admin all branches dekh sakta hai. Branch staff ko assigned branch ka stock/billing/receive hi dikhna chahiye."
+      ]
+    },
+    "branch-transfer.html": {
+      title: "Branch Transfer",
+      intro: "Main/source branch se destination branch ko barcode stock transfer karne ke liye Branch Transfer use hota hai.",
+      steps: [
+        "Source aur destination branch select karein.",
+        "Transfer me barcode scan/add karein.",
+        "Items verify karein, phir transfer dispatch karein.",
+        "Dispatch ke baad items IN_TRANSIT ho jaate hain aur sell nahi ho sakte.",
+        "Destination branch Branch Receive page me received barcodes scan karegi.",
+        "Shortage ya mismatch ho to audit/shortage reports me review karein."
+      ],
+      warnings: [
+        "IN_TRANSIT items billing/invoice me use nahi honge. Wrong branch barcode blocked hoga."
+      ]
+    },
+    "branch-receive.html": {
+      title: "Branch Receive",
+      intro: "Destination branch transfer receive karne aur barcodes verify karne ke liye Branch Receive use hota hai.",
+      steps: [
+        "Incoming transfer open karein.",
+        "Physical parcel me received barcodes scan karein.",
+        "Valid received items destination branch stock me move ho jaate hain.",
+        "Jo item receive nahi hua wo shortage/mismatch me mark ho sakta hai.",
+        "Receive complete karne ke baad stock aur audit report verify karein."
+      ],
+      warnings: [
+        "Sirf actual received barcode scan karein. Missing item ko manually available na mark karein."
+      ]
+    },
+    "branch-transfer-history.html": {
+      title: "Branch Transfer History",
+      intro: "Purane branch transfers, status, dispatch aur receive details check karne ke liye use karein.",
+      steps: [
+        "Date, branch, status ya transfer number se search karein.",
+        "Transfer open karke items aur barcode status verify karein.",
+        "IN_TRANSIT, received, shortage aur mismatch status compare karein.",
+        "Owner/Admin branch-wise movement review kar sakta hai."
+      ],
+      warnings: [
+        "Transfer history audit reference hai. Barcode status ko billing se pehle verify karein."
+      ]
+    },
+    "branch-shortage-report.html": {
+      title: "Branch Shortage Report",
+      intro: "Branch transfer me missing ya mismatch items ko track karne ke liye Shortage Report use karein.",
+      steps: [
+        "Branch, transfer, date ya status filter select karein.",
+        "Missing barcode aur expected destination branch verify karein.",
+        "Physical parcel, scan history aur receive record compare karein.",
+        "Shortage item ko resolve hone tak sale ke liye available na maaney."
+      ],
+      warnings: [
+        "Shortage item billing/invoice me blocked rehna chahiye."
+      ]
+    },
+    "branch-analytics.html": {
+      title: "Branch Analytics",
+      intro: "Branch-wise stock, transfer, receive aur performance analytics ke liye use karein.",
+      steps: [
+        "Branch/date filters select karein.",
+        "Transfer volume, receive status aur shortage trend dekhein.",
+        "Owner/Admin all branches compare kar sakta hai.",
+        "Staff apne assigned branch ka view use karega."
+      ],
+      warnings: [
+        "Analytics decision support hai. Actual correction Branch Receive/Audit workflow se karein."
+      ]
+    },
+    "transfer-ageing-report.html": {
+      title: "Transfer Ageing",
+      intro: "Kaunse transfers zyada time se pending ya in-transit hain, ye report batata hai.",
+      steps: [
+        "Date range aur branch filter select karein.",
+        "Old IN_TRANSIT transfers identify karein.",
+        "Destination branch se receive status confirm karein.",
+        "Delay reason ko branch audit me track karein."
+      ],
+      warnings: [
+        "Long pending transfer ka stock sale ke liye available nahi hota."
+      ]
+    },
+    "shortage-analytics.html": {
+      title: "Shortage Analytics",
+      intro: "Transfer shortage/mismatch pattern samajhne ke liye Shortage Analytics use hota hai.",
+      steps: [
+        "Branch/date filter lagayein.",
+        "Shortage count, barcode aur transfer details dekhein.",
+        "Repeated shortage branch/process identify karein.",
+        "Audit dashboard me follow-up karein."
+      ],
+      warnings: [
+        "TRANSFER_SHORTAGE item billing me sell nahi hoga."
+      ]
+    },
+    "stock-movement-ledger.html": {
+      title: "Stock Movement Ledger",
+      intro: "Barcode stock ka full movement trail dekhne ke liye ledger use karein.",
+      steps: [
+        "Barcode, branch ya date se search karein.",
+        "Created, transferred, received, sold, returned jaise movements verify karein.",
+        "Wrong branch ya missing stock issue me ledger first check karein.",
+        "Audit ke liye movement sequence save/review karein."
+      ],
+      warnings: [
+        "Ledger history ko manually change karne ke liye nahi, investigation ke liye use karein."
+      ]
+    },
+    "branch-reconciliation.html": {
+      title: "Branch Reconciliation",
+      intro: "Branch stock aur transfer records reconcile karne ke liye use karein.",
+      steps: [
+        "Branch aur date range select karein.",
+        "Expected stock, actual received, shortage aur mismatch compare karein.",
+        "Exception items ko verify karein.",
+        "Reconciliation result audit dashboard me review karein."
+      ],
+      warnings: [
+        "Reconciliation ke baad bhi doubtful barcode ko billing me use karne se pehle status check karein."
+      ]
+    },
+    "branch-audit-dashboard.html": {
+      title: "Branch Audit Dashboard",
+      intro: "Branch transfer, shortage, mismatch aur reconciliation audit ka control view hai.",
+      steps: [
+        "Audit summary cards review karein.",
+        "Exception queue, snapshots aur reconciliation runs check karein.",
+        "High risk branch/transfer identify karein.",
+        "Follow-up action branch operations team ke saath close karein."
+      ],
+      warnings: [
+        "Audit dashboard monitoring ke liye hai. Stock movement actual transfer/receive/billing workflow se hota hai."
+      ]
+    },
+    "branch-snapshots.html": {
+      title: "Branch Snapshots",
+      intro: "Branch stock snapshot records audit/reference ke liye use hote hain.",
+      steps: [
+        "Branch aur snapshot date select karein.",
+        "Snapshot stock count aur value review karein.",
+        "Current stock se difference investigate karein.",
+        "Exception items ko ledger/audit me verify karein."
+      ],
+      warnings: [
+        "Snapshot past state hai. Current sale se pehle live stock status check karein."
+      ]
+    },
+    "branch-reconciliation-runs.html": {
+      title: "Reconciliation Runs",
+      intro: "Past reconciliation runs aur results review karne ke liye use karein.",
+      steps: [
+        "Run date, branch aur status filter karein.",
+        "Matched, mismatch aur shortage result dekhein.",
+        "Failed/exception run ko recheck karein.",
+        "Audit close karne se pehle unresolved items verify karein."
+      ],
+      warnings: [
+        "Unresolved reconciliation issue ko ignore na karein."
+      ]
+    },
+    "branch-exception-queue.html": {
+      title: "Exception Queue",
+      intro: "Branch mismatch, shortage, wrong movement ya doubtful barcode follow-up ke liye Exception Queue use hota hai.",
+      steps: [
+        "Exception type aur branch filter karein.",
+        "Barcode/transfer detail open karke issue samjhein.",
+        "Stock movement ledger se full trail verify karein.",
+        "Issue resolve hone ke baad audit note maintain karein."
+      ],
+      warnings: [
+        "Exception item ko clear proof ke bina sell/adjust na karein."
       ]
     },
     "transaction-reports.html": {
@@ -237,11 +509,14 @@
     },
     "index.html": {
       title: "ERP Start",
-      intro: "Use this page to open the ERP login screen.",
+      intro: "ERP start page se login screen open hoti hai. Staff aur admin same ERP URL use karte hain.",
       steps: [
         "Wait for the system to open the login page.",
         "Log in with your registered account.",
-        "Contact the owner or admin if your login is not active."
+        "Company first time use kar rahi hai to SuperAdmin approval required hai.",
+        "Branch staff ko Owner/Admin branch assign karega, uske baad staff same URL se login karega.",
+        "Contact the owner or admin if your login is not active.",
+        "Common issue: port 8080 already in use ho to old node process close karein ya port change karein."
       ],
       warnings: []
     }

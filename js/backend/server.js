@@ -264,6 +264,31 @@ function getSmtpPlaceholderMessage() {
     : "";
 }
 
+function getRequiredSmtpEnvListText() {
+  return SMTP_REQUIRED_ENV_KEYS.join(", ");
+}
+
+function getSafeSmtpDiagnostic(error) {
+  const rawMessage = String(error?.message || error || "SMTP verification failed").trim();
+  const lowerMessage = rawMessage.toLowerCase();
+
+  if (!rawMessage) return "SMTP verification failed.";
+  if (lowerMessage.includes("invalid login") || lowerMessage.includes("authentication") || lowerMessage.includes("auth")) {
+    return "SMTP authentication failed. Check SMTP_USER and SMTP_PASS.";
+  }
+  if (lowerMessage.includes("timeout") || lowerMessage.includes("timed out")) {
+    return "SMTP connection timed out. Check SMTP_HOST, SMTP_PORT, and network access.";
+  }
+  if (lowerMessage.includes("certificate") || lowerMessage.includes("tls") || lowerMessage.includes("ssl")) {
+    return "SMTP TLS/SSL verification failed. Check SMTP_SECURE and SMTP_PORT.";
+  }
+  if (lowerMessage.includes("getaddrinfo") || lowerMessage.includes("enotfound") || lowerMessage.includes("econnrefused")) {
+    return "SMTP server connection failed. Check SMTP_HOST and SMTP_PORT.";
+  }
+
+  return "SMTP verification failed. Check provider settings and credentials.";
+}
+
 function getEmailDomainOnly(value) {
   const clean = String(value || "").trim();
   const atIndex = clean.lastIndexOf("@");
@@ -370,7 +395,7 @@ function logEnvStatus() {
 
   if (missingSmtpEnv.length) {
     console.warn(
-      `[CONFIG] Missing SMTP environment variables: ${missingSmtpEnv.join(", ")}. OTP email features will stay unavailable until these are set.`
+      `[CONFIG] SMTP is enabled but incomplete. Missing: ${missingSmtpEnv.join(", ")}. Required: ${getRequiredSmtpEnvListText()}. OTP email features will stay unavailable. See SMTP_SETUP.md.`
     );
   }
 }
@@ -838,7 +863,9 @@ async function testSmtpConnection() {
   if (missingSmtpEnv.length) {
     startupStatus.smtp = "failed";
     markSmtpUnavailable(`SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`);
-    console.warn(`[STARTUP] SMTP not configured. Missing: ${missingSmtpEnv.join(", ")}`);
+    console.warn(
+      `[STARTUP] SMTP is enabled but incomplete. Missing: ${missingSmtpEnv.join(", ")}. Required: ${getRequiredSmtpEnvListText()}. OTP email features are unavailable. See SMTP_SETUP.md.`
+    );
     return;
   }
 
@@ -846,7 +873,7 @@ async function testSmtpConnection() {
     startupStatus.smtp = "failed";
     const placeholderMessage = getSmtpPlaceholderMessage();
     markSmtpUnavailable(placeholderMessage);
-    console.warn(`[STARTUP] ${placeholderMessage}`);
+    console.warn(`[STARTUP] ${placeholderMessage} Replace placeholder SMTP values. See SMTP_SETUP.md.`);
     return;
   }
 
@@ -858,7 +885,7 @@ async function testSmtpConnection() {
     smtpReady = true;
   } catch (error) {
     startupStatus.smtp = "failed";
-    markSmtpUnavailable(error?.message || "SMTP verification failed");
+    markSmtpUnavailable(getSafeSmtpDiagnostic(error));
     console.warn("[STARTUP] SMTP verification failed. Email features are disabled until SMTP settings are fixed.");
     console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
   }
@@ -26926,7 +26953,7 @@ async function runBackgroundStartupTasks() {
     }
   } catch (error) {
     startupStatus.smtp = "failed";
-    markSmtpUnavailable(error?.message || "SMTP connection failed");
+    markSmtpUnavailable(getSafeSmtpDiagnostic(error));
     console.warn("[STARTUP] SMTP connection failed. Email features are disabled until SMTP settings are fixed.");
     console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
   }

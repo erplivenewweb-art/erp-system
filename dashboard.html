@@ -11,6 +11,75 @@
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/toast.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style id="dashboardModeRouterStyle">
+    html {
+      visibility: hidden;
+    }
+  </style>
+  <script>
+    (function routeDashboardByMode() {
+      const MODE_KEY = "erpNavigationMode";
+      const MODE_TARGETS = {
+        production: "production-dashboard.html",
+        sales: "sales-dashboard.html"
+      };
+
+      function getStoredUser() {
+        try {
+          return JSON.parse(localStorage.getItem("erpLoggedInUser") || "null");
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function getStoredToken() {
+        try {
+          return String(localStorage.getItem("erpAuthToken") || "").trim();
+        } catch (_) {
+          return "";
+        }
+      }
+
+      function getNormalizedRole(user) {
+        const rawRole = String(user?.role || "").trim().toLowerCase();
+        if (rawRole === "admin") return "owner";
+        if (["billing", "invoice", "sticker", "stock", "process"].includes(rawRole)) return "staff";
+        if (["transaction", "expense"].includes(rawRole)) return "accounts";
+        return rawRole;
+      }
+
+      function getAllowedModes(user) {
+        if (!user) return ["production", "sales"];
+        const normalizedRole = getNormalizedRole(user);
+        const rawRole = String(user.role || "").trim().toLowerCase();
+        const email = String(user.email || "").trim().toLowerCase();
+
+        if (normalizedRole === "superadmin" || email === "grudrapratap0@gmail.com" || normalizedRole === "owner") {
+          return ["production", "sales"];
+        }
+
+        if (normalizedRole === "accounts") return ["production", "sales"];
+        if (["billing", "invoice"].includes(rawRole)) return ["sales"];
+        if (["process", "sticker"].includes(rawRole)) return ["production"];
+        if (rawRole === "stock") return ["sales"];
+        return ["production", "sales"];
+      }
+
+      const user = getStoredUser();
+      if (!user || !getStoredToken()) {
+        document.getElementById("dashboardModeRouterStyle")?.remove();
+        return;
+      }
+
+      const allowedModes = getAllowedModes(user);
+      const storedMode = String(localStorage.getItem(MODE_KEY) || "").trim();
+      const mode = allowedModes.includes(storedMode) ? storedMode : allowedModes[0] || "production";
+      const target = MODE_TARGETS[mode] || MODE_TARGETS.production;
+
+      localStorage.setItem(MODE_KEY, mode);
+      window.location.replace(target);
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js" defer></script>
   <style>
     body {
