@@ -88,6 +88,7 @@ const OPERATIONAL_MUTATION_PATHS = [
   "/branches",
   "/branch-transfers",
   "/branch-audit",
+  "/transaction-types",
   "/transaction/parties",
   "/transaction/transactions",
   "/updatesticker/"
@@ -974,8 +975,10 @@ function normalizePartyType(value) {
 }
 
 function normalizeTransactionType(value) {
-  const clean = String(value || "").trim().toUpperCase();
-  return TRANSACTION_TYPES.includes(clean) ? clean : "";
+  const raw = String(value || "").trim().replace(/\s+/g, " ");
+  const clean = raw.toUpperCase();
+  if (TRANSACTION_TYPES.includes(clean)) return clean;
+  return raw.slice(0, 60);
 }
 
 function normalizeMetalType(value) {
@@ -6158,6 +6161,19 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS transaction_types (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      type_name VARCHAR(60) NOT NULL,
+      status VARCHAR(50) DEFAULT 'ACTIVE',
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_transaction_types_company_name (company_id, type_name)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS transaction_lines (
       id INT AUTO_INCREMENT PRIMARY KEY,
       transaction_id INT NOT NULL,
@@ -7635,6 +7651,17 @@ async function ensureSchema() {
     await addIndexIfMissing("transaction_master", "idx_txn_company_invoice", "(company_id, invoice_no)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_date", "(company_id, voucher_date)");
     await addIndexIfMissing("transaction_master", "idx_txn_created", "(created_at)");
+  }
+
+  if (await tableExists("transaction_types")) {
+    await addColumnIfMissing("transaction_types", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("transaction_types", "type_name", "VARCHAR(60) NOT NULL");
+    await addColumnIfMissing("transaction_types", "status", "VARCHAR(50) DEFAULT 'ACTIVE'");
+    await addColumnIfMissing("transaction_types", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_types", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("transaction_types", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await addIndexIfMissing("transaction_types", "idx_transaction_types_company_status", "(company_id, status)");
+    await addUniqueIndexIfMissing("transaction_types", "uq_transaction_types_company_name", "(company_id, type_name)");
   }
 
   if (await tableExists("transaction_lines")) {
@@ -25725,6 +25752,142 @@ app.get("/userByEmail", authMiddleware, async (req, res) => {
 /* =========================
    TRANSACTION FOUNDATION
 ========================= */
+app.get("/transaction-types", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT id, company_id, type_name, status, created_by, created_at, updated_at
+      FROM transaction_types
+      WHERE company_id = ?
+        AND status = 'ACTIVE'
+      ORDER BY type_name ASC, id ASC
+      `,
+      [access.companyScope]
+    );
+
+    return res.json({
+      success: true,
+      transactionTypes: rows
+    });
+  } catch (error) {
+    console.error("Get transaction types error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transaction type fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/transaction-types", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const typeName = String(req.body.type_name || req.body.typeName || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 60);
+
+    if (!typeName) {
+      return res.status(400).json({
+        success: false,
+        message: "Transaction type name is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [duplicateRows] = await connection.query(
+      `
+      SELECT id, company_id, type_name, status, created_by, created_at, updated_at
+      FROM transaction_types
+      WHERE company_id = ?
+        AND LOWER(TRIM(type_name)) = LOWER(TRIM(?))
+      LIMIT 1
+      `,
+      [access.companyScope, typeName]
+    );
+
+    if (duplicateRows.length) {
+      const existing = duplicateRows[0];
+      if (String(existing.status || "").trim().toUpperCase() !== "ACTIVE") {
+        await connection.query(
+          `
+          UPDATE transaction_types
+          SET status = 'ACTIVE', updated_at = NOW()
+          WHERE id = ?
+          `,
+          [existing.id]
+        );
+        existing.status = "ACTIVE";
+      }
+
+      await connection.commit();
+      return res.json({
+        success: true,
+        created: false,
+        transactionType: existing
+      });
+    }
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO transaction_types (company_id, type_name, status, created_by)
+      VALUES (?, ?, 'ACTIVE', ?)
+      `,
+      [access.companyScope, typeName, access.actingUserId ?? getRequestedUserId(req)]
+    );
+
+    const [rows] = await connection.query(
+      `
+      SELECT id, company_id, type_name, status, created_by, created_at, updated_at
+      FROM transaction_types
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId]
+    );
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      created: true,
+      transactionType: rows[0]
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Create transaction type error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Transaction type create failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.post("/transaction/parties", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
 

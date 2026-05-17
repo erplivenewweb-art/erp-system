@@ -120,6 +120,106 @@
       color: #7c5a1d;
     }
 
+    .txn-type-combobox {
+      position: relative;
+    }
+
+    .txn-type-dropdown {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid #dbe2ea;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+      display: none;
+    }
+
+    .txn-type-dropdown.open {
+      display: block;
+    }
+
+    .txn-type-option {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #f1f5f9;
+      background: #fff;
+      color: #0f172a;
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .txn-type-option:hover,
+    .txn-type-option.active {
+      background: #f8fafc;
+      color: #7c5a1d;
+    }
+
+    .txn-type-option.add {
+      color: #166534;
+    }
+
+    .txn-party-combobox {
+      position: relative;
+    }
+
+    .txn-party-dropdown {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid #dbe2ea;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+      display: none;
+    }
+
+    .txn-party-dropdown.open {
+      display: block;
+    }
+
+    .txn-party-option {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #f1f5f9;
+      background: #fff;
+      color: #0f172a;
+      text-align: left;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .txn-party-option span {
+      display: block;
+      margin-top: 2px;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .txn-party-option:hover,
+    .txn-party-option.active {
+      background: #f8fafc;
+      color: #7c5a1d;
+    }
+
+    .txn-party-option.add {
+      color: #166534;
+    }
+
     .txn-summary-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -497,24 +597,20 @@
 
                   <div class="input-box">
                     <label>Transaction Type</label>
-                    <select id="txnType">
-                      <option value="PAYMENT_RECEIVED">Payment Received</option>
-                      <option value="PAYMENT_GIVEN">Payment Given</option>
-                      <option value="METAL_RECEIVED">Metal Received</option>
-                      <option value="METAL_GIVEN">Metal Given</option>
-                      <option value="ADVANCE_RECEIVED">Advance Received</option>
-                      <option value="ADVANCE_GIVEN">Advance Given</option>
-                      <option value="CASH_ADJUSTMENT">Cash Adjustment</option>
-                      <option value="METAL_ADJUSTMENT">Metal Adjustment</option>
-                      <option value="KARIGAR_ISSUE">Karigar Issue</option>
-                      <option value="KARIGAR_RECEIVE">Karigar Receive</option>
-                      <option value="KARIGAR_LABOUR">Karigar Labour</option>
-                    </select>
+                    <div class="txn-type-combobox" id="txnTypeBox">
+                      <input type="text" id="txnTypeSearch" placeholder="Search or add transaction type" autocomplete="off" />
+                      <input type="hidden" id="txnType" value="PAYMENT_RECEIVED" />
+                      <div class="txn-type-dropdown" id="txnTypeDropdown"></div>
+                    </div>
                   </div>
 
                   <div class="input-box">
                     <label>Party</label>
-                    <select id="txnParty"></select>
+                    <div class="txn-party-combobox" id="txnPartyBox">
+                      <input type="text" id="txnPartySearch" placeholder="Search or add party" autocomplete="off" />
+                      <input type="hidden" id="txnParty" value="" />
+                      <div class="txn-party-dropdown" id="txnPartyDropdown"></div>
+                    </div>
                   </div>
 
                   <div class="input-box">
@@ -907,19 +1003,26 @@
       return `${baseKey}_${scope}`;
     }
 
-    const SUPPORTED_TRANSACTION_TYPES = [
-      "PAYMENT_RECEIVED",
-      "PAYMENT_GIVEN",
-      "METAL_RECEIVED",
-      "METAL_GIVEN",
-      "ADVANCE_RECEIVED",
-      "ADVANCE_GIVEN",
+    const DEFAULT_TRANSACTION_TYPE_OPTIONS = [
+      { value: "PAYMENT_RECEIVED", label: "Payment Received" },
+      { value: "PAYMENT_GIVEN", label: "Payment Given" },
+      { value: "METAL_RECEIVED", label: "Metal Received" },
+      { value: "METAL_GIVEN", label: "Metal Given" },
+      { value: "ADVANCE_RECEIVED", label: "Advance Received" },
+      { value: "ADVANCE_GIVEN", label: "Advance Given" },
+      { value: "KARIGAR_ISSUE", label: "Karigar Issue" },
+      { value: "KARIGAR_RECEIVE", label: "Karigar Receive" }
+    ];
+
+    const REMOVED_CREATE_TRANSACTION_TYPES = new Set([
       "CASH_ADJUSTMENT",
       "METAL_ADJUSTMENT",
-      "KARIGAR_ISSUE",
-      "KARIGAR_RECEIVE",
       "KARIGAR_LABOUR"
-    ];
+    ]);
+
+    const TRANSACTION_TYPE_ALIASES = {
+      "payment sent": "PAYMENT_GIVEN"
+    };
 
     const TRANSACTION_TYPE_LABELS = {
       PAYMENT_RECEIVED: "Payment Received",
@@ -957,6 +1060,7 @@
     let recentReferenceData = [];
     let txnCurrentPage = 1;
     let txnHasNextPage = false;
+    let transactionTypeOptions = [...DEFAULT_TRANSACTION_TYPE_OPTIONS];
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1069,6 +1173,193 @@
       return TRANSACTION_TYPE_LABELS[String(value || "").trim().toUpperCase()] || String(value || "");
     }
 
+    function normalizeTransactionTypeText(value) {
+      return String(value || "").trim().replace(/\s+/g, " ");
+    }
+
+    function transactionTypeDuplicateKey(value) {
+      return normalizeTransactionTypeText(value).toLowerCase();
+    }
+
+    function findTransactionTypeOption(value) {
+      const key = transactionTypeDuplicateKey(value);
+      if (!key) return null;
+      const aliasValue = TRANSACTION_TYPE_ALIASES[key] || "";
+      if (aliasValue) {
+        return transactionTypeOptions.find((option) => String(option.value || "").trim().toUpperCase() === aliasValue) || null;
+      }
+      return transactionTypeOptions.find((option) =>
+        transactionTypeDuplicateKey(option.value) === key ||
+        transactionTypeDuplicateKey(option.label) === key
+      ) || null;
+    }
+
+    function mergeTransactionTypeOption(option) {
+      const label = normalizeTransactionTypeText(option?.label || option?.type_name || option?.typeName || "");
+      const value = normalizeTransactionTypeText(option?.value || option?.type_name || option?.typeName || label);
+      if (!label || !value || REMOVED_CREATE_TRANSACTION_TYPES.has(value.toUpperCase())) return;
+
+      const existing = findTransactionTypeOption(label) || findTransactionTypeOption(value);
+      if (existing) return;
+
+      transactionTypeOptions.push({
+        value,
+        label,
+        custom: !TRANSACTION_TYPE_LABELS[value.toUpperCase()]
+      });
+    }
+
+    function refreshTxnTypeDependents() {
+      updateTransactionFormState();
+      renderSettlementSection();
+    }
+
+    function setTxnType(value, { silent = false } = {}) {
+      const hidden = document.getElementById("txnType");
+      const input = document.getElementById("txnTypeSearch");
+      const cleanValue = normalizeTransactionTypeText(value);
+      const option = findTransactionTypeOption(cleanValue);
+      const finalValue = cleanValue ? (option?.value || cleanValue) : "";
+      const finalLabel = cleanValue ? (option?.label || formatTxnType(finalValue) || cleanValue) : "";
+
+      if (hidden) hidden.value = finalValue;
+      if (input) input.value = finalLabel;
+      renderTxnTypeDropdown("");
+
+      if (!silent && hidden) {
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+
+    function renderTxnTypeDropdown(filterText = "") {
+      const dropdown = document.getElementById("txnTypeDropdown");
+      if (!dropdown) return;
+
+      const searchText = normalizeTransactionTypeText(filterText);
+      const searchKey = transactionTypeDuplicateKey(searchText);
+      const visibleOptions = transactionTypeOptions.filter((option) => {
+        const label = String(option.label || "");
+        const value = String(option.value || "");
+        if (REMOVED_CREATE_TRANSACTION_TYPES.has(value.toUpperCase())) return false;
+        if (!searchKey) return true;
+        return transactionTypeDuplicateKey(label).includes(searchKey) || transactionTypeDuplicateKey(value).includes(searchKey);
+      });
+      const existing = searchKey ? findTransactionTypeOption(searchText) : null;
+
+      dropdown.innerHTML = visibleOptions.map((option) => `
+        <button type="button" class="txn-type-option" data-type-value="${escapeHtml(option.value)}">
+          ${escapeHtml(option.label)}
+        </button>
+      `).join("");
+
+      if (searchText && !existing) {
+        dropdown.innerHTML += `
+          <button type="button" class="txn-type-option add" data-add-type="${escapeHtml(searchText)}">
+            Add new type: ${escapeHtml(searchText)}
+          </button>
+        `;
+      }
+
+      if (!dropdown.innerHTML) {
+        dropdown.innerHTML = `<button type="button" class="txn-type-option" disabled>No matching transaction type</button>`;
+      }
+    }
+
+    function openTxnTypeDropdown() {
+      const dropdown = document.getElementById("txnTypeDropdown");
+      const input = document.getElementById("txnTypeSearch");
+      renderTxnTypeDropdown(input?.value || "");
+      dropdown?.classList.add("open");
+    }
+
+    function closeTxnTypeDropdown() {
+      document.getElementById("txnTypeDropdown")?.classList.remove("open");
+    }
+
+    function restoreTxnTypeSearchFromHidden() {
+      const hiddenValue = normalizeTransactionTypeText(document.getElementById("txnType")?.value || "");
+      const input = document.getElementById("txnTypeSearch");
+      if (!input) return;
+      if (!hiddenValue) {
+        input.value = "";
+        return;
+      }
+
+      const option = findTransactionTypeOption(hiddenValue);
+      input.value = option?.label || formatTxnType(hiddenValue) || hiddenValue;
+    }
+
+    async function loadTransactionTypes() {
+      transactionTypeOptions = [...DEFAULT_TRANSACTION_TYPE_OPTIONS];
+
+      try {
+        const params = buildProtectedParams(true);
+        const res = await fetch(`${API_BASE}/transaction-types?${params.toString()}`, { cache: "no-store" });
+        const data = await res.json();
+
+        if (!data.success) {
+          throw new Error(data.message || "Transaction type load failed");
+        }
+
+        (Array.isArray(data.transactionTypes) ? data.transactionTypes : []).forEach((item) => {
+          mergeTransactionTypeOption({
+            value: item.type_name,
+            label: item.type_name
+          });
+        });
+      } catch (error) {
+        console.log("Transaction type load error:", error);
+        showToast("Custom transaction types could not be loaded", "error");
+      }
+
+      renderTxnTypeDropdown("");
+      setTxnType(document.getElementById("txnType")?.value || "PAYMENT_RECEIVED", { silent: true });
+    }
+
+    async function addTransactionTypeFromInput(value) {
+      const typeName = normalizeTransactionTypeText(value);
+
+      if (!typeName) {
+        showToast("Please enter a transaction type.", "error");
+        return;
+      }
+
+      const existing = findTransactionTypeOption(typeName);
+      if (existing) {
+        setTxnType(existing.value);
+        closeTxnTypeDropdown();
+        showToast("Transaction type already exists", "info");
+        return existing.value;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/transaction-types`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...Object.fromEntries(buildProtectedParams(true)),
+            type_name: typeName
+          })
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+          throw new Error(data.message || "Transaction type add failed");
+        }
+
+        const savedName = data.transactionType?.type_name || typeName;
+        mergeTransactionTypeOption({ value: savedName, label: savedName });
+        setTxnType(savedName);
+        closeTxnTypeDropdown();
+        showToast(data.created === false ? "Transaction type already exists" : "Transaction type added", "success");
+        return savedName;
+      } catch (error) {
+        console.log("Transaction type add error:", error);
+        showToast(error.message || "Transaction type add failed", "error");
+        return "";
+      }
+    }
+
     function formatPartyType(value) {
       return PARTY_TYPE_LABELS[String(value || "").trim().toUpperCase()] || String(value || "");
     }
@@ -1094,6 +1385,14 @@
       return transactionParties.find((item) => Number(item.id) === partyId) || null;
     }
 
+    function normalizePartySearchText(value) {
+      return String(value || "").trim().replace(/\s+/g, " ");
+    }
+
+    function partyDuplicateKey(value) {
+      return normalizePartySearchText(value).toLowerCase();
+    }
+
     function matchesPartyTypeFilter(partyType, filterType) {
       const cleanPartyType = String(partyType || "").trim().toUpperCase();
       const cleanFilter = String(filterType || "").trim().toUpperCase();
@@ -1107,6 +1406,153 @@
         return true;
       }
       return false;
+    }
+
+    function getFilteredTxnParties() {
+      const selectedPartyType = String(document.getElementById("txnPartyType")?.value || "").trim();
+      return transactionParties.filter((party) => matchesPartyTypeFilter(party.party_type, selectedPartyType));
+    }
+
+    function getPartyOptionLabel(party) {
+      return `${party.party_name || ""} (${formatPartyType(party.party_type)})`;
+    }
+
+    function findTxnPartyOption(value) {
+      const key = partyDuplicateKey(value);
+      if (!key) return null;
+      const filtered = getFilteredTxnParties();
+      return filtered.find((party) =>
+        partyDuplicateKey(party.party_name) === key ||
+        partyDuplicateKey(party.display_name) === key ||
+        partyDuplicateKey(getPartyOptionLabel(party)) === key ||
+        partyDuplicateKey(party.mobile) === key ||
+        partyDuplicateKey(party.party_code) === key
+      ) || null;
+    }
+
+    function renderTxnPartyDropdown(filterText = "") {
+      const dropdown = document.getElementById("txnPartyDropdown");
+      if (!dropdown) return;
+
+      const searchText = normalizePartySearchText(filterText);
+      const searchKey = partyDuplicateKey(searchText);
+      const visibleParties = getFilteredTxnParties().filter((party) => {
+        if (!searchKey) return true;
+        return [
+          party.party_name,
+          party.display_name,
+          party.party_code,
+          party.mobile,
+          party.gst_no,
+          formatPartyType(party.party_type)
+        ].some((value) => partyDuplicateKey(value).includes(searchKey));
+      });
+      const existing = searchKey ? findTxnPartyOption(searchText) : null;
+
+      dropdown.innerHTML = visibleParties.map((party) => `
+        <button type="button" class="txn-party-option" data-party-id="${Number(party.id)}">
+          ${escapeHtml(party.party_name || "")}
+          <span>${escapeHtml(formatPartyType(party.party_type) || "")}${party.mobile ? ` | ${escapeHtml(party.mobile)}` : ""}</span>
+        </button>
+      `).join("");
+
+      if (searchText && !existing) {
+        dropdown.innerHTML += `
+          <button type="button" class="txn-party-option add" data-add-party="${escapeHtml(searchText)}">
+            Add new party: ${escapeHtml(searchText)}
+          </button>
+        `;
+      }
+
+      if (!dropdown.innerHTML) {
+        dropdown.innerHTML = `<button type="button" class="txn-party-option" disabled>No matching party</button>`;
+      }
+    }
+
+    function openTxnPartyDropdown() {
+      const dropdown = document.getElementById("txnPartyDropdown");
+      const input = document.getElementById("txnPartySearch");
+      renderTxnPartyDropdown(input?.value || "");
+      dropdown?.classList.add("open");
+    }
+
+    function closeTxnPartyDropdown() {
+      document.getElementById("txnPartyDropdown")?.classList.remove("open");
+    }
+
+    function setTxnParty(partyId, { silent = false } = {}) {
+      const hidden = document.getElementById("txnParty");
+      const input = document.getElementById("txnPartySearch");
+      const party = transactionParties.find((item) => Number(item.id) === Number(partyId)) || null;
+
+      if (hidden) hidden.value = party ? String(party.id) : "";
+      if (input) input.value = party ? (party.party_name || "") : "";
+      renderTxnPartyDropdown("");
+
+      if (!silent && hidden) {
+        hidden.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        renderLiveSummaryPanel();
+      }
+    }
+
+    function restoreTxnPartySearchFromHidden() {
+      const hiddenValue = document.getElementById("txnParty")?.value || "";
+      setTxnParty(hiddenValue, { silent: true });
+    }
+
+    async function addTxnPartyFromInput(value) {
+      const partyName = normalizePartySearchText(value);
+      const partyType = String(document.getElementById("txnPartyType")?.value || "").trim();
+
+      if (!partyName) {
+        showToast("Please enter the party name.", "error");
+        return null;
+      }
+
+      if (!partyType) {
+        showToast("Please select the party type first.", "error");
+        return null;
+      }
+
+      const existing = findTxnPartyOption(partyName);
+      if (existing) {
+        setTxnParty(existing.id);
+        closeTxnPartyDropdown();
+        showToast("Party already exists", "info");
+        return existing;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/transaction/parties`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...Object.fromEntries(buildProtectedParams(true)),
+            party_name: partyName,
+            display_name: partyName,
+            party_type: partyType
+          })
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+          throw new Error(data.message || "Party add failed");
+        }
+
+        await loadTxnParties({ preserveSelection: false });
+        const createdParty = transactionParties.find((party) => Number(party.id) === Number(data.partyId)) || findTxnPartyOption(partyName);
+        if (createdParty) {
+          setTxnParty(createdParty.id);
+        }
+        closeTxnPartyDropdown();
+        showToast("Party added", "success");
+        return createdParty || null;
+      } catch (error) {
+        console.log("Party add error:", error);
+        showToast(error.message || "Party add failed", "error");
+        return null;
+      }
     }
 
     function getCashEntryType(type, direction) {
@@ -1427,6 +1873,18 @@
         effectField.style.display = (type === "CASH_ADJUSTMENT" || type === "METAL_ADJUSTMENT") ? "" : "none";
       }
 
+      if (!type) {
+        if (cashHint) cashHint.textContent = "Select a transaction type to open the related cash section.";
+        if (metalHint) metalHint.textContent = "Select a transaction type to open the related metal section.";
+        if (headerHint) headerHint.textContent = "Choose a transaction type to see the matching cash, metal, karigar, and settlement sections.";
+        if (karigarHint) karigarHint.textContent = "Karigar transaction details will appear for karigar movement types.";
+        if (amountLabel) amountLabel.textContent = "Amount";
+        if (weightLabel) weightLabel.textContent = "Gross Weight (gm)";
+        renderSettlementSection();
+        renderLiveSummaryPanel();
+        return;
+      }
+
       if (cashHint) {
         cashHint.textContent = type === "KARIGAR_LABOUR"
           ? "Record labour payable/receivable for the selected karigar."
@@ -1523,10 +1981,11 @@
       }
     }
 
-    async function loadTxnParties() {
-      const select = document.getElementById("txnParty");
-      if (!select) return;
-      const oldValue = select.value || "";
+    async function loadTxnParties(options = {}) {
+      const hidden = document.getElementById("txnParty");
+      if (!hidden) return;
+      const preserveSelection = options.preserveSelection !== false;
+      const oldValue = preserveSelection ? (hidden.value || "") : "";
 
       try {
         const params = buildProtectedParams(isSuperAdmin());
@@ -1544,21 +2003,14 @@
         showToast("Party master load failed", "error");
       }
 
-      select.innerHTML = '<option value="">Select Party</option>';
-
-      const selectedPartyType = String(document.getElementById("txnPartyType")?.value || "").trim();
-      select.innerHTML += transactionParties
-        .filter((party) => matchesPartyTypeFilter(party.party_type, selectedPartyType))
-        .map((party) => {
-          const label = `${party.party_name || ""} (${formatPartyType(party.party_type)})`;
-          return `<option value="${Number(party.id)}">${escapeHtml(label)}</option>`;
-        })
-        .join("");
-
-      if ([...select.options].some((opt) => opt.value === oldValue)) {
-        select.value = oldValue;
+      const selectedStillVisible = oldValue && getFilteredTxnParties().some((party) => String(party.id) === String(oldValue));
+      if (selectedStillVisible) {
+        setTxnParty(oldValue, { silent: true });
+      } else {
+        setTxnParty("", { silent: true });
       }
 
+      renderTxnPartyDropdown("");
       renderLiveSummaryPanel();
     }
 
@@ -1600,7 +2052,7 @@
     function clearTransactionForm() {
       document.getElementById("txnEditId").value = "";
       document.getElementById("txnPartyType").value = "CUSTOMER";
-      document.getElementById("txnParty").value = "";
+      setTxnParty("", { silent: true });
       document.getElementById("txnInvoiceNo").value = "";
       document.getElementById("txnLotNo").value = "";
       document.getElementById("txnProcessLotNo").value = "";
@@ -1619,7 +2071,7 @@
       document.getElementById("txnAmount").value = "";
       document.getElementById("txnAmount").dataset.manual = "";
       document.getElementById("txnNote").value = "";
-      document.getElementById("txnType").value = "PAYMENT_RECEIVED";
+      setTxnType("PAYMENT_RECEIVED", { silent: true });
       document.getElementById("txnSettlementInvoice").value = "";
       openSettlementInvoices = [];
       recentReferenceData = [];
@@ -1822,7 +2274,7 @@
     }
 
     function canReuseTransaction(item) {
-      return SUPPORTED_TRANSACTION_TYPES.includes(String(item?.transaction_type || "").trim().toUpperCase());
+      return Boolean(findTransactionTypeOption(item?.transaction_type || ""));
     }
 
     function editTransaction(id) {
@@ -1832,10 +2284,10 @@
       document.getElementById("txnEditId").value = item.id || "";
       document.getElementById("txnPartyType").value = item.party_type || "CUSTOMER";
       loadTxnParties().then(() => {
-        document.getElementById("txnParty").value = String(item.party_id || "");
+        setTxnParty(item.party_id || "", { silent: true });
         loadSettlementContext();
       });
-      document.getElementById("txnType").value = item.transaction_type || "PAYMENT_RECEIVED";
+      setTxnType(item.transaction_type || "PAYMENT_RECEIVED", { silent: true });
       document.getElementById("txnInvoiceNo").value = item.invoice_no || "";
       document.getElementById("txnLotNo").value = item.lot_no || "";
       document.getElementById("txnProcessLotNo").value = item.process_lot_no || "";
@@ -2126,9 +2578,151 @@
       updateTransactionFormState();
     });
     document.getElementById("txnParty")?.addEventListener("change", loadSettlementContext);
+    document.getElementById("txnPartySearch")?.addEventListener("focus", openTxnPartyDropdown);
+    document.getElementById("txnPartySearch")?.addEventListener("input", function () {
+      const typed = normalizePartySearchText(this.value);
+      if (!typed) {
+        setTxnParty("");
+        closeTxnPartyDropdown();
+        return;
+      }
+
+      renderTxnPartyDropdown(typed);
+      openTxnPartyDropdown();
+    });
+    document.getElementById("txnPartySearch")?.addEventListener("keydown", async function (event) {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+
+      const typed = normalizePartySearchText(this.value);
+      if (!typed) {
+        showToast("Please enter the party name.", "error");
+        setTxnParty("");
+        closeTxnPartyDropdown();
+        return;
+      }
+
+      const existing = findTxnPartyOption(typed);
+      if (existing) {
+        setTxnParty(existing.id);
+        closeTxnPartyDropdown();
+        return;
+      }
+
+      await addTxnPartyFromInput(typed);
+    });
+    document.getElementById("txnPartySearch")?.addEventListener("blur", function () {
+      setTimeout(() => {
+        const typed = normalizePartySearchText(this.value);
+        if (!typed) {
+          setTxnParty("");
+          closeTxnPartyDropdown();
+          return;
+        }
+
+        const existing = findTxnPartyOption(typed);
+        if (existing) {
+          setTxnParty(existing.id);
+          closeTxnPartyDropdown();
+          return;
+        }
+
+        restoreTxnPartySearchFromHidden();
+        closeTxnPartyDropdown();
+      }, 120);
+    });
+    document.getElementById("txnPartyDropdown")?.addEventListener("mousedown", async function (event) {
+      event.preventDefault();
+      const optionButton = event.target.closest("[data-party-id]");
+      const addButton = event.target.closest("[data-add-party]");
+
+      if (optionButton) {
+        setTxnParty(optionButton.dataset.partyId || "");
+        closeTxnPartyDropdown();
+        return;
+      }
+
+      if (addButton) {
+        await addTxnPartyFromInput(addButton.dataset.addParty || "");
+      }
+    });
     document.getElementById("txnType")?.addEventListener("change", function () {
-      updateTransactionFormState();
-      renderSettlementSection();
+      refreshTxnTypeDependents();
+    });
+    document.getElementById("txnTypeSearch")?.addEventListener("focus", openTxnTypeDropdown);
+    document.getElementById("txnTypeSearch")?.addEventListener("input", function () {
+      const typed = normalizeTransactionTypeText(this.value);
+      if (!typed) {
+        setTxnType("");
+        closeTxnTypeDropdown();
+        return;
+      }
+
+      renderTxnTypeDropdown(typed);
+      openTxnTypeDropdown();
+    });
+    document.getElementById("txnTypeSearch")?.addEventListener("keydown", async function (event) {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+
+      const typed = normalizeTransactionTypeText(this.value);
+      if (!typed) {
+        setTxnType("");
+        closeTxnTypeDropdown();
+        return;
+      }
+
+      const existing = findTransactionTypeOption(typed);
+      if (existing) {
+        setTxnType(existing.value);
+        closeTxnTypeDropdown();
+        return;
+      }
+
+      await addTransactionTypeFromInput(typed);
+    });
+    document.getElementById("txnTypeSearch")?.addEventListener("blur", function () {
+      setTimeout(() => {
+        const typed = normalizeTransactionTypeText(this.value);
+        if (!typed) {
+          setTxnType("");
+          closeTxnTypeDropdown();
+          return;
+        }
+
+        const existing = findTransactionTypeOption(typed);
+        if (existing) {
+          setTxnType(existing.value);
+          closeTxnTypeDropdown();
+          return;
+        }
+
+        restoreTxnTypeSearchFromHidden();
+        closeTxnTypeDropdown();
+      }, 120);
+    });
+    document.getElementById("txnTypeDropdown")?.addEventListener("mousedown", async function (event) {
+      event.preventDefault();
+      const optionButton = event.target.closest("[data-type-value]");
+      const addButton = event.target.closest("[data-add-type]");
+
+      if (optionButton) {
+        setTxnType(optionButton.dataset.typeValue || "");
+        closeTxnTypeDropdown();
+        return;
+      }
+
+      if (addButton) {
+        await addTransactionTypeFromInput(addButton.dataset.addType || "");
+      }
+    });
+    document.addEventListener("click", function (event) {
+      if (!event.target.closest("#txnTypeBox")) {
+        closeTxnTypeDropdown();
+      }
+      if (!event.target.closest("#txnPartyBox")) {
+        closeTxnPartyDropdown();
+      }
     });
     document.getElementById("txnSettlementInvoice")?.addEventListener("change", function () {
       const selectedInvoice = getSelectedSettlementInvoice();
@@ -2159,6 +2753,7 @@
 
     window.addEventListener("load", async function () {
       renderProfileBox();
+      await loadTransactionTypes();
       clearTransactionForm();
       await syncStockItemsFromServer();
       await loadTxnParties();
