@@ -2450,6 +2450,11 @@ function isBranchManagerRole(role = "") {
   return normalizedRole === "OWNER" || normalizedRole === "ACCOUNTS";
 }
 
+function isBranchManagerProfileRole(role = "") {
+  const clean = String(role || "").trim().toLowerCase();
+  return ["branchmanager", "branch_manager", "storemanager", "store_manager"].includes(clean);
+}
+
 async function resolveBranchAccessContext(req, { requireCompanyScope = false } = {}) {
   const access = await resolveAccessContext(req, {
     requireActingUser: true,
@@ -2462,7 +2467,17 @@ async function resolveBranchAccessContext(req, { requireCompanyScope = false } =
   }
 
   const role = normalizeRoleValue(access.actingUser?.role || "");
+  const isReceiveOnlyBranchManager = isBranchManagerProfileRole(access.actingUser?.role || "");
   const userBranchId = getUserBranchId(access.actingUser);
+
+  if (isReceiveOnlyBranchManager && userBranchId === null) {
+    return {
+      ok: false,
+      status: 403,
+      message: "Branch Manager must be assigned to a branch before accessing branch stock or transfers"
+    };
+  }
+
   const canViewAllBranches = Boolean(access.isSuperAdmin || isBranchManagerRole(role) || userBranchId === null);
   const canManageBranches = Boolean(!access.isSuperAdmin && isBranchManagerRole(role));
   const isBranchLocked = Boolean(!access.isSuperAdmin && !isBranchManagerRole(role) && userBranchId !== null);
@@ -2474,6 +2489,7 @@ async function resolveBranchAccessContext(req, { requireCompanyScope = false } =
     branchScope: isBranchLocked ? userBranchId : null,
     canViewAllBranches,
     canManageBranches,
+    isReceiveOnlyBranchManager,
     isBranchLocked
   };
 }
@@ -2690,6 +2706,7 @@ function canAccessTransferBranch(access, branchId) {
 
 function canCreateTransferFromBranch(access, fromBranchId) {
   if (access?.isSuperAdmin) return false;
+  if (access?.isReceiveOnlyBranchManager) return false;
   if (!access?.isBranchLocked) return true;
   return Number(fromBranchId || 0) === Number(access.userBranchId || 0);
 }
@@ -4799,6 +4816,10 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "BRANCH", pattern: /^\/branch-stock(?:\/|$)/i },
   { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer(?:\.html)?$/i },
   { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer-history(?:\.html)?$/i },
+  { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/incoming$/i },
+  { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/[^/]+\/receive-scan$/i },
+  { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/[^/]+\/receive-summary$/i },
+  { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/[^/]+\/confirm-shortage$/i },
   { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfers(?:\/|$)/i },
   { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-receive(?:\.html)?$/i },
   { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-audit-dashboard(?:\.html)?$/i },

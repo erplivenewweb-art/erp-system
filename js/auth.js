@@ -97,7 +97,9 @@ const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "daily-report",
   "transaction",
   "transaction-reports",
-  "profit-report"
+  "profit-report",
+  "branch-receive",
+  "branch-transfer-history"
 ]);
 const ERP_NAVIGATION_MODES = {
   production: {
