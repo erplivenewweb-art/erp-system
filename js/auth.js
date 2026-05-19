@@ -141,7 +141,7 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", group: "branch", pageKey: "branch-management", href: "branch-management.html", label: "Branch Management", icon: "fas fa-code-branch", moduleKey: "BRANCH" },
   { mode: "sales", group: "branch", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box", moduleKey: "BRANCH_TRANSFER" },
   { mode: "sales", group: "branch", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode", moduleKey: "BRANCH_RECEIVE" },
-  { mode: "sales", group: "branch", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route", moduleKey: "BRANCH_TRANSFER" },
+  { mode: "sales", group: "branch", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route", moduleKey: "BRANCH_RECEIVE" },
   { mode: "sales", group: "branch", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple", moduleKey: "ANALYTICS" },
   { mode: "sales", group: "branch", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half", moduleKey: "ANALYTICS" },
   { mode: "sales", group: "branch", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation", moduleKey: "ANALYTICS" },
@@ -257,7 +257,7 @@ function getNormalizedRole(user = null) {
 function isBranchManagerProfile(user = null) {
   const targetUser = user || getLoggedInUser();
   const raw = String(targetUser?.role || "").trim().toLowerCase();
-  return ["branchmanager", "branch_manager", "storemanager", "store_manager"].includes(raw);
+  return raw === "branchmanager";
 }
 
 function normalizeAllowedRoles(roles = []) {

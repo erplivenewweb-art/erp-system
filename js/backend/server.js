@@ -2452,7 +2452,7 @@ function isBranchManagerRole(role = "") {
 
 function isBranchManagerProfileRole(role = "") {
   const clean = String(role || "").trim().toLowerCase();
-  return ["branchmanager", "branch_manager", "storemanager", "store_manager"].includes(clean);
+  return clean === "branchmanager";
 }
 
 async function resolveBranchAccessContext(req, { requireCompanyScope = false } = {}) {
