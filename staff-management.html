@@ -40,6 +40,52 @@
       font-weight: 700;
     }
 
+    .staff-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 12px;
+    }
+
+    .staff-status-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+
+    .staff-status-badge.active {
+      background: #ecfdf3;
+      color: #027a48;
+    }
+
+    .staff-status-badge.inactive {
+      background: #fff1f1;
+      color: #b42318;
+    }
+
+    .staff-action-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 800;
+      background: #f8fafc;
+      color: #334155;
+    }
+
+    .staff-action-btn.warn {
+      background: #fff7ed;
+      color: #c2410c;
+    }
+
+    .staff-action-btn.success {
+      background: #ecfdf3;
+      color: #027a48;
+    }
+
     @media screen and (max-width: 900px) {
       .form-grid,
       .grid-2,
@@ -410,6 +456,16 @@
 
           <div class="sub-card" style="margin-top:16px;">
             <h3>Saved Staff</h3>
+            <div class="staff-toolbar">
+              <div class="input-box" style="max-width:220px; margin:0;">
+                <label for="staffStatusFilter">Status Filter</label>
+                <select id="staffStatusFilter" onchange="renderStaffTable()">
+                  <option value="ALL">All</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+              </div>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -418,7 +474,9 @@
                     <th>Mobile</th>
                     <th>Join Date</th>
                     <th>Monthly Salary</th>
+                    <th>Status</th>
                     <th>Address / Note</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="staffTableBody"></tbody>
@@ -524,7 +582,7 @@
       return `${baseKey}_${scope}`;
     }
 
-    let staffData = JSON.parse(localStorage.getItem(companyScopedKey("staffData"))) || [];
+    let staffData = normalizeStaffData(JSON.parse(localStorage.getItem(companyScopedKey("staffData"))) || []);
     let workData = JSON.parse(localStorage.getItem(companyScopedKey("workData"))) || [];
     let attendanceData = JSON.parse(localStorage.getItem(companyScopedKey("attendanceData"))) || [];
     let paymentData = JSON.parse(localStorage.getItem(companyScopedKey("paymentData"))) || [];
@@ -604,8 +662,39 @@
       if (event.key === "Escape") closeSidebarMobile();
     });
 
-    function saveAll() {
+    function normalizeStaffStatus(value) {
+      const status = String(value || "ACTIVE").trim().toUpperCase();
+      return status === "INACTIVE" ? "INACTIVE" : "ACTIVE";
+    }
+
+    function normalizeStaffData(rows) {
+      return (Array.isArray(rows) ? rows : []).map((item) => ({
+        ...item,
+        status: normalizeStaffStatus(item?.status)
+      }));
+    }
+
+    function isActiveStaff(staff) {
+      return normalizeStaffStatus(staff?.status) === "ACTIVE";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function saveStaffDataOnly() {
+      staffData = normalizeStaffData(staffData);
       localStorage.setItem(companyScopedKey("staffData"), JSON.stringify(staffData));
+    }
+
+    function saveAll() {
+      saveStaffDataOnly();
       localStorage.setItem(companyScopedKey("workData"), JSON.stringify(workData));
       localStorage.setItem(companyScopedKey("attendanceData"), JSON.stringify(attendanceData));
       localStorage.setItem(companyScopedKey("paymentData"), JSON.stringify(paymentData));
@@ -638,13 +727,16 @@
         joinDate,
         monthlySalary,
         address,
+        status: "ACTIVE",
         company_id: companyId
       };
 
       if (existingIndex >= 0) {
         staffData[existingIndex] = {
           ...staffData[existingIndex],
-          ...staffRecord
+          ...staffRecord,
+          id: staffData[existingIndex].id || staffRecord.id,
+          status: normalizeStaffStatus(staffData[existingIndex].status)
         };
       } else {
         staffData.unshift(staffRecord);
@@ -684,7 +776,8 @@ async function loadStaffFromServer() {
           ...user,
           joinDate: localMatch?.joinDate || "",
           monthlySalary: Number(localMatch?.monthlySalary || 0),
-          address: localMatch?.address || ""
+          address: localMatch?.address || "",
+          status: normalizeStaffStatus(localMatch?.status)
         };
       });
 
@@ -692,7 +785,7 @@ async function loadStaffFromServer() {
         return !merged.some((user) => String(user.name || "").trim() === String(item.name || "").trim());
       });
 
-      staffData = [...merged, ...remainingLocal];
+      staffData = normalizeStaffData([...merged, ...remainingLocal]);
       saveAll();
       renderStaffTable();
       loadStaffDropdowns();
@@ -944,24 +1037,57 @@ async function loadStaffFromServer() {
       const tbody = document.getElementById("staffTableBody");
       if (!tbody) return;
 
+      staffData = normalizeStaffData(staffData);
       tbody.innerHTML = "";
 
-      if (!staffData.length) {
-        tbody.innerHTML = `<tr><td colspan="5">No staff found</td></tr>`;
+      const statusFilter = normalizeStaffStatus(document.getElementById("staffStatusFilter")?.value || "ALL");
+      const selectedFilter = String(document.getElementById("staffStatusFilter")?.value || "ALL").trim().toUpperCase();
+      const visibleStaff = selectedFilter === "ALL"
+        ? staffData
+        : staffData.filter((item) => normalizeStaffStatus(item.status) === statusFilter);
+
+      if (!visibleStaff.length) {
+        tbody.innerHTML = `<tr><td colspan="7">No staff found</td></tr>`;
         return;
       }
 
-      staffData.forEach((item) => {
+      visibleStaff.forEach((item) => {
+        const status = normalizeStaffStatus(item.status);
+        const nextStatus = status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+        const actionLabel = status === "ACTIVE" ? "Deactivate" : "Reactivate";
+        const actionClass = status === "ACTIVE" ? "warn" : "success";
+        const staffIndex = staffData.indexOf(item);
         tbody.innerHTML += `
           <tr>
-            <td>${item.name || ""}</td>
-            <td>${item.mobile || ""}</td>
-            <td>${item.joinDate || ""}</td>
+            <td>${escapeHtml(item.name || "")}</td>
+            <td>${escapeHtml(item.mobile || "")}</td>
+            <td>${escapeHtml(item.joinDate || "")}</td>
             <td>${Number(item.monthlySalary || 0).toFixed(2)}</td>
-            <td>${item.address || ""}</td>
+            <td><span class="staff-status-badge ${status.toLowerCase()}">${status}</span></td>
+            <td>${escapeHtml(item.address || "")}</td>
+            <td><button class="staff-action-btn ${actionClass}" type="button" onclick="setStaffStatus(${staffIndex}, '${nextStatus}')">${actionLabel}</button></td>
           </tr>
         `;
       });
+    }
+
+    function setStaffStatus(staffIndex, nextStatus) {
+      const targetStatus = normalizeStaffStatus(nextStatus);
+      const index = Number(staffIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= staffData.length) {
+        showToast("Staff record not found.", "error");
+        return;
+      }
+
+      staffData[index] = {
+        ...staffData[index],
+        status: targetStatus
+      };
+
+      saveStaffDataOnly();
+      renderStaffTable();
+      loadStaffDropdowns();
+      showToast(targetStatus === "ACTIVE" ? "Staff reactivated" : "Staff deactivated", "success");
     }
 
     function renderWorkTable() {
@@ -1042,26 +1168,41 @@ async function loadStaffFromServer() {
     }
 
     function loadStaffDropdowns() {
+      staffData = normalizeStaffData(staffData);
       const filter = document.getElementById("attendanceFilterName");
       if (filter) {
         filter.innerHTML = '<option value="">Select Staff</option>';
         staffData.forEach(s => {
-          filter.innerHTML += `<option value="${s.name}">${s.name}</option>`;
+          const statusLabel = isActiveStaff(s) ? "" : " (Inactive)";
+          filter.innerHTML += `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)}${statusLabel}</option>`;
         });
       }
 
-      const ids = ["workStaffName", "attendanceStaffName", "paymentStaffName", "summaryStaffName"];
+      const entryIds = ["workStaffName", "attendanceStaffName", "paymentStaffName"];
 
-      ids.forEach((id) => {
+      entryIds.forEach((id) => {
         const select = document.getElementById(id);
         if (!select) return;
 
         select.innerHTML = '<option value="">Select Staff</option>';
 
-        staffData.forEach((staff) => {
-          select.innerHTML += `<option value="${staff.name}">${staff.name}</option>`;
+        staffData.filter(isActiveStaff).forEach((staff) => {
+          select.innerHTML += `<option value="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}</option>`;
         });
       });
+
+      const summarySelect = document.getElementById("summaryStaffName");
+      if (summarySelect) {
+        const oldValue = summarySelect.value || "";
+        summarySelect.innerHTML = '<option value="">Select Staff</option>';
+        staffData.forEach((staff) => {
+          const statusLabel = isActiveStaff(staff) ? "" : " (Inactive)";
+          summarySelect.innerHTML += `<option value="${escapeHtml(staff.name)}">${escapeHtml(staff.name)}${statusLabel}</option>`;
+        });
+        if ([...summarySelect.options].some((option) => option.value === oldValue)) {
+          summarySelect.value = oldValue;
+        }
+      }
     }
 
     function updateStaffSummary() {
@@ -1199,6 +1340,8 @@ async function loadStaffFromServer() {
 
     window.addEventListener("load", function () {
       
+      staffData = normalizeStaffData(staffData);
+      saveStaffDataOnly();
       workData = JSON.parse(localStorage.getItem(companyScopedKey("workData"))) || [];
       attendanceData = JSON.parse(localStorage.getItem(companyScopedKey("attendanceData"))) || [];
       paymentData = JSON.parse(localStorage.getItem(companyScopedKey("paymentData"))) || [];
