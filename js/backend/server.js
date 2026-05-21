@@ -2786,6 +2786,80 @@ async function resolveOperationalBranchScope(connection, access, requestedBranch
   };
 }
 
+async function resolveStockCreationBranch(connection, access, req = {}) {
+  if (!access?.ok) return access;
+
+  if (access.isBranchLocked) {
+    if (!access.userBranchId) {
+      return {
+        ok: false,
+        status: 403,
+        message: "Your account is not assigned to a branch"
+      };
+    }
+
+    return {
+      ok: true,
+      branchId: Number(access.userBranchId),
+      source: "USER_BRANCH"
+    };
+  }
+
+  const requestedBranchId = getRequestedBranchScopeValue(req);
+  if (requestedBranchId !== null) {
+    const [rows] = await connection.query(
+      `
+      SELECT id
+      FROM branches
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      `,
+      [requestedBranchId, access.companyScope]
+    );
+
+    if (!rows.length) {
+      return {
+        ok: false,
+        status: 400,
+        message: "Selected branch was not found in this company"
+      };
+    }
+
+    return {
+      ok: true,
+      branchId: requestedBranchId,
+      source: "REQUESTED_BRANCH"
+    };
+  }
+
+  const [mainRows] = await connection.query(
+    `
+    SELECT id
+    FROM branches
+    WHERE company_id = ?
+      AND UPPER(TRIM(branch_code)) = 'MAIN'
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [access.companyScope]
+  );
+
+  if (!mainRows.length) {
+    return {
+      ok: false,
+      status: 400,
+      message: "Main branch is not configured for this company"
+    };
+  }
+
+  return {
+    ok: true,
+    branchId: Number(mainRows[0].id),
+    source: "MAIN_BRANCH"
+  };
+}
+
 function appendOperationalStockVisibilityFilter(whereParts, {
   alias = "",
   includeSold = false,
@@ -4808,7 +4882,7 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "PROCESS", pattern: /^\/process(?:\.html)?$/i },
   { moduleKey: "PROCESS", pattern: /^\/process(?:\/|$)/i },
   { moduleKey: "STICKER", pattern: /^\/sticker(?:\.html)?$/i },
-  { moduleKey: "STICKER", pattern: /^\/(?:addSticker|updateSticker|deleteSticker|restoreSticker|getSticker)(?:\/|$)/i },
+  { moduleKey: "STICKER", pattern: /^\/(?:addSticker|addStickersBulk|updateSticker|deleteSticker|restoreSticker|getSticker)(?:\/|$)/i },
   { moduleKey: "STOCK", pattern: /^\/stock(?:\.html)?$/i },
   { moduleKey: "STOCK", pattern: /^\/getStock$/i },
   { moduleKey: "BRANCH", pattern: /^\/branch-management(?:\.html)?$/i },
@@ -15364,15 +15438,295 @@ app.get("/materialStock/summary", authMiddleware, async (req, res) => {
   }
 });
 
+function createStickerBulkError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  error.statusCode = status;
+  error.isStickerBulkError = true;
+  return error;
+}
+
+function normalizeStickerSaveItem(item = {}, index = 0) {
+  const rowLabel = `Sticker row ${index + 1}`;
+  const serial = String(item.serial ?? "").trim();
+  const productName = String(item.productName ?? item.product_name ?? "").trim();
+  const purity = String(item.purity ?? "").trim();
+  const sku = String(item.sku ?? "").trim();
+  const mm = String(item.mm ?? "").trim();
+  const size = String(item.size ?? "").trim();
+  const lot = String(item.lot ?? item.lot_number ?? "").trim();
+  const metalType = String(item.metalType ?? item.metal_type ?? "").trim();
+  const processType = String(item.processType ?? item.process_type ?? "").trim();
+  const barcode = String(item.barcode ?? "").trim();
+
+  if (!serial || !productName || !purity || !sku || !size || !lot || !barcode || !hasProvidedValue(item.weight)) {
+    throw createStickerBulkError(`${rowLabel}: Serial, product, purity, SKU, size, weight, lot, and barcode are required`);
+  }
+
+  const parsedWeight = parseRequiredNumber(item.weight, `${rowLabel} weight`);
+  if (!parsedWeight.ok || parsedWeight.value <= 0) {
+    throw createStickerBulkError(`${rowLabel}: ${parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message}`);
+  }
+
+  const qtyProvided = hasProvidedValue(item.qty);
+  const parsedQty = parseOptionalNumber(item.qty, `${rowLabel} quantity`, 1);
+  if (!parsedQty.ok || parsedQty.value <= 0) {
+    throw createStickerBulkError(`${rowLabel}: ${parsedQty.ok ? "Sticker quantity must be greater than zero" : parsedQty.message}`);
+  }
+
+  return {
+    index,
+    rowLabel,
+    serial,
+    productName,
+    purity,
+    sku,
+    mm,
+    size,
+    weight: Number(format3(parsedWeight.value)),
+    qty: parsedQty.value,
+    qtyProvided,
+    lot,
+    metalType,
+    processType,
+    barcode,
+    normalizedBarcode: normalizeBarcodeForComparison(barcode)
+  };
+}
+
+async function validateStickerSaveItemAgainstStock(connection, companyId, item) {
+  await ensureSingleStockBarcode(companyId, item.barcode, connection);
+
+  const [dupLotSerial] = await connection.query(
+    `
+    SELECT id FROM stock
+    WHERE lot_number = ?
+      AND serial = ?
+      AND company_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [item.lot, item.serial, companyId]
+  );
+
+  if (dupLotSerial.length > 0) {
+    throw createStickerBulkError(`${item.rowLabel}: Serial ${item.serial} already exists in lot ${item.lot}`);
+  }
+
+  const [dupBarcode] = await connection.query(
+    `
+    SELECT id FROM stock
+    WHERE UPPER(TRIM(barcode)) = ?
+      AND company_id = ?
+      ${getSellableStockFilterSql()}
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [item.normalizedBarcode, companyId]
+  );
+
+  if (dupBarcode.length > 0) {
+    throw createStickerBulkError(`${item.rowLabel}: Barcode ${item.barcode} already exists`);
+  }
+}
+
+async function insertStickerStockRow(connection, item, {
+  companyId,
+  userId,
+  branchId,
+  processLot
+}) {
+  const isManualStickerLot = isManualProcessLot(processLot);
+
+  await connection.query(
+    `
+    INSERT INTO stock (
+      serial,
+      product_name,
+      purity,
+      sku,
+      mm,
+      size,
+      weight,
+      qty,
+      lot_number,
+      barcode,
+      metal_type,
+      process_type,
+      source,
+      manual_lot_id,
+      status,
+      stock_state,
+      current_branch_id,
+      company_id,
+      created_by,
+      deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      item.serial,
+      item.productName,
+      item.purity,
+      item.sku,
+      item.mm,
+      item.size,
+      item.weight,
+      item.qty,
+      item.lot,
+      item.barcode,
+      item.metalType,
+      item.processType,
+      isManualStickerLot ? "MANUAL_ENTRY" : "",
+      isManualStickerLot ? Number(processLot.id || 0) || null : null,
+      "IN_STOCK",
+      "IN_STOCK",
+      branchId,
+      companyId,
+      userId,
+      null
+    ]
+  );
+}
+
 /* =========================
    ADD STICKER
 ========================= */
+app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const items = Array.isArray(req.body?.items)
+      ? req.body.items
+      : Array.isArray(req.body?.stickers)
+        ? req.body.stickers
+        : [];
+
+    if (!items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one sticker item is required"
+      });
+    }
+
+    if (items.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "A maximum of 500 sticker items can be saved at once"
+      });
+    }
+
+    const finalCompanyId = access.companyScope;
+    const finalUserId = access.actingUserId ?? getRequestedUserId(req);
+    const normalizedItems = items.map((item, index) => normalizeStickerSaveItem(item, index));
+    const seenBarcodes = new Map();
+    const seenLotSerials = new Map();
+    const lotTotals = new Map();
+
+    normalizedItems.forEach((item) => {
+      if (seenBarcodes.has(item.normalizedBarcode)) {
+        throw createStickerBulkError(`${item.rowLabel}: Duplicate barcode ${item.barcode} in this save batch`);
+      }
+      seenBarcodes.set(item.normalizedBarcode, item.index);
+
+      const lotSerialKey = `${item.lot}\u0000${item.serial}`;
+      if (seenLotSerials.has(lotSerialKey)) {
+        throw createStickerBulkError(`${item.rowLabel}: Duplicate serial ${item.serial} in lot ${item.lot} in this save batch`);
+      }
+      seenLotSerials.set(lotSerialKey, item.index);
+
+      const lotKey = normalizeProcessLotNo(item.lot);
+      const total = lotTotals.get(lotKey) || {
+        lot: item.lot,
+        weight: 0,
+        qty: 0,
+        qtyProvided: true
+      };
+      total.weight += item.weight;
+      total.qty += item.qty;
+      total.qtyProvided = total.qtyProvided && item.qtyProvided;
+      lotTotals.set(lotKey, total);
+    });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const stockBranch = await resolveStockCreationBranch(connection, access, req);
+    if (!stockBranch.ok) {
+      throw createStickerBulkError(stockBranch.message || "Stock branch could not be resolved", stockBranch.status || 400);
+    }
+
+    for (const item of normalizedItems) {
+      await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item);
+    }
+
+    for (const total of lotTotals.values()) {
+      const stickerLimit = await validateStickerAgainstProcessOutput(
+        connection,
+        finalCompanyId,
+        total.lot,
+        Number(format3(total.weight)),
+        total.qty,
+        null,
+        total.qtyProvided
+      );
+      if (!stickerLimit.ok) {
+        throw createStickerBulkError(stickerLimit.message);
+      }
+    }
+
+    const processLotByLot = new Map();
+    for (const item of normalizedItems) {
+      const lotKey = normalizeProcessLotNo(item.lot);
+      if (!processLotByLot.has(lotKey)) {
+        processLotByLot.set(lotKey, await getProcessLotForSteps(connection, finalCompanyId, item.lot));
+      }
+      await insertStickerStockRow(connection, item, {
+        companyId: finalCompanyId,
+        userId: finalUserId,
+        branchId: stockBranch.branchId,
+        processLot: processLotByLot.get(lotKey)
+      });
+    }
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: `${normalizedItems.length} sticker${normalizedItems.length === 1 ? "" : "s"} saved successfully`,
+      savedCount: normalizedItems.length,
+      branchId: stockBranch.branchId
+    });
+  } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Bulk add stickers error:", err);
+    return res.status(err?.isStickerBulkError ? Number(err.status || err.statusCode || 400) : getBarcodeSafetyStatus(err)).json({
+      success: false,
+      message: err?.isStickerBulkError ? err.message : getBarcodeSafetyMessage(err, "Bulk sticker save failed"),
+      error: getErrorDetail(err)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -15397,6 +15751,14 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
     const finalCompanyId = access.companyScope;
     const finalUserId = access.actingUserId ?? getRequestedUserId(req);
+    const stockBranch = await resolveStockCreationBranch(pool, access, req);
+
+    if (!stockBranch.ok) {
+      return res.status(stockBranch.status || 400).json({
+        success: false,
+        message: stockBranch.message || "Stock branch could not be resolved"
+      });
+    }
 
     if (!serial || !productName || !purity || !sku || !size || !weight || !lot || !barcode) {
       return res.json({
@@ -15501,10 +15863,12 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         source,
         manual_lot_id,
         status,
+        stock_state,
+        current_branch_id,
         company_id,
         created_by,
         deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cleanSerial,
@@ -15522,6 +15886,8 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         isManualStickerLot ? "MANUAL_ENTRY" : "",
         isManualStickerLot ? Number(stickerProcessLot.id || 0) || null : null,
         "IN_STOCK",
+        "IN_STOCK",
+        stockBranch.branchId,
         finalCompanyId,
         finalUserId,
         null

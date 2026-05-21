@@ -601,7 +601,7 @@
             </div>
 
             <div class="print-action-row">
-              <button class="primary-btn save-btn" type="button" onclick="savePendingToServer()">Save All</button>
+              <button id="saveAllStickersBtn" class="primary-btn save-btn" type="button" onclick="savePendingToServer()">Save All</button>
               <button class="primary-btn" type="button" onclick="printStickerSheet()">Print Sticker</button>
             </div>
 
@@ -1532,8 +1532,13 @@
           }
         }
 
-        for (const item of unsavedItems) {
-          const payload = {
+        const saveButton = document.getElementById("saveAllStickersBtn");
+        if (saveButton) {
+          saveButton.disabled = true;
+          saveButton.textContent = "Saving...";
+        }
+
+        const items = unsavedItems.map((item) => ({
             serial: item.serial,
             productName: item.product_name || item.productName || "",
             purity: item.purity || "",
@@ -1547,20 +1552,25 @@
             barcode: item.barcode || "",
             companyId: companyId,
             userId: getCurrentUserId()
-          };
+        }));
 
-          const res = await fetch(`${API_BASE}/addSticker`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
+        const payload = {
+          companyId: companyId,
+          userId: getCurrentUserId(),
+          items
+        };
 
-          const result = await res.json();
+        const res = await fetch(`${API_BASE}/addStickersBulk`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-          if (!result.success) {
-      showToast(result.message || "Some items could not be saved.", "error");
-            return;
-          }
+        const result = await res.json();
+
+        if (!res.ok || !result.success) {
+      showToast(result.message || "No stickers were saved.", "error");
+          return;
         }
 
         pendingStickerItems = pendingStickerItems.map(item =>
@@ -1577,6 +1587,12 @@
       } catch (err) {
         console.log("Bulk save error:", err);
         showToast("Server save error", "error");
+      } finally {
+        const saveButton = document.getElementById("saveAllStickersBtn");
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.textContent = "Save All";
+        }
       }
     }
 
