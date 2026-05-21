@@ -23878,6 +23878,13 @@ app.post("/branches/create-with-login", authMiddleware, async (req, res) => {
       });
     }
 
+    if (cleanPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters"
+      });
+    }
+
     const branch = validation.branch;
     connection = await pool.getConnection();
     await connection.beginTransaction();

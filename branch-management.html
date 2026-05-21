@@ -43,6 +43,10 @@
     .optional-login-toggle input { width: 18px; height: 18px; accent-color: #bb8134; }
     .optional-login-fields { display: none; margin-top: 12px; }
     .optional-login-fields.show { display: grid; }
+    .password-wrap { position: relative; display: flex; align-items: center; }
+    .password-wrap input { padding-right: 44px; }
+    .password-toggle { position: absolute; right: 6px; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: #64748b; cursor: pointer; }
+    .password-toggle:disabled { cursor: not-allowed; opacity: .5; }
     .assignment-grid { display: grid; grid-template-columns: minmax(230px, 320px) 1fr; gap: 14px; align-items: end; margin-bottom: 14px; }
     .empty-state { padding: 22px; color: #64748b; text-align: center; }
     @media (max-width: 1040px) { .branch-shell { grid-template-columns: 1fr; } }
@@ -85,7 +89,20 @@
                   <div class="optional-login-fields form-grid" id="branchLoginFields">
                     <div class="field"><label for="branchLoginName">Staff Name</label><input id="branchLoginName" placeholder="Staff name"></div>
                     <div class="field"><label for="branchLoginEmail">Email</label><input id="branchLoginEmail" type="email" placeholder="staff@example.com"></div>
-                    <div class="field"><label for="branchLoginPassword">Password</label><input id="branchLoginPassword" type="password" placeholder="Create password"></div>
+                    <div class="field">
+                      <label for="branchLoginPassword">Password</label>
+                      <div class="password-wrap">
+                        <input id="branchLoginPassword" type="password" placeholder="Create password" autocomplete="new-password">
+                        <button id="branchLoginPasswordToggle" class="password-toggle" type="button" onclick="toggleBranchLoginPasswordVisibility('branchLoginPassword', 'branchLoginPasswordToggle')" title="Show password" aria-label="Show password"><i class="fas fa-eye"></i></button>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label for="branchLoginConfirmPassword">Confirm Password</label>
+                      <div class="password-wrap">
+                        <input id="branchLoginConfirmPassword" type="password" placeholder="Confirm password" autocomplete="new-password">
+                        <button id="branchLoginConfirmPasswordToggle" class="password-toggle" type="button" onclick="toggleBranchLoginPasswordVisibility('branchLoginConfirmPassword', 'branchLoginConfirmPasswordToggle')" title="Show confirm password" aria-label="Show confirm password"><i class="fas fa-eye"></i></button>
+                      </div>
+                    </div>
                     <div class="field">
                       <label for="branchLoginRole">Role</label>
                       <select id="branchLoginRole">
@@ -153,7 +170,7 @@
     let canMutate = false;
 
     const branchFields = ["branchName", "branchCode", "branchType", "branchAddress", "contactName", "contactPhone", "branchStatus"];
-    const branchLoginFields = ["createBranchLogin", "branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginRole"];
+    const branchLoginFields = ["createBranchLogin", "branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginConfirmPassword", "branchLoginPasswordToggle", "branchLoginConfirmPasswordToggle", "branchLoginRole"];
     const quickBranchLoginRoles = ["Branch Manager", "Billing", "Stock", "Sticker", "Process", "Invoice"];
 
     function notify(message, type = "info") {
@@ -240,18 +257,63 @@
         staff_name: document.getElementById("branchLoginName").value.trim(),
         email: document.getElementById("branchLoginEmail").value.trim().toLowerCase(),
         password: document.getElementById("branchLoginPassword").value.trim(),
+        confirm_password: document.getElementById("branchLoginConfirmPassword").value.trim(),
         role: document.getElementById("branchLoginRole").value
       };
+    }
+
+    function toggleBranchLoginPasswordVisibility(inputId, buttonId) {
+      const input = document.getElementById(inputId);
+      const button = document.getElementById(buttonId);
+      if (!input || !button || input.disabled) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.title = show ? "Hide password" : "Show password";
+      button.setAttribute("aria-label", button.title);
+      button.innerHTML = `<i class="fas ${show ? "fa-eye-slash" : "fa-eye"}"></i>`;
+    }
+
+    function resetBranchLoginPasswordVisibility() {
+      [
+        ["branchLoginPassword", "branchLoginPasswordToggle"],
+        ["branchLoginConfirmPassword", "branchLoginConfirmPasswordToggle"]
+      ].forEach(([inputId, buttonId]) => {
+        const input = document.getElementById(inputId);
+        const button = document.getElementById(buttonId);
+        if (input) input.type = "password";
+        if (button) {
+          button.title = inputId === "branchLoginConfirmPassword" ? "Show confirm password" : "Show password";
+          button.setAttribute("aria-label", button.title);
+          button.innerHTML = `<i class="fas fa-eye"></i>`;
+        }
+      });
+    }
+
+    function validateBranchLoginPayload(login) {
+      if (!login.staff_name || !login.email || !login.password || !login.confirm_password || !login.role) {
+        return "Staff name, email, password, confirm password, and role are required";
+      }
+      if (login.password.length < 8) {
+        return "Password must be at least 8 characters";
+      }
+      if (login.password !== login.confirm_password) {
+        return "Password and confirm password do not match";
+      }
+      if (!quickBranchLoginRoles.includes(login.role)) {
+        return "Only Branch Manager, Billing, Stock, Sticker, Process, or Invoice roles are allowed here";
+      }
+      return "";
     }
 
     function toggleBranchLoginSection() {
       const enabled = isBranchLoginEnabled();
       const fields = document.getElementById("branchLoginFields");
       if (fields) fields.classList.toggle("show", enabled);
-      ["branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginRole"].forEach((id) => {
+      ["branchLoginName", "branchLoginEmail", "branchLoginPassword", "branchLoginConfirmPassword", "branchLoginPasswordToggle", "branchLoginConfirmPasswordToggle", "branchLoginRole"].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.disabled = !canMutate || !enabled;
       });
+      if (!enabled) resetBranchLoginPasswordVisibility();
       const saveBtn = document.getElementById("saveBranchBtn");
       if (saveBtn && !editingBranchId) {
         saveBtn.innerHTML = enabled
@@ -265,7 +327,9 @@
       document.getElementById("branchLoginName").value = "";
       document.getElementById("branchLoginEmail").value = "";
       document.getElementById("branchLoginPassword").value = "";
+      document.getElementById("branchLoginConfirmPassword").value = "";
       document.getElementById("branchLoginRole").value = "";
+      resetBranchLoginPasswordVisibility();
       toggleBranchLoginSection();
     }
 
@@ -366,13 +430,14 @@
         const createLogin = isBranchLoginEnabled();
         if (createLogin) {
           const login = getBranchLoginPayload();
-          if (!login.staff_name || !login.email || !login.password || !login.role) {
-            return notify("Staff name, email, password, and role are required", "warning");
-          }
-          if (!quickBranchLoginRoles.includes(login.role)) {
-            return notify("Only Branch Manager, Billing, Stock, Sticker, Process, or Invoice roles are allowed here", "error");
-          }
-          payload.login = login;
+          const loginError = validateBranchLoginPayload(login);
+          if (loginError) return notify(loginError, "warning");
+          payload.login = {
+            staff_name: login.staff_name,
+            email: login.email,
+            password: login.password,
+            role: login.role
+          };
         }
 
         const path = editingBranchId ? `/branches/${editingBranchId}` : createLogin ? "/branches/create-with-login" : "/branches";
