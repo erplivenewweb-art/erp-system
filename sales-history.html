@@ -140,6 +140,15 @@
       background: #fecaca;
     }
 
+    .preview-btn {
+      background: #ecfeff;
+      color: #0e7490;
+    }
+
+    .preview-btn:hover {
+      background: #cffafe;
+    }
+
     .action-stack {
       display: inline-flex;
       align-items: center;
@@ -216,6 +225,73 @@
       font-weight: 800;
       color: #166534;
       white-space: nowrap;
+    }
+
+    .cancel-preview-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 14px;
+    }
+
+    .cancel-preview-status.ok {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .cancel-preview-status.blocked {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .cancel-preview-section {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+
+    .cancel-preview-section h4 {
+      margin: 0 0 10px;
+      color: #0f172a;
+    }
+
+    .cancel-preview-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #334155;
+      line-height: 1.6;
+    }
+
+    .cancel-preview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .cancel-preview-kv {
+      padding: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .cancel-preview-kv span {
+      display: block;
+      color: #64748b;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .cancel-preview-kv strong {
+      color: #0f172a;
+      word-break: break-word;
     }
 
     @media screen and (max-width: 900px) {
@@ -578,11 +654,25 @@
     </div>
   </div>
 
+  <div id="saleCancelPreviewModal" class="sale-modal">
+    <div class="sale-modal-box" style="width:min(980px, 100%);">
+      <div class="sale-modal-header">
+        <h3>Cancel Preview</h3>
+        <button type="button" class="sale-close-btn" onclick="closeSaleCancelPreviewModal()">&times;</button>
+      </div>
+
+      <div class="sale-modal-body" id="saleCancelPreviewBody">
+        <div class="empty-box">Load an invoice preview to inspect cancellation safety.</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.ERP_API_BASE;
     const SALES_PAGE_LIMIT = 100;
     let salesHistoryData = [];
     let activeSalePaymentRecord = null;
+    let activeSaleCancelPreviewData = null;
     let currentSalesViewMode = "ACTIVE";
     let salesCurrentPage = 1;
     let salesHasNextPage = false;
@@ -756,6 +846,15 @@
 
     function formatMoney(value) {
       return "\u20B9 " + Number(value || 0).toFixed(2);
+    }
+
+    function safeText(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
     function normalizeText(value) {
@@ -1002,10 +1101,14 @@
         const deleteReason = item.delete_reason || item.deleteReason || "-";
 
         if (isDeletedSalesView()) {
+          const deletedStatus = String(item.status || "").trim().toUpperCase();
+          const cancelledBadge = deletedStatus === "CANCELLED"
+            ? `<span class="status-pill status-due" style="margin-left:6px;">CANCELLED</span>`
+            : "";
           return `
             <tr>
               <td>${item.id || index + 1}</td>
-              <td>${invoiceNo}</td>
+              <td>${invoiceNo}${cancelledBadge}</td>
               <td>${customer}</td>
               <td>${item.invoice_date || item.invoiceDate || ""}</td>
               <td>${totalAmount.toFixed(2)}</td>
@@ -1076,10 +1179,10 @@
                     ? `
                       <button
                         type="button"
-                        class="action-btn delete-btn"
-                        onclick="deleteSaleRecord('${escapedInvoiceNo}', ${getItemCompanyId(item) ?? "null"})"
+                        class="action-btn preview-btn"
+                        onclick="openSaleCancelPreview('${escapedInvoiceNo}', ${getItemCompanyId(item) ?? "null"})"
                       >
-                        Delete
+                        Cancel Preview
                       </button>
                     `
                     : ""
@@ -1281,6 +1384,222 @@
       document.getElementById("salePaymentModal").classList.remove("show");
     }
 
+    function renderCancelPreviewList(items, emptyText) {
+      const rows = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (!rows.length) return `<div class="action-empty">${safeText(emptyText || "None")}</div>`;
+      return `<ul class="cancel-preview-list">${rows.map((item) => `<li>${safeText(item)}</li>`).join("")}</ul>`;
+    }
+
+    function renderCancelPreviewData(data) {
+      const body = document.getElementById("saleCancelPreviewBody");
+      if (!body) return;
+
+      const sale = data?.saleSummary || {};
+      const stockImpact = Array.isArray(data?.stockImpact) ? data.stockImpact : [];
+      const ledger = data?.ledgerImpact || {};
+      const cash = ledger.cash || {};
+      const linkedTransactions = Array.isArray(ledger.linkedTransactions) ? ledger.linkedTransactions : [];
+      const metalPreview = Array.isArray(ledger?.metal?.reversalPreview) ? ledger.metal.reversalPreview : [];
+      const blockingReasons = Array.isArray(data?.blockingReasons) ? data.blockingReasons : [];
+      const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+      const statusClass = data?.canCancel ? "ok" : "blocked";
+      const statusText = data?.canCancel ? "Can Cancel" : "Cannot Cancel";
+
+      const stockRows = stockImpact.length
+        ? stockImpact.map((item) => `
+            <div class="cancel-preview-kv">
+              <span>${safeText(item.barcode || "-")}</span>
+              <strong>${safeText(item.currentStockStatus || "-")} -> ${item.restorePreview ? "IN_STOCK" : "Not restorable"}</strong>
+              <div style="margin-top:6px;color:#64748b;">Branch: ${safeText(item.currentBranchId ?? "-")} | Lot: ${safeText(item.lotNumber || "-")}</div>
+              ${
+                Array.isArray(item.blockingReasons) && item.blockingReasons.length
+                  ? `<div style="margin-top:6px;color:#991b1b;">${safeText(item.blockingReasons.join(", "))}</div>`
+                  : ""
+              }
+            </div>
+          `).join("")
+        : `<div class="action-empty">No stock rows found</div>`;
+
+      const transactionRows = linkedTransactions.length
+        ? linkedTransactions.map((txn) => `
+            <div class="cancel-preview-kv">
+              <span>${safeText(txn.transactionType || "-")}</span>
+              <strong>${safeText(txn.voucherNo || txn.id || "-")}</strong>
+              <div style="margin-top:6px;color:#64748b;">${safeText(txn.paymentMode || "-")} | ${safeText(txn.paymentStatus || txn.status || "-")}</div>
+            </div>
+          `).join("")
+        : `<div class="action-empty">No linked transactions found</div>`;
+
+      const metalRows = metalPreview.length
+        ? metalPreview.map((row) => `
+            <div class="cancel-preview-kv">
+              <span>${safeText(row.metalType || "-")}</span>
+              <strong>Fine in->out: ${Number(row.fineInToOut || 0).toFixed(3)}g</strong>
+              <div style="margin-top:6px;color:#64748b;">Gross in->out: ${Number(row.grossInToOut || 0).toFixed(3)}g</div>
+            </div>
+          `).join("")
+        : `<div class="action-empty">No metal ledger rows found</div>`;
+
+      body.innerHTML = `
+        <div class="cancel-preview-status ${statusClass}">
+          <i class="fas ${data?.canCancel ? "fa-circle-check" : "fa-triangle-exclamation"}"></i>
+          ${statusText}
+        </div>
+
+        <div class="cancel-preview-grid">
+          <div class="cancel-preview-kv"><span>Invoice</span><strong>${safeText(data?.invoiceNumber || sale.invoiceNumber || "-")}</strong></div>
+          <div class="cancel-preview-kv"><span>Customer</span><strong>${safeText(sale.customerName || "-")}</strong></div>
+          <div class="cancel-preview-kv"><span>Total</span><strong>${formatMoney(sale.totalAmount || 0)}</strong></div>
+          <div class="cancel-preview-kv"><span>Paid / Due</span><strong>${formatMoney(sale.paidAmount || 0)} / ${formatMoney(sale.dueAmount || 0)}</strong></div>
+        </div>
+
+        <div class="cancel-preview-section">
+          <h4>Blocking Reasons</h4>
+          ${renderCancelPreviewList(blockingReasons, "No blocking reasons found")}
+        </div>
+
+        <div class="cancel-preview-section">
+          <h4>Warnings</h4>
+          ${renderCancelPreviewList(warnings, "No warnings found")}
+        </div>
+
+        <div class="cancel-preview-section">
+          <h4>Stock Restore Preview</h4>
+          <div class="cancel-preview-grid">${stockRows}</div>
+        </div>
+
+        <div class="cancel-preview-section">
+          <h4>Ledger Reversal Preview</h4>
+          <div class="cancel-preview-grid">
+            <div class="cancel-preview-kv"><span>Cash Debit To Credit</span><strong>${formatMoney(cash?.reversalPreview?.debitToCredit || 0)}</strong></div>
+            <div class="cancel-preview-kv"><span>Cash Credit To Debit</span><strong>${formatMoney(cash?.reversalPreview?.creditToDebit || 0)}</strong></div>
+            <div class="cancel-preview-kv"><span>Net Receivable Impact</span><strong>${formatMoney(cash.netReceivableImpact || 0)}</strong></div>
+          </div>
+          <div class="cancel-preview-grid" style="margin-top:10px;">${metalRows}</div>
+        </div>
+
+        <div class="cancel-preview-section">
+          <h4>Linked Transactions</h4>
+          <div class="cancel-preview-grid">${transactionRows}</div>
+        </div>
+
+        ${
+          data?.canCancel
+            ? `
+              <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" class="mini-btn" onclick="closeSaleCancelPreviewModal()">Close</button>
+                <button type="button" class="action-btn delete-btn" onclick="cancelSaleFromPreview()">Cancel Invoice</button>
+              </div>
+            `
+            : ""
+        }
+      `;
+    }
+
+    async function openSaleCancelPreview(invoiceNumber, saleCompanyId = null) {
+      const cleanInvoiceNo = String(invoiceNumber || "").trim();
+      if (!cleanInvoiceNo) {
+        showToast("Invoice number missing", "error");
+        return;
+      }
+
+      const modal = document.getElementById("saleCancelPreviewModal");
+      const body = document.getElementById("saleCancelPreviewBody");
+      if (body) body.innerHTML = `<div class="empty-box">Loading cancel preview...</div>`;
+      if (modal) modal.classList.add("show");
+
+      try {
+        const companyId =
+          saleCompanyId !== null && saleCompanyId !== undefined && saleCompanyId !== "null"
+            ? Number(saleCompanyId)
+            : getCurrentCompanyId();
+        const actingUserId = getCurrentUserId();
+        const params = new URLSearchParams();
+
+        if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+          params.set("actingUserId", String(actingUserId));
+        }
+
+        if (companyId !== null && !Number.isNaN(companyId)) {
+          params.set("companyId", String(companyId));
+        }
+
+        const response = await fetch(
+          `${API_BASE}/sales-history/${encodeURIComponent(cleanInvoiceNo)}/cancel-preview${params.toString() ? `?${params.toString()}` : ""}`,
+          { cache: "no-store" }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Cancel preview failed");
+        }
+
+        activeSaleCancelPreviewData = {
+          ...result,
+          companyId
+        };
+        renderCancelPreviewData(result);
+      } catch (error) {
+        console.error("Cancel preview error:", error);
+        if (body) {
+          body.innerHTML = `<div class="empty-box">${safeText(error.message || "Cancel preview failed")}</div>`;
+        }
+        showToast(error.message || "Cancel preview failed", "error");
+      }
+    }
+
+    function closeSaleCancelPreviewModal() {
+      activeSaleCancelPreviewData = null;
+      document.getElementById("saleCancelPreviewModal").classList.remove("show");
+    }
+
+    async function cancelSaleFromPreview() {
+      if (!activeSaleCancelPreviewData?.canCancel) {
+        showToast("This invoice cannot be cancelled", "error");
+        return;
+      }
+
+      const invoiceNumber = String(activeSaleCancelPreviewData.invoiceNumber || "").trim();
+      const reason = window.prompt("Cancellation reason is required:", "");
+      if (!String(reason || "").trim()) {
+        showToast("Cancellation reason is required", "error");
+        return;
+      }
+
+      try {
+        const params = new URLSearchParams();
+        const actingUserId = getCurrentUserId();
+        const companyId = Number(activeSaleCancelPreviewData.companyId || getCurrentCompanyId());
+
+        if (actingUserId !== null && !Number.isNaN(actingUserId)) {
+          params.set("actingUserId", String(actingUserId));
+        }
+
+        if (companyId !== null && !Number.isNaN(companyId)) {
+          params.set("companyId", String(companyId));
+        }
+
+        const response = await fetch(
+          `${API_BASE}/sales-history/${encodeURIComponent(invoiceNumber)}/cancel${params.toString() ? `?${params.toString()}` : ""}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: String(reason || "").trim() })
+          }
+        );
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Cancellation failed");
+        }
+
+        closeSaleCancelPreviewModal();
+        showToast(result.message || "Invoice cancelled successfully", "success");
+        await loadSalesHistory();
+      } catch (error) {
+        console.error("Cancel invoice error:", error);
+        showToast(error.message || "Cancellation failed", "error");
+      }
+    }
+
     async function saveSalePaymentUpdate() {
       if (!activeSalePaymentRecord) {
         showToast("No sale selected", "error");
@@ -1457,11 +1776,15 @@
     window.addEventListener("click", function (e) {
       const itemsModal = document.getElementById("saleItemsModal");
       const paymentModal = document.getElementById("salePaymentModal");
+      const cancelPreviewModal = document.getElementById("saleCancelPreviewModal");
       if (e.target === itemsModal) {
         closeSaleItemsModal();
       }
       if (e.target === paymentModal) {
         closeSalePaymentModal();
+      }
+      if (e.target === cancelPreviewModal) {
+        closeSaleCancelPreviewModal();
       }
     });
 

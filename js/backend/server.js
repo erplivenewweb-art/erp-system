@@ -1086,6 +1086,48 @@ function parseOptionalNumber(value, fieldName, fallback = 0) {
   return { ok: true, value: parsed, provided: true };
 }
 
+const PROCESS_WEIGHT_TOLERANCE = 0.0005;
+const PROCESS_WEIGHT_BALANCE_MESSAGE = "Output weight plus recovery weight cannot be greater than input weight plus additive material used weight";
+
+function validateProcessStepWeightBalance({
+  inputWeight = 0,
+  outputWeight = 0,
+  recoveryWeight = 0,
+  additiveUsedWeight = 0,
+  message = PROCESS_WEIGHT_BALANCE_MESSAGE
+} = {}) {
+  const input = toNumber(inputWeight);
+  const output = toNumber(outputWeight);
+  const recovery = toNumber(recoveryWeight);
+  const additiveUsed = toNumber(additiveUsedWeight);
+  const allowedInputWeight = input + additiveUsed;
+  const balanceWeight = allowedInputWeight - output - recovery;
+
+  if (balanceWeight < -PROCESS_WEIGHT_TOLERANCE) {
+    return {
+      ok: false,
+      message,
+      inputWeight: input,
+      outputWeight: output,
+      recoveryWeight: recovery,
+      additiveUsedWeight: additiveUsed,
+      allowedInputWeight,
+      balanceWeight
+    };
+  }
+
+  return {
+    ok: true,
+    inputWeight: input,
+    outputWeight: output,
+    recoveryWeight: recovery,
+    additiveUsedWeight: additiveUsed,
+    allowedInputWeight,
+    balanceWeight,
+    lossWeight: Math.max(balanceWeight, 0)
+  };
+}
+
 function parseAdditiveMaterialPayload(body = {}) {
   const givenRaw = body.additiveGivenWeight ?? body.additive_given_weight;
   const returnedRaw = body.additiveReturnedWeight ?? body.additive_returned_weight;
@@ -1130,6 +1172,10 @@ function normalizeProcessLotNo(value) {
 
 function normalizeKarigarName(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeKarigarDisplayName(value) {
+  return String(value || "").trim();
 }
 
 function normalizeProcessName(value) {
@@ -1216,6 +1262,40 @@ function normalizeProcessStepRow(row) {
     additiveUsedWeight: toNumber(row.additiveUsedWeight ?? row.additive_used_weight),
     additive_material_label: String(row.additive_material_label || ""),
     additiveMaterialLabel: String(row.additiveMaterialLabel ?? row.additive_material_label ?? "")
+  };
+}
+
+function normalizeProcessJobSlipRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    id: Number(row.id || 0),
+    company_id: row.company_id === null || row.company_id === undefined ? null : Number(row.company_id),
+    companyId: row.company_id === null || row.company_id === undefined ? null : Number(row.company_id),
+    slipNo: String(row.slip_no || ""),
+    processLotId: row.process_lot_id === null || row.process_lot_id === undefined ? null : Number(row.process_lot_id),
+    processStepId: row.process_step_id === null || row.process_step_id === undefined ? null : Number(row.process_step_id),
+    lotNo: String(row.lot_no || ""),
+    workCategory: normalizeWorkCategory(row.work_category),
+    karigarId: row.karigar_id === null || row.karigar_id === undefined ? null : Number(row.karigar_id),
+    karigarName: String(row.karigar_name || ""),
+    rawMaterialName: String(row.raw_material_name || ""),
+    givenWeight: toNumber(row.given_weight),
+    targetProductName: String(row.target_product_name || ""),
+    targetItemWeight: toNumber(row.target_item_weight),
+    allowanceWeight: toNumber(row.allowance_weight),
+    calculationDivisor: toNumber(row.calculation_divisor),
+    expectedQty: toNumber(row.expected_qty),
+    expectedOutputWeight: toNumber(row.expected_output_weight),
+    expectedReturnLossWeight: toNumber(row.expected_return_loss_weight),
+    calculationNote: String(row.calculation_note || ""),
+    remarks: String(row.remarks || ""),
+    issuedBy: row.issued_by === null || row.issued_by === undefined ? null : Number(row.issued_by),
+    issuedAt: row.issued_at || null,
+    printedAt: row.printed_at || null,
+    createdBy: row.created_by === null || row.created_by === undefined ? null : Number(row.created_by),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
   };
 }
 
@@ -1654,14 +1734,38 @@ async function ensureProcessRecoveryStockEntry(connection, {
   createdBy,
   lotNo,
   stepId,
-  recoveryWeight
+  recoveryWeight,
+  processName = "",
+  branchId = null
 }) {
   const cleanStepId = String(stepId || "").trim();
   const cleanLotNo = normalizeProcessLotNo(lotNo);
   const safeRecoveryWeight = toNumber(recoveryWeight);
+  const normalizedProcessName = normalizeProcessName(processName || "");
+  const isCuttingRecovery = normalizedProcessName === "cutting";
+  const recoveryProductName = isCuttingRecovery
+    ? (cleanLotNo ? `Cutting Recovery (${cleanLotNo})` : "Cutting Recovery")
+    : (cleanLotNo ? `Recovery Silver (${cleanLotNo})` : "Recovery Silver");
+  const recoveryProcessType = isCuttingRecovery ? "CUTTING_RECOVERY" : "PROCESS_RECOVERY";
+  let recoveryBranchId = branchId === null || branchId === undefined || branchId === "" ? null : Number(branchId);
 
   if (!cleanStepId || safeRecoveryWeight <= 0) {
     return { inserted: false, reason: "NO_RECOVERY" };
+  }
+
+  if (!recoveryBranchId) {
+    const [branchRows] = await connection.query(
+      `
+      SELECT id
+      FROM branches
+      WHERE company_id = ?
+        AND UPPER(TRIM(branch_code)) = 'MAIN'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    recoveryBranchId = Number(branchRows[0]?.id || 0) || null;
   }
 
   const [existingRows] = await connection.query(
@@ -1670,6 +1774,7 @@ async function ensureProcessRecoveryStockEntry(connection, {
     FROM stock
     WHERE company_id = ?
       AND reference_step_id = ?
+      AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
     LIMIT 1
     `,
     [companyId, cleanStepId]
@@ -1689,29 +1794,795 @@ async function ensureProcessRecoveryStockEntry(connection, {
       qty,
       lot_number,
       status,
+      stock_state,
       source,
+      process_type,
       reference_step_id,
+      current_branch_id,
       company_id,
       created_by,
       created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `,
     [
-      cleanLotNo ? `Recovery Silver (${cleanLotNo})` : "Recovery Silver",
+      recoveryProductName,
       "RECOVERY",
       Number(safeRecoveryWeight.toFixed(3)),
       0,
       cleanLotNo,
       "IN_STOCK",
+      "IN_STOCK",
       "PROCESS_RECOVERY",
+      recoveryProcessType,
       cleanStepId,
+      recoveryBranchId,
       companyId,
       createdBy || null
     ]
   );
 
   return { inserted: true, stockId: insertResult.insertId };
+}
+
+async function getProcessStepCorrectionLock(connection, companyId, step, processLot = null, options = {}) {
+  const stepId = Number(step?.id || 0);
+  const processLotId = Number(step?.process_lot_id || step?.processLotId || 0);
+  const stepNo = Number(step?.step_no || step?.stepNo || 0);
+  const lotNo = normalizeProcessLotNo(step?.lot_no || step?.lotNo || "");
+  const status = normalizeProcessStepStatus(step?.status);
+
+  const lock = (code, reason, details = {}) => ({
+    locked: true,
+    code,
+    reason,
+    details
+  });
+
+  if (!stepId || !processLotId) {
+    return lock("INVALID_STEP", "Process step is missing lot linkage");
+  }
+
+  if (status !== "COMPLETED") {
+    return lock("STEP_NOT_COMPLETED", "Only COMPLETED process steps can be corrected");
+  }
+
+  if (processLot && normalizeProcessLotStatus(processLot.status) === "COMPLETED") {
+    return lock("LOT_COMPLETED", "Lot is already completed. Reverse or correct the lot output flow before editing this step.");
+  }
+
+  const [laterRows] = await connection.query(
+    `
+    SELECT id, step_no, status
+    FROM process_steps
+    WHERE company_id = ?
+      AND process_lot_id = ?
+      AND (
+        step_no > ?
+        OR (step_no = ? AND id > ?)
+      )
+    ORDER BY step_no ASC, id ASC
+    LIMIT 1
+    `,
+    [companyId, processLotId, stepNo, stepNo, stepId]
+  );
+
+  if (laterRows.length) {
+    const later = laterRows[0];
+    return lock(
+      "DOWNSTREAM_STEP_EXISTS",
+      `Step ${later.step_no || later.id} already exists after this step. Correct the latest step only, or use a reversal flow.`,
+      {
+        downstreamStepId: later.id,
+        downstreamStepNo: later.step_no,
+        downstreamStatus: later.status
+      }
+    );
+  }
+
+  const lastCompletedStep = await getLastCompletedProcessStep(connection, companyId, processLotId);
+  if (!lastCompletedStep || Number(lastCompletedStep.id || 0) !== stepId) {
+    return lock("NOT_LATEST_COMPLETED", "Only the latest completed step for this lot can be corrected");
+  }
+
+  const [stickerRows] = await connection.query(
+    `
+    SELECT id, barcode, status
+    FROM stock
+    WHERE company_id = ?
+      AND lot_number = ?
+      ${getSellableFinishedStockWhereSql()}
+    LIMIT 1
+    `,
+    [companyId, lotNo]
+  );
+
+  if (stickerRows.length) {
+    return lock("STICKER_OUTPUT_EXISTS", "Sticker or finished stock has already been created from this lot output", {
+      stockId: stickerRows[0].id
+    });
+  }
+
+  const [directStockRows] = await connection.query(
+    `
+    SELECT id, source, status
+    FROM stock
+    WHERE company_id = ?
+      AND manual_lot_id = ?
+      AND reference_step_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+      AND UPPER(COALESCE(source, '')) IN ('PROCESS_KDM', 'PROCESS_PIN')
+    LIMIT 1
+    `,
+    [companyId, processLotId, String(stepId)]
+  );
+
+  if (directStockRows.length) {
+    return lock("DIRECT_STOCK_MOVEMENT_EXISTS", "Stock has already been created from this completed process step", {
+      stockId: directStockRows[0].id,
+      source: directStockRows[0].source
+    });
+  }
+
+  const [recoveryInputRows] = await connection.query(
+    `
+    SELECT id, stock_id
+    FROM process_step_recovery_inputs
+    WHERE company_id = ?
+      AND process_step_id = ?
+    LIMIT 1
+    `,
+    [companyId, stepId]
+  );
+
+  if (recoveryInputRows.length) {
+    return lock("RECOVERY_INPUT_CONSUMED", "This step consumed recovery stock, so it needs a reversal workflow before correction", {
+      recoveryInputId: recoveryInputRows[0].id,
+      stockId: recoveryInputRows[0].stock_id
+    });
+  }
+
+  const [recoveryOutputRows] = await connection.query(
+    `
+    SELECT id, status, used_in_process_step_id
+    FROM stock
+    WHERE company_id = ?
+      AND reference_step_id = ?
+      AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+    ${options.forUpdateRecovery ? "FOR UPDATE" : ""}
+    `,
+    [companyId, String(stepId)]
+  );
+
+  const lockedRecoveryOutput = recoveryOutputRows.find((row) => {
+    const rowStatus = String(row.status || "IN_STOCK").trim().toUpperCase();
+    return row.used_in_process_step_id || rowStatus !== "IN_STOCK";
+  });
+
+  if (lockedRecoveryOutput) {
+    return lock("RECOVERY_OUTPUT_DEPENDENCY_EXISTS", "Recovery stock from this step has already been used or moved", {
+      stockId: lockedRecoveryOutput.id,
+      status: lockedRecoveryOutput.status,
+      usedInProcessStepId: lockedRecoveryOutput.used_in_process_step_id
+    });
+  }
+
+  const [additiveIssueRows] = await connection.query(
+    `
+    SELECT id
+    FROM process_step_additive_issues
+    WHERE company_id = ?
+      AND process_step_id = ?
+    LIMIT 1
+    `,
+    [companyId, stepId]
+  );
+
+  if (additiveIssueRows.length) {
+    return lock("ADDITIVE_STOCK_MOVEMENT_EXISTS", "KDM/Solder stock has been issued in this step, so correction needs reversal tracking first", {
+      additiveIssueId: additiveIssueRows[0].id
+    });
+  }
+
+  const [ledgerRows] = await connection.query(
+    `
+    SELECT id, status
+    FROM outside_karigar_ledger
+    WHERE company_id = ?
+      AND (issue_step_id = ? OR receive_step_id = ?)
+    LIMIT 1
+    `,
+    [companyId, stepId, stepId]
+  );
+
+  if (ledgerRows.length) {
+    return lock("OUTSIDE_KARIGAR_LEDGER_DEPENDENCY", "Outside karigar ledger is linked to this step and requires reversal before correction", {
+      ledgerId: ledgerRows[0].id,
+      status: ledgerRows[0].status
+    });
+  }
+
+  return {
+    locked: false,
+    reason: "",
+    code: "",
+    recoveryOutputStockIds: recoveryOutputRows.map((row) => Number(row.id || 0)).filter(Boolean)
+  };
+}
+
+function buildCorrectionDependencyResult(classification = "CLEAN", details = [], reason = "") {
+  const safeDetails = Array.isArray(details) ? details : [];
+  return {
+    classification: safeDetails.length ? classification : "CLEAN",
+    count: safeDetails.length,
+    reason: safeDetails.length ? reason : "",
+    details: safeDetails
+  };
+}
+
+function getStockDependencyClassification(row) {
+  const status = String(row?.status || "IN_STOCK").trim().toUpperCase();
+  return status === "IN_STOCK" ? "NEEDS_ADMIN_APPROVAL_FUTURE" : "HARD_BLOCKED";
+}
+
+async function buildProcessStepCorrectionScan(connection, companyId, step, processLot = null) {
+  const processStep = normalizeProcessStepRow(step || {});
+  const stepId = Number(processStep.id || 0);
+  const processLotId = Number(processStep.process_lot_id || processStep.processLotId || 0);
+  const stepNo = Number(processStep.step_no || processStep.stepNo || 0);
+  const lotNo = normalizeProcessLotNo(processStep.lot_no || processStep.lotNo || "");
+  const status = normalizeProcessStepStatus(processStep.status);
+  const lockReasons = [];
+
+  if (!stepId || !processLotId) {
+    lockReasons.push({
+      code: "INVALID_STEP",
+      reason: "Process step is missing lot linkage",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  if (status !== "COMPLETED") {
+    lockReasons.push({
+      code: "STEP_NOT_COMPLETED",
+      reason: "Only COMPLETED process steps can be corrected",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  const lotCompleted = Boolean(processLot && normalizeProcessLotStatus(processLot.status) === "COMPLETED");
+  if (lotCompleted) {
+    lockReasons.push({
+      code: "LOT_COMPLETED",
+      reason: "Lot is already completed",
+      classification: "NEEDS_ADMIN_APPROVAL_FUTURE"
+    });
+  }
+
+  const [downstreamRows] = await connection.query(
+    `
+    SELECT id, step_no, process_name, karigar_name, status, input_weight, output_weight, recovery_weight, output_qty, completed_at
+    FROM process_steps
+    WHERE company_id = ?
+      AND process_lot_id = ?
+      AND (
+        step_no > ?
+        OR (step_no = ? AND id > ?)
+      )
+    ORDER BY step_no ASC, id ASC
+    `,
+    [companyId, processLotId, stepNo, stepNo, stepId]
+  );
+  const downstreamSteps = downstreamRows.map((row) => ({
+    id: Number(row.id || 0),
+    stepNo: Number(row.step_no || 0),
+    processName: String(row.process_name || ""),
+    karigarName: String(row.karigar_name || ""),
+    status: normalizeProcessStepStatus(row.status),
+    inputWeight: toNumber(row.input_weight),
+    outputWeight: toNumber(row.output_weight),
+    recoveryWeight: toNumber(row.recovery_weight),
+    outputQty: toNumber(row.output_qty),
+    completedAt: row.completed_at || null
+  }));
+  if (downstreamSteps.length) {
+    lockReasons.push({
+      code: "DOWNSTREAM_STEP_EXISTS",
+      reason: "Later process step exists",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  const lastCompletedStep = await getLastCompletedProcessStep(connection, companyId, processLotId);
+  if (status === "COMPLETED" && (!lastCompletedStep || Number(lastCompletedStep.id || 0) !== stepId)) {
+    lockReasons.push({
+      code: "NOT_LATEST_COMPLETED",
+      reason: "Only the latest completed step for this lot can be corrected",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  const [additiveRows] = await connection.query(
+    `
+    SELECT id, material_label, given_weight, returned_weight, used_weight, status, stock_item_id, issue_stock_movement_id, return_stock_movement_id, issued_at, returned_at
+    FROM process_step_additive_issues
+    WHERE company_id = ?
+      AND process_step_id = ?
+    ORDER BY id ASC
+    `,
+    [companyId, stepId]
+  );
+  const additiveIssues = additiveRows.map((row) => ({
+    id: Number(row.id || 0),
+    materialLabel: String(row.material_label || ""),
+    givenWeight: toNumber(row.given_weight),
+    returnedWeight: toNumber(row.returned_weight),
+    usedWeight: toNumber(row.used_weight),
+    status: String(row.status || ""),
+    stockItemId: row.stock_item_id === null || row.stock_item_id === undefined ? null : Number(row.stock_item_id),
+    issueStockMovementId: row.issue_stock_movement_id === null || row.issue_stock_movement_id === undefined ? null : Number(row.issue_stock_movement_id),
+    returnStockMovementId: row.return_stock_movement_id === null || row.return_stock_movement_id === undefined ? null : Number(row.return_stock_movement_id),
+    issuedAt: row.issued_at || null,
+    returnedAt: row.returned_at || null
+  }));
+  if (additiveIssues.length) {
+    lockReasons.push({
+      code: "ADDITIVE_STOCK_MOVEMENT_EXISTS",
+      reason: "KDM/Solder issued in this step",
+      classification: "AUTO_REVERSIBLE_FUTURE"
+    });
+  }
+
+  const [recoveryStockRows] = await connection.query(
+    `
+    SELECT id, product_name, weight, qty, lot_number, status, source, reference_step_id, used_in_process_step_id, created_at, updated_at
+    FROM stock
+    WHERE company_id = ?
+      AND reference_step_id = ?
+      AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+    ORDER BY id ASC
+    `,
+    [companyId, String(stepId)]
+  );
+  const recoveryStock = recoveryStockRows.map((row) => ({
+    id: Number(row.id || 0),
+    productName: String(row.product_name || ""),
+    weight: toNumber(row.weight),
+    qty: toNumber(row.qty),
+    lotNumber: String(row.lot_number || ""),
+    status: String(row.status || ""),
+    source: String(row.source || ""),
+    referenceStepId: String(row.reference_step_id || ""),
+    usedInProcessStepId: row.used_in_process_step_id === null || row.used_in_process_step_id === undefined ? null : Number(row.used_in_process_step_id),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
+  }));
+  const lockedRecoveryStock = recoveryStock.some((row) => {
+    const rowStatus = String(row.status || "IN_STOCK").trim().toUpperCase();
+    return row.usedInProcessStepId || rowStatus !== "IN_STOCK";
+  });
+  if (lockedRecoveryStock) {
+    lockReasons.push({
+      code: "RECOVERY_OUTPUT_DEPENDENCY_EXISTS",
+      reason: "Recovery stock from this step has already been used or moved",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  const [recoveryConsumedRows] = await connection.query(
+    `
+    SELECT pri.id, pri.stock_id, pri.weight, pri.created_at, s.lot_number, s.status, s.reference_step_id
+    FROM process_step_recovery_inputs pri
+    LEFT JOIN stock s
+      ON s.id = pri.stock_id
+     AND s.company_id = pri.company_id
+    WHERE pri.company_id = ?
+      AND pri.process_step_id = ?
+    ORDER BY pri.id ASC
+    `,
+    [companyId, stepId]
+  );
+  const recoveryConsumed = recoveryConsumedRows.map((row) => ({
+    id: Number(row.id || 0),
+    stockId: Number(row.stock_id || 0),
+    weight: toNumber(row.weight),
+    lotNumber: String(row.lot_number || ""),
+    stockStatus: String(row.status || ""),
+    sourceStepId: String(row.reference_step_id || ""),
+    createdAt: row.created_at || null
+  }));
+  if (recoveryConsumed.length) {
+    lockReasons.push({
+      code: "RECOVERY_INPUT_CONSUMED",
+      reason: "This step consumed recovery stock",
+      classification: "HARD_BLOCKED"
+    });
+  }
+
+  const [outsideLedgerRows] = await connection.query(
+    `
+    SELECT id, issue_step_id, receive_step_id, karigar_name, issue_weight, receive_weight, pending_weight, status, issue_date, receive_date
+    FROM outside_karigar_ledger
+    WHERE company_id = ?
+      AND (issue_step_id = ? OR receive_step_id = ?)
+    ORDER BY id ASC
+    `,
+    [companyId, stepId, stepId]
+  );
+  const outsideLedger = outsideLedgerRows.map((row) => ({
+    id: Number(row.id || 0),
+    issueStepId: row.issue_step_id === null || row.issue_step_id === undefined ? null : Number(row.issue_step_id),
+    receiveStepId: row.receive_step_id === null || row.receive_step_id === undefined ? null : Number(row.receive_step_id),
+    karigarName: String(row.karigar_name || ""),
+    issueWeight: toNumber(row.issue_weight),
+    receiveWeight: toNumber(row.receive_weight),
+    pendingWeight: toNumber(row.pending_weight),
+    status: String(row.status || ""),
+    issueDate: row.issue_date || null,
+    receiveDate: row.receive_date || null
+  }));
+  if (outsideLedger.length) {
+    lockReasons.push({
+      code: "OUTSIDE_KARIGAR_LEDGER_DEPENDENCY",
+      reason: "Outside karigar ledger is linked to this step",
+      classification: "NEEDS_ADMIN_APPROVAL_FUTURE"
+    });
+  }
+
+  const [stickerRows] = await connection.query(
+    `
+    SELECT id, barcode, product_name, category, weight, qty, status, source, stock_state, created_at
+    FROM stock
+    WHERE company_id = ?
+      AND lot_number = ?
+      ${getSellableFinishedStockWhereSql()}
+    ORDER BY id ASC
+    `,
+    [companyId, lotNo]
+  );
+  const stickerStock = stickerRows.map((row) => ({
+    id: Number(row.id || 0),
+    barcode: String(row.barcode || ""),
+    productName: String(row.product_name || ""),
+    category: String(row.category || ""),
+    weight: toNumber(row.weight),
+    qty: toNumber(row.qty),
+    status: String(row.status || ""),
+    source: String(row.source || ""),
+    stockState: String(row.stock_state || ""),
+    createdAt: row.created_at || null
+  }));
+  if (stickerStock.length) {
+    const hardSticker = stickerStock.some((row) => getStockDependencyClassification(row) === "HARD_BLOCKED");
+    lockReasons.push({
+      code: "STICKER_OUTPUT_EXISTS",
+      reason: "Sticker stock created from this lot output",
+      classification: hardSticker ? "HARD_BLOCKED" : "NEEDS_ADMIN_APPROVAL_FUTURE"
+    });
+  }
+
+  const [directStockRows] = await connection.query(
+    `
+    SELECT id, product_name, category, weight, qty, lot_number, status, source, reference_step_id, manual_lot_id, created_at
+    FROM stock
+    WHERE company_id = ?
+      AND manual_lot_id = ?
+      AND reference_step_id = ?
+      AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+      AND UPPER(COALESCE(source, '')) IN ('PROCESS_KDM', 'PROCESS_PIN')
+    ORDER BY id ASC
+    `,
+    [companyId, processLotId, String(stepId)]
+  );
+  const directStock = directStockRows.map((row) => ({
+    id: Number(row.id || 0),
+    productName: String(row.product_name || ""),
+    category: String(row.category || ""),
+    weight: toNumber(row.weight),
+    qty: toNumber(row.qty),
+    lotNumber: String(row.lot_number || ""),
+    status: String(row.status || ""),
+    source: String(row.source || ""),
+    referenceStepId: String(row.reference_step_id || ""),
+    manualLotId: row.manual_lot_id === null || row.manual_lot_id === undefined ? null : Number(row.manual_lot_id),
+    createdAt: row.created_at || null
+  }));
+  if (directStock.length) {
+    const hardDirectStock = directStock.some((row) => getStockDependencyClassification(row) === "HARD_BLOCKED");
+    lockReasons.push({
+      code: "DIRECT_STOCK_MOVEMENT_EXISTS",
+      reason: "Direct stock created from this completed process step",
+      classification: hardDirectStock ? "HARD_BLOCKED" : "NEEDS_ADMIN_APPROVAL_FUTURE"
+    });
+  }
+
+  const dependencies = {
+    downstreamSteps: buildCorrectionDependencyResult("HARD_BLOCKED", downstreamSteps, "Later process step exists"),
+    additiveIssues: buildCorrectionDependencyResult("AUTO_REVERSIBLE_FUTURE", additiveIssues, "KDM/Solder issued in this step"),
+    recoveryStock: buildCorrectionDependencyResult(
+      lockedRecoveryStock ? "HARD_BLOCKED" : "AUTO_REVERSIBLE_FUTURE",
+      recoveryStock,
+      lockedRecoveryStock ? "Recovery stock from this step has already been used or moved" : "Recovery stock created in this step"
+    ),
+    recoveryConsumed: buildCorrectionDependencyResult("HARD_BLOCKED", recoveryConsumed, "This step consumed recovery stock"),
+    outsideLedger: buildCorrectionDependencyResult("NEEDS_ADMIN_APPROVAL_FUTURE", outsideLedger, "Outside karigar ledger is linked to this step"),
+    stickerStock: buildCorrectionDependencyResult(
+      stickerStock.some((row) => getStockDependencyClassification(row) === "HARD_BLOCKED") ? "HARD_BLOCKED" : "NEEDS_ADMIN_APPROVAL_FUTURE",
+      stickerStock,
+      "Sticker stock created from this lot output"
+    ),
+    directStock: buildCorrectionDependencyResult(
+      directStock.some((row) => getStockDependencyClassification(row) === "HARD_BLOCKED") ? "HARD_BLOCKED" : "NEEDS_ADMIN_APPROVAL_FUTURE",
+      directStock,
+      "Direct stock created from this completed process step"
+    ),
+    lotCompleted
+  };
+
+  return {
+    canCorrectNow: !lockReasons.length,
+    lockReasons,
+    dependencies
+  };
+}
+
+function getProcessStepCorrectionValuesFromBody(body = {}, beforeStep = {}) {
+  const processNameRaw = body.processName ?? body.process_name;
+  const karigarNameRaw = body.karigarName ?? body.karigar_name;
+  const outputWeightRaw = body.outputWeight ?? body.output_weight;
+  const recoveryWeightRaw = body.recoveryWeight ?? body.recovery_weight;
+  const outputQtyRaw = body.outputQty ?? body.output_qty;
+  const lossReasonRaw = body.lossReason ?? body.loss_reason;
+
+  const processName = hasProvidedValue(processNameRaw)
+    ? normalizeProcessName(processNameRaw)
+    : String(beforeStep.process_name || "").trim();
+  const karigarName = hasProvidedValue(karigarNameRaw)
+    ? normalizeKarigarName(karigarNameRaw)
+    : String(beforeStep.karigar_name || "").trim();
+  const lossReason = hasProvidedValue(lossReasonRaw)
+    ? String(lossReasonRaw || "").trim()
+    : String(beforeStep.loss_reason || "").trim();
+
+  const parsedOutputWeight = parseRequiredNumber(outputWeightRaw, "Output weight");
+  if (!parsedOutputWeight.ok) return parsedOutputWeight;
+
+  const parsedRecoveryWeight = parseOptionalNumber(recoveryWeightRaw, "Recovery weight", toNumber(beforeStep.recovery_weight));
+  if (!parsedRecoveryWeight.ok) return parsedRecoveryWeight;
+
+  const parsedOutputQty = parseRequiredNumber(outputQtyRaw, "Output quantity");
+  if (!parsedOutputQty.ok) return parsedOutputQty;
+
+  const outputWeight = parsedOutputWeight.value;
+  const recoveryWeight = parsedRecoveryWeight.value;
+  const outputQty = parsedOutputQty.value;
+  const inputQty = toNumber(beforeStep.input_qty);
+
+  if (!processName) return { ok: false, message: "Process name is required" };
+  if (outputWeight < 0) return { ok: false, message: "Output weight cannot be negative" };
+  if (recoveryWeight < 0) return { ok: false, message: "Recovery weight cannot be negative" };
+  const weightValidation = validateProcessStepWeightBalance({
+    inputWeight: beforeStep.input_weight,
+    outputWeight,
+    recoveryWeight,
+    additiveUsedWeight: beforeStep.additive_used_weight
+  });
+  if (!weightValidation.ok) return weightValidation;
+  if (outputQty < 0) return { ok: false, message: "Output quantity cannot be negative" };
+  if (inputQty > 0 && outputQty > inputQty + 0.0005) {
+    return { ok: false, message: "Output quantity cannot be greater than input quantity" };
+  }
+
+  return {
+    ok: true,
+    processName,
+    karigarName,
+    outputWeight,
+    recoveryWeight,
+    outputQty,
+    lossReason,
+    lossWeight: weightValidation.lossWeight,
+    lossQty: Math.max(0, inputQty - outputQty)
+  };
+}
+
+function getNonReversibleCorrectionScanReasons(scan = {}) {
+  const reasons = [];
+  const dependencies = scan.dependencies || {};
+  const addReason = (message) => reasons.push(message);
+
+  if (dependencies.lotCompleted) addReason("Lot is already completed");
+
+  [
+    "downstreamSteps",
+    "recoveryConsumed",
+    "outsideLedger",
+    "stickerStock",
+    "directStock"
+  ].forEach((key) => {
+    const dependency = dependencies[key] || {};
+    if (Number(dependency.count || 0) > 0) {
+      addReason(dependency.reason || `${key} dependency exists`);
+    }
+  });
+
+  const additiveIssues = dependencies.additiveIssues?.details || [];
+  additiveIssues.forEach((issue) => {
+    if (toNumber(issue.returnedWeight) > 0 || issue.returnStockMovementId) {
+      addReason("KDM/Solder return or adjustment already exists");
+    }
+    if (!issue.stockItemId) {
+      addReason("KDM/Solder stock item is missing");
+    }
+  });
+
+  const recoveryStock = dependencies.recoveryStock?.details || [];
+  recoveryStock.forEach((stock) => {
+    const stockStatus = String(stock.status || "IN_STOCK").trim().toUpperCase();
+    if (stockStatus !== "IN_STOCK" || stock.usedInProcessStepId) {
+      addReason("Recovery stock is no longer unused IN_STOCK");
+    }
+  });
+
+  const hardReasons = (scan.lockReasons || []).filter((reason) => {
+    const classification = String(reason.classification || "").trim().toUpperCase();
+    return classification && classification !== "AUTO_REVERSIBLE_FUTURE";
+  });
+  hardReasons.forEach((reason) => addReason(reason.reason || reason.code || "Non-reversible dependency exists"));
+
+  return [...new Set(reasons.filter(Boolean))];
+}
+
+async function insertProcessStepReversalEntry(connection, {
+  companyId,
+  batchId,
+  processLotId,
+  processStepId,
+  dependencyType,
+  entityTable,
+  entityId,
+  reversalAction,
+  classification = "AUTO_REVERSIBLE_FUTURE",
+  beforeData = null,
+  afterData = null,
+  message = "",
+  createdBy = null
+}) {
+  await connection.query(
+    `
+    INSERT INTO process_step_reversal_entries
+    (
+      company_id, batch_id, process_lot_id, process_step_id,
+      dependency_type, entity_table, entity_id, reversal_action,
+      classification, before_data, after_data, status, message, created_by, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPLIED', ?, ?, NOW())
+    `,
+    [
+      companyId,
+      batchId,
+      processLotId || null,
+      processStepId,
+      dependencyType,
+      entityTable,
+      String(entityId || ""),
+      reversalAction,
+      classification,
+      safeJsonStringify(sanitizeAuditPayload(beforeData)),
+      safeJsonStringify(sanitizeAuditPayload(afterData)),
+      message,
+      createdBy || null
+    ]
+  );
+}
+
+async function syncCorrectedRecoveryStockEntry(connection, {
+  companyId,
+  createdBy,
+  lotNo,
+  stepId,
+  recoveryWeight,
+  processName = "",
+  branchId = null
+}) {
+  const safeRecoveryWeight = toNumber(recoveryWeight);
+  const cleanStepId = String(stepId || "").trim();
+  const cleanLotNo = normalizeProcessLotNo(lotNo);
+  const normalizedProcessName = normalizeProcessName(processName || "");
+  const isCuttingRecovery = normalizedProcessName === "cutting";
+  const recoveryProductName = isCuttingRecovery
+    ? (cleanLotNo ? `Cutting Recovery (${cleanLotNo})` : "Cutting Recovery")
+    : (cleanLotNo ? `Recovery Silver (${cleanLotNo})` : "Recovery Silver");
+  const recoveryProcessType = isCuttingRecovery ? "CUTTING_RECOVERY" : "PROCESS_RECOVERY";
+  let recoveryBranchId = branchId === null || branchId === undefined || branchId === "" ? null : Number(branchId);
+
+  if (!recoveryBranchId) {
+    const [branchRows] = await connection.query(
+      `
+      SELECT id
+      FROM branches
+      WHERE company_id = ?
+        AND UPPER(TRIM(branch_code)) = 'MAIN'
+      ORDER BY id ASC
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    recoveryBranchId = Number(branchRows[0]?.id || 0) || null;
+  }
+
+  const [existingRows] = await connection.query(
+    `
+    SELECT id
+    FROM stock
+    WHERE company_id = ?
+      AND reference_step_id = ?
+      AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+    LIMIT 1
+    `,
+    [companyId, cleanStepId]
+  );
+
+  if (safeRecoveryWeight <= 0) {
+    if (existingRows.length) {
+      await connection.query(
+        `
+        UPDATE stock
+        SET weight = 0,
+            status = 'DELETED',
+            stock_state = 'DELETED',
+            deleted_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [companyId, existingRows[0].id]
+      );
+    }
+    return { updated: Boolean(existingRows.length), deleted: Boolean(existingRows.length) };
+  }
+
+  if (existingRows.length) {
+    await connection.query(
+      `
+      UPDATE stock
+      SET weight = ?,
+          qty = 0,
+          lot_number = ?,
+          product_name = ?,
+          category = 'RECOVERY',
+          source = 'PROCESS_RECOVERY',
+          process_type = ?,
+          status = 'IN_STOCK',
+          stock_state = 'IN_STOCK',
+          current_branch_id = COALESCE(current_branch_id, ?),
+          deleted_at = NULL
+      WHERE company_id = ?
+        AND id = ?
+      `,
+      [
+        Number(format3(safeRecoveryWeight)),
+        cleanLotNo,
+        recoveryProductName,
+        recoveryProcessType,
+        recoveryBranchId,
+        companyId,
+        existingRows[0].id
+      ]
+    );
+    return { updated: true, stockId: existingRows[0].id };
+  }
+
+  return ensureProcessRecoveryStockEntry(connection, {
+    companyId,
+    createdBy,
+    lotNo,
+    stepId,
+    recoveryWeight: safeRecoveryWeight,
+    processName,
+    branchId: recoveryBranchId
+  });
 }
 
 function normalizeExpenseRow(row) {
@@ -2081,6 +2952,45 @@ async function generateInvoiceNumberForCompany(connection, companyId, billDate, 
   );
 
   return `${cleanPrefix}-${sequenceYear}-${String(nextNumber).padStart(6, "0")}`;
+}
+
+function getKarigarJobSlipDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const yyyy = safeDate.getFullYear();
+  const mm = String(safeDate.getMonth() + 1).padStart(2, "0");
+  const dd = String(safeDate.getDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`;
+}
+
+async function generateKarigarJobSlipNo(connection, companyId, dateValue = new Date()) {
+  if (!connection || typeof connection.query !== "function") {
+    throw new Error("A transaction connection is required to generate job slip number");
+  }
+
+  const cleanCompanyId = Number(companyId || 0);
+  if (!cleanCompanyId) {
+    throw new Error("Company id is required to generate job slip number");
+  }
+
+  const dateKey = getKarigarJobSlipDateKey(dateValue);
+  const prefix = `KJS-${dateKey}-`;
+  const [rows] = await connection.query(
+    `
+    SELECT slip_no
+    FROM process_job_slips
+    WHERE company_id = ?
+      AND slip_no LIKE ?
+    ORDER BY slip_no DESC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [cleanCompanyId, `${prefix}%`]
+  );
+
+  const lastSlipNo = String(rows[0]?.slip_no || "");
+  const lastSequence = Number(lastSlipNo.slice(prefix.length)) || 0;
+  return `${prefix}${String(lastSequence + 1).padStart(4, "0")}`;
 }
 
 function buildVoucherNo(transactionType) {
@@ -5862,6 +6772,44 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await addColumnIfMissing("sales_history", "cancelled_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("sales_history", "cancelled_by", "INT DEFAULT NULL");
+  await addColumnIfMissing("sales_history", "cancellation_reason", "TEXT DEFAULT NULL");
+  await addColumnIfMissing("sales_history", "cancellation_id", "INT DEFAULT NULL");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sales_cancellations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      invoice_number VARCHAR(100) NOT NULL,
+      sale_id INT DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'PENDING',
+      reason TEXT DEFAULT NULL,
+      blocked_reason TEXT DEFAULT NULL,
+      before_snapshot JSON DEFAULT NULL,
+      after_snapshot JSON DEFAULT NULL,
+      cancelled_by INT DEFAULT NULL,
+      cancelled_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_sales_cancellations_invoice (company_id, invoice_number),
+      INDEX idx_sales_cancellations_status (company_id, status, created_at)
+    )
+  `);
+  await addColumnIfMissing("sales_cancellations", "company_id", "INT DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "invoice_number", "VARCHAR(100) DEFAULT ''");
+  await addColumnIfMissing("sales_cancellations", "sale_id", "INT DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "status", "VARCHAR(30) DEFAULT 'PENDING'");
+  await addColumnIfMissing("sales_cancellations", "reason", "TEXT DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "blocked_reason", "TEXT DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "before_snapshot", "JSON DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "after_snapshot", "JSON DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "cancelled_by", "INT DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "cancelled_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("sales_cancellations", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  await addColumnIfMissing("sales_cancellations", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  await addIndexIfMissing("sales_cancellations", "idx_sales_cancellations_invoice", "(company_id, invoice_number)");
+  await addIndexIfMissing("sales_cancellations", "idx_sales_cancellations_status", "(company_id, status, created_at)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS invoice_sequences (
@@ -5924,6 +6872,9 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await addColumnIfMissing("sales_items", "item_status", "VARCHAR(50) DEFAULT 'SOLD'");
+  await addColumnIfMissing("sales_items", "cancelled_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("sales_items", "cancelled_by", "INT DEFAULT NULL");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS branches (
@@ -6248,12 +7199,16 @@ async function ensureSchema() {
       payment_status VARCHAR(50) DEFAULT '',
       remarks TEXT DEFAULT NULL,
       note TEXT DEFAULT NULL,
+      reversal_of_transaction_id INT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       approved_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  await addColumnIfMissing("transaction_master", "reversal_of_transaction_id", "INT DEFAULT NULL");
+  await addIndexIfMissing("transaction_master", "idx_transaction_reversal_of", "(company_id, reversal_of_transaction_id)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS transaction_types (
@@ -6558,6 +7513,38 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_job_slips (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      slip_no VARCHAR(40) NOT NULL,
+      process_lot_id INT DEFAULT NULL,
+      process_step_id INT DEFAULT NULL,
+      lot_no VARCHAR(120) DEFAULT '',
+      work_category VARCHAR(40) DEFAULT 'REGULAR_SANKHA',
+      karigar_id INT DEFAULT NULL,
+      karigar_name VARCHAR(255) DEFAULT '',
+      raw_material_name VARCHAR(255) DEFAULT '',
+      given_weight DECIMAL(14,3) DEFAULT 0.000,
+      target_product_name VARCHAR(255) DEFAULT '',
+      target_item_weight DECIMAL(14,3) DEFAULT 0.000,
+      allowance_weight DECIMAL(14,3) DEFAULT 0.000,
+      calculation_divisor DECIMAL(14,3) DEFAULT 0.000,
+      expected_qty DECIMAL(14,3) DEFAULT 0.000,
+      expected_output_weight DECIMAL(14,3) DEFAULT 0.000,
+      expected_return_loss_weight DECIMAL(14,3) DEFAULT 0.000,
+      calculation_note TEXT DEFAULT NULL,
+      remarks TEXT DEFAULT NULL,
+      issued_by INT DEFAULT NULL,
+      issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      printed_at DATETIME DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_process_job_slips_company_slip_no (company_id, slip_no)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS process_additive_stock_movements (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -6569,6 +7556,48 @@ async function ensureSchema() {
       before_weight DECIMAL(14,3) DEFAULT 0.000,
       after_weight DECIMAL(14,3) DEFAULT 0.000,
       notes TEXT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_step_correction_batches (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_lot_id INT DEFAULT NULL,
+      process_step_id INT NOT NULL,
+      batch_type VARCHAR(60) DEFAULT 'REVERSE_AND_CORRECT',
+      status VARCHAR(30) DEFAULT 'APPLIED',
+      correction_reason TEXT DEFAULT NULL,
+      before_step_json JSON DEFAULT NULL,
+      after_step_json JSON DEFAULT NULL,
+      dependency_scan_json JSON DEFAULT NULL,
+      requested_by INT DEFAULT NULL,
+      approved_by INT DEFAULT NULL,
+      applied_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      applied_at DATETIME DEFAULT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_step_reversal_entries (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      batch_id INT NOT NULL,
+      process_lot_id INT DEFAULT NULL,
+      process_step_id INT NOT NULL,
+      dependency_type VARCHAR(80) DEFAULT '',
+      entity_table VARCHAR(120) DEFAULT '',
+      entity_id VARCHAR(120) DEFAULT '',
+      reversal_action VARCHAR(120) DEFAULT '',
+      classification VARCHAR(60) DEFAULT '',
+      before_data JSON DEFAULT NULL,
+      after_data JSON DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'APPLIED',
+      message TEXT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -7251,6 +8280,34 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_additive_issues", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("process_job_slips")) {
+    await addColumnIfMissing("process_job_slips", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "slip_no", "VARCHAR(40) DEFAULT ''");
+    await addColumnIfMissing("process_job_slips", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "process_step_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "lot_no", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_job_slips", "work_category", "VARCHAR(40) DEFAULT 'REGULAR_SANKHA'");
+    await addColumnIfMissing("process_job_slips", "karigar_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "karigar_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_job_slips", "raw_material_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_job_slips", "given_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "target_product_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("process_job_slips", "target_item_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "allowance_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "calculation_divisor", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "expected_qty", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "expected_output_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "expected_return_loss_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_job_slips", "calculation_note", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "remarks", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "issued_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "issued_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_job_slips", "printed_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_job_slips", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_job_slips", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("process_additive_stock_movements")) {
     await addColumnIfMissing("process_additive_stock_movements", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_additive_stock_movements", "stock_item_id", "INT DEFAULT NULL");
@@ -7263,6 +8320,42 @@ async function ensureSchema() {
     await addColumnIfMissing("process_additive_stock_movements", "notes", "TEXT DEFAULT NULL");
     await addColumnIfMissing("process_additive_stock_movements", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_additive_stock_movements", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("process_step_correction_batches")) {
+    await addColumnIfMissing("process_step_correction_batches", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "process_step_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "batch_type", "VARCHAR(60) DEFAULT 'REVERSE_AND_CORRECT'");
+    await addColumnIfMissing("process_step_correction_batches", "status", "VARCHAR(30) DEFAULT 'APPLIED'");
+    await addColumnIfMissing("process_step_correction_batches", "correction_reason", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "before_step_json", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "after_step_json", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "dependency_scan_json", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "requested_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "approved_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "applied_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_step_correction_batches", "applied_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_step_correction_batches", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("process_step_reversal_entries")) {
+    await addColumnIfMissing("process_step_reversal_entries", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "batch_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "process_step_id", "INT NOT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "dependency_type", "VARCHAR(80) DEFAULT ''");
+    await addColumnIfMissing("process_step_reversal_entries", "entity_table", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_step_reversal_entries", "entity_id", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_step_reversal_entries", "reversal_action", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("process_step_reversal_entries", "classification", "VARCHAR(60) DEFAULT ''");
+    await addColumnIfMissing("process_step_reversal_entries", "before_data", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "after_data", "JSON DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "status", "VARCHAR(30) DEFAULT 'APPLIED'");
+    await addColumnIfMissing("process_step_reversal_entries", "message", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_reversal_entries", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
   if (await tableExists("process_material_issues")) {
@@ -7709,10 +8802,28 @@ async function ensureSchema() {
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_return_movement", "(return_stock_movement_id)");
   }
 
+  if (await tableExists("process_job_slips")) {
+    await addIndexIfMissing("process_job_slips", "idx_process_job_slips_company_created", "(company_id, created_at)");
+    await addIndexIfMissing("process_job_slips", "idx_process_job_slips_lot", "(company_id, lot_no, created_at)");
+    await addIndexIfMissing("process_job_slips", "idx_process_job_slips_karigar", "(company_id, karigar_name)");
+    await addUniqueIndexIfMissing("process_job_slips", "uq_process_job_slips_company_slip_no", "(company_id, slip_no)");
+  }
+
   if (await tableExists("process_additive_stock_movements")) {
     await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_stock", "(company_id, stock_item_id)");
     await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_step", "(company_id, process_step_id)");
     await addIndexIfMissing("process_additive_stock_movements", "idx_additive_stock_movements_issue", "(additive_issue_id)");
+  }
+
+  if (await tableExists("process_step_correction_batches")) {
+    await addIndexIfMissing("process_step_correction_batches", "idx_process_correction_step", "(company_id, process_step_id)");
+    await addIndexIfMissing("process_step_correction_batches", "idx_process_correction_lot", "(company_id, process_lot_id)");
+  }
+
+  if (await tableExists("process_step_reversal_entries")) {
+    await addIndexIfMissing("process_step_reversal_entries", "idx_process_reversal_batch", "(batch_id)");
+    await addIndexIfMissing("process_step_reversal_entries", "idx_process_reversal_step", "(company_id, process_step_id)");
+    await addIndexIfMissing("process_step_reversal_entries", "idx_process_reversal_entity", "(entity_table, entity_id)");
   }
 
   if (await tableExists("process_material_issues")) {
@@ -11855,6 +12966,7 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
     const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
     const params = [];
     const whereParts = [];
+    let processLotForCorrection = null;
 
     if (companyId !== null) {
       whereParts.push("company_id = ?");
@@ -11871,6 +12983,7 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
             steps: []
           });
         }
+        processLotForCorrection = processLot;
         whereParts.push("process_lot_id = ?");
         params.push(processLot.id);
       } finally {
@@ -11892,9 +13005,28 @@ app.get("/process/steps", authMiddleware, async (req, res) => {
       params
     );
 
+    let steps = rows.map(normalizeProcessStepRow);
+    if (companyId !== null && processLotForCorrection) {
+      const connection = await pool.getConnection();
+      try {
+        steps = await Promise.all(steps.map(async (step) => {
+          const lock = await getProcessStepCorrectionLock(connection, companyId, step, processLotForCorrection);
+          return {
+            ...step,
+            correctionLocked: Boolean(lock.locked),
+            correctionLockReason: lock.reason || "",
+            correctionLockCode: lock.code || "",
+            canCorrect: !lock.locked
+          };
+        }));
+      } finally {
+        connection.release();
+      }
+    }
+
     return res.json({
       success: true,
-      steps: rows.map(normalizeProcessStepRow)
+      steps
     });
   } catch (error) {
     console.error("Get process steps error:", error);
@@ -11928,8 +13060,11 @@ app.get("/process/recovery-stock", authMiddleware, async (req, res) => {
         qty,
         lot_number,
         status,
+        stock_state,
         source,
+        process_type,
         reference_step_id,
+        current_branch_id,
         company_id,
         created_by,
         created_at,
@@ -11939,6 +13074,7 @@ app.get("/process/recovery-stock", authMiddleware, async (req, res) => {
         AND UPPER(COALESCE(category, '')) = 'RECOVERY'
         AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
         AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
         AND COALESCE(weight, 0) > 0
         AND deleted_at IS NULL
       ORDER BY created_at ASC, id ASC
@@ -13132,7 +14268,6 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const additiveReturnedWeight = additivePayload.returnedWeight;
     const additiveUsedWeight = additivePayload.usedWeight;
     const additiveMaterialLabel = additivePayload.materialLabel;
-    const allowedInputWeight = effectiveInputWeight + additiveUsedWeight;
 
     if (effectiveInputWeight <= 0) {
       await connection.rollback();
@@ -13173,14 +14308,6 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight > allowedInputWeight) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Output weight cannot be greater than input weight plus additive material used weight"
-      });
-    }
-
     let recoveryWeight = 0;
     if (recoveryProvided) {
       const parsedRecoveryWeight = parseOptionalNumber(recoveryWeightRaw, "Recovery weight");
@@ -13202,11 +14329,18 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputWeight + recoveryWeight > allowedInputWeight) {
+    const weightValidation = validateProcessStepWeightBalance({
+      inputWeight: effectiveInputWeight,
+      outputWeight,
+      recoveryWeight,
+      additiveUsedWeight
+    });
+
+    if (requestedStatus === "COMPLETED" && !weightValidation.ok) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight plus recovery weight cannot be greater than input weight plus additive material used weight"
+        message: weightValidation.message
       });
     }
 
@@ -13272,12 +14406,13 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
     const finalRecoveryWeight = finalStatus === "COMPLETED" ? recoveryWeight : 0;
-    const lossWeight = finalStatus === "COMPLETED" ? allowedInputWeight - finalOutputWeight - finalRecoveryWeight : 0;
+    const rawLossWeight = finalStatus === "COMPLETED" ? weightValidation.balanceWeight : 0;
+    const lossWeight = Math.max(rawLossWeight, 0);
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
     const warnings = [];
 
-    if (lossWeight < 0) {
+    if (rawLossWeight < -0.0005) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -13403,7 +14538,8 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       createdBy: userId,
       lotNo,
       stepId: insertResult.insertId,
-      recoveryWeight: finalRecoveryWeight
+      recoveryWeight: finalRecoveryWeight,
+      processName
     });
 
     const [savedRows] = await connection.query(
@@ -13574,13 +14710,18 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     const additiveMaterialLabel = hasIssueLedger
       ? (issueTotals.additiveMaterialLabel || additivePayload.materialLabel)
       : additivePayload.materialLabel;
-    const allowedInputWeight = step.input_weight + additiveUsedWeight;
+    const weightValidation = validateProcessStepWeightBalance({
+      inputWeight: step.input_weight,
+      outputWeight,
+      recoveryWeight,
+      additiveUsedWeight
+    });
 
-    if (outputWeight + recoveryWeight > allowedInputWeight) {
+    if (!weightValidation.ok) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output weight plus recovery weight cannot be greater than input weight plus additive material used weight"
+        message: weightValidation.message
       });
     }
 
@@ -13629,11 +14770,12 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    const lossWeight = allowedInputWeight - outputWeight - recoveryWeight;
+    const rawLossWeight = weightValidation.balanceWeight;
+    const lossWeight = weightValidation.lossWeight;
     const lossQty = step.input_qty - outputQty;
     const warnings = [];
 
-    if (lossWeight < 0) {
+    if (rawLossWeight < -0.0005) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
@@ -13692,7 +14834,8 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       createdBy: access.actingUserId,
       lotNo: step.lot_no,
       stepId,
-      recoveryWeight
+      recoveryWeight,
+      processName: step.process_name || step.processName || ""
     });
 
     const [savedRows] = await connection.query(
@@ -13726,6 +14869,790 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     return res.status(500).json({
       success: false,
       message: "Process step completion failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/process/steps/:id/correction-scan", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const stepId = Number(req.params.id || 0);
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        message: "Process step id is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    const [stepRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      `,
+      [stepId, access.companyScope]
+    );
+
+    if (!stepRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Process step not found"
+      });
+    }
+
+    const step = normalizeProcessStepRow(stepRows[0]);
+    const processLot = await getProcessLotById(connection, access.companyScope, step.process_lot_id);
+    const scan = await buildProcessStepCorrectionScan(connection, access.companyScope, step, processLot);
+
+    return res.json({
+      success: true,
+      step,
+      processLot: processLot ? normalizeProcessLotRow(processLot) : null,
+      canCorrectNow: scan.canCorrectNow,
+      lockReasons: scan.lockReasons,
+      dependencies: scan.dependencies
+    });
+  } catch (error) {
+    console.error("Process step correction scan error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process step correction scan failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const stepId = Number(req.params.id || 0);
+    const correctionReason = String(req.body.correctionReason || req.body.correction_reason || "").trim();
+
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        message: "Process step id is required"
+      });
+    }
+
+    if (!correctionReason) {
+      return res.status(400).json({
+        success: false,
+        message: "Correction reason is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [stepRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [stepId, access.companyScope]
+    );
+
+    if (!stepRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process step not found"
+      });
+    }
+
+    const beforeStep = normalizeProcessStepRow(stepRows[0]);
+    const processLot = await getProcessLotById(connection, access.companyScope, beforeStep.process_lot_id);
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available in the process workflow yet"
+      });
+    }
+
+    const scan = await buildProcessStepCorrectionScan(connection, access.companyScope, beforeStep, processLot);
+    const nonReversibleReasons = getNonReversibleCorrectionScanReasons(scan);
+    if (nonReversibleReasons.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: nonReversibleReasons[0],
+        lockReasons: nonReversibleReasons,
+        scan
+      });
+    }
+
+    const correctionValues = getProcessStepCorrectionValuesFromBody(req.body, beforeStep);
+    if (!correctionValues.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: correctionValues.message
+      });
+    }
+
+    const [batchResult] = await connection.query(
+      `
+      INSERT INTO process_step_correction_batches
+      (
+        company_id, process_lot_id, process_step_id, batch_type, status,
+        correction_reason, before_step_json, dependency_scan_json,
+        requested_by, approved_by, applied_by, created_at, applied_at
+      )
+      VALUES (?, ?, ?, 'REVERSE_AND_CORRECT', 'APPLYING', ?, ?, ?, ?, ?, ?, NOW(), NULL)
+      `,
+      [
+        access.companyScope,
+        beforeStep.process_lot_id || null,
+        stepId,
+        correctionReason,
+        safeJsonStringify(sanitizeAuditPayload(beforeStep)),
+        safeJsonStringify(sanitizeAuditPayload(scan)),
+        access.actingUserId,
+        access.actingUserId,
+        access.actingUserId
+      ]
+    );
+    const batchId = Number(batchResult.insertId || 0);
+
+    const [additiveRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_step_additive_issues
+      WHERE company_id = ?
+        AND process_step_id = ?
+      FOR UPDATE
+      `,
+      [access.companyScope, stepId]
+    );
+
+    for (const additiveRow of additiveRows) {
+      const issue = normalizeAdditiveIssueRow(additiveRow);
+      if (toNumber(issue.returnedWeight) > 0 || issue.returnStockMovementId) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "KDM/Solder return or adjustment already exists"
+        });
+      }
+
+      const materialType = normalizeAdditiveMaterialType(issue.materialLabel) || "KDM";
+      const stockItem = issue.stockItemId
+        ? await getAdditiveStockItemById(connection, access.companyScope, issue.stockItemId, materialType, { forUpdate: true })
+        : null;
+      if (!stockItem) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "KDM/Solder stock item is missing"
+        });
+      }
+
+      const beforeStock = { ...stockItem };
+      const restoreWeight = toNumber(issue.givenWeight);
+      const stockBeforeWeight = toNumber(stockItem.weight);
+      const stockAfterWeight = Number(format3(stockBeforeWeight + restoreWeight));
+
+      await connection.query(
+        `
+        UPDATE stock
+        SET weight = ?,
+            updated_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [stockAfterWeight, access.companyScope, stockItem.id]
+      );
+
+      const reversalMovementId = await createAdditiveStockMovement(connection, {
+        companyId: access.companyScope,
+        stockItemId: Number(stockItem.id || 0),
+        processStepId: stepId,
+        additiveIssueId: issue.id,
+        movementType: "ISSUE_REVERSAL",
+        weight: restoreWeight,
+        beforeWeight: stockBeforeWeight,
+        afterWeight: stockAfterWeight,
+        createdBy: access.actingUserId,
+        notes: `${materialType} reversal for correction batch ${batchId}`
+      });
+
+      await connection.query(
+        `
+        UPDATE process_step_additive_issues
+        SET returned_weight = given_weight,
+            used_weight = 0,
+            return_stock_movement_id = ?,
+            status = 'REVERSED',
+            returned_by = ?,
+            returned_at = NOW(),
+            notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE ' | ' END, ?)
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [
+          reversalMovementId,
+          access.actingUserId,
+          `Auto-reversed for correction batch ${batchId}`,
+          access.companyScope,
+          issue.id
+        ]
+      );
+
+      const [updatedIssueRows] = await connection.query(
+        `
+        SELECT *
+        FROM process_step_additive_issues
+        WHERE company_id = ?
+          AND id = ?
+        LIMIT 1
+        `,
+        [access.companyScope, issue.id]
+      );
+      const [updatedStockRows] = await connection.query(
+        `
+        SELECT *
+        FROM stock
+        WHERE company_id = ?
+          AND id = ?
+        LIMIT 1
+        `,
+        [access.companyScope, stockItem.id]
+      );
+
+      await insertProcessStepReversalEntry(connection, {
+        companyId: access.companyScope,
+        batchId,
+        processLotId: beforeStep.process_lot_id,
+        processStepId: stepId,
+        dependencyType: "ADDITIVE_ISSUE",
+        entityTable: "process_step_additive_issues",
+        entityId: issue.id,
+        reversalAction: "RESTORE_ADDITIVE_STOCK",
+        beforeData: {
+          issue,
+          stock: beforeStock
+        },
+        afterData: {
+          issue: updatedIssueRows[0] || null,
+          stock: updatedStockRows[0] || null,
+          reversalMovementId
+        },
+        message: `${materialType} stock restored by ${restoreWeight.toFixed(3)}g`,
+        createdBy: access.actingUserId
+      });
+    }
+
+    const [recoveryRows] = await connection.query(
+      `
+      SELECT *
+      FROM stock
+      WHERE company_id = ?
+        AND reference_step_id = ?
+        AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+      FOR UPDATE
+      `,
+      [access.companyScope, String(stepId)]
+    );
+
+    for (const recoveryRow of recoveryRows) {
+      const status = String(recoveryRow.status || "IN_STOCK").trim().toUpperCase();
+      if (status !== "IN_STOCK" || recoveryRow.used_in_process_step_id) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "Recovery stock is no longer unused IN_STOCK"
+        });
+      }
+
+      await connection.query(
+        `
+        UPDATE stock
+        SET weight = 0,
+            status = 'DELETED',
+            stock_state = 'DELETED',
+            deleted_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [access.companyScope, recoveryRow.id]
+      );
+
+      const [updatedRecoveryRows] = await connection.query(
+        `
+        SELECT *
+        FROM stock
+        WHERE company_id = ?
+          AND id = ?
+        LIMIT 1
+        `,
+        [access.companyScope, recoveryRow.id]
+      );
+
+      await insertProcessStepReversalEntry(connection, {
+        companyId: access.companyScope,
+        batchId,
+        processLotId: beforeStep.process_lot_id,
+        processStepId: stepId,
+        dependencyType: "RECOVERY_STOCK",
+        entityTable: "stock",
+        entityId: recoveryRow.id,
+        reversalAction: "DELETE_UNUSED_RECOVERY_STOCK",
+        beforeData: recoveryRow,
+        afterData: updatedRecoveryRows[0] || null,
+        message: `Unused recovery stock reversed (${toNumber(recoveryRow.weight).toFixed(3)}g)`,
+        createdBy: access.actingUserId
+      });
+    }
+
+    await recalcProcessStepAdditiveTotals(connection, access.companyScope, stepId, {
+      forUpdate: true
+    });
+    const effectiveAdditiveGivenWeight = toNumber(beforeStep.additive_given_weight);
+    const effectiveAdditiveReturnedWeight = toNumber(beforeStep.additive_returned_weight);
+    const effectiveAdditiveUsedWeight = toNumber(beforeStep.additive_used_weight);
+    const effectiveAdditiveMaterialLabel = beforeStep.additive_material_label || beforeStep.additiveMaterialLabel || "";
+    const weightValidation = validateProcessStepWeightBalance({
+      inputWeight: beforeStep.input_weight,
+      outputWeight: correctionValues.outputWeight,
+      recoveryWeight: correctionValues.recoveryWeight,
+      additiveUsedWeight: effectiveAdditiveUsedWeight,
+      message: "Output weight plus recovery weight cannot be greater than corrected input weight plus additive material used weight"
+    });
+    if (!weightValidation.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: weightValidation.message
+      });
+    }
+
+    const finalLossWeight = weightValidation.lossWeight;
+    const finalLossQty = Math.max(0, toNumber(beforeStep.input_qty) - correctionValues.outputQty);
+
+    await connection.query(
+      `
+      UPDATE process_steps
+      SET process_name = ?,
+          karigar_name = ?,
+          output_weight = ?,
+          recovery_weight = ?,
+          loss_weight = ?,
+          additive_given_weight = ?,
+          additive_returned_weight = ?,
+          additive_used_weight = ?,
+          additive_material_label = ?,
+          output_qty = ?,
+          loss_qty = ?,
+          loss_reason = ?,
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [
+        correctionValues.processName,
+        correctionValues.karigarName,
+        Number(format3(correctionValues.outputWeight)),
+        Number(format3(correctionValues.recoveryWeight)),
+        Number(format3(finalLossWeight)),
+        Number(format3(effectiveAdditiveGivenWeight)),
+        Number(format3(effectiveAdditiveReturnedWeight)),
+        Number(format3(effectiveAdditiveUsedWeight)),
+        effectiveAdditiveMaterialLabel,
+        correctionValues.outputQty,
+        finalLossQty,
+        correctionValues.lossReason,
+        stepId,
+        access.companyScope
+      ]
+    );
+
+    await syncCorrectedRecoveryStockEntry(connection, {
+      companyId: access.companyScope,
+      createdBy: access.actingUserId,
+      lotNo: beforeStep.lot_no,
+      stepId,
+      recoveryWeight: correctionValues.recoveryWeight,
+      processName: correctionValues.processName
+    });
+
+    const [updatedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      `,
+      [stepId, access.companyScope]
+    );
+    const afterStep = updatedRows.length ? normalizeProcessStepRow(updatedRows[0]) : null;
+
+    await connection.query(
+      `
+      UPDATE process_step_correction_batches
+      SET status = 'APPLIED',
+          after_step_json = ?,
+          applied_at = NOW(),
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND id = ?
+      `,
+      [
+        safeJsonStringify(sanitizeAuditPayload(afterStep)),
+        access.companyScope,
+        batchId
+      ]
+    );
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "PROCESS_STEP_REVERSED_AND_CORRECTED",
+      entityType: "process_step",
+      entityId: String(stepId),
+      moduleName: "process",
+      status: "success",
+      message: "Process step dependencies reversed and step corrected",
+      beforeData: beforeStep,
+      afterData: afterStep,
+      metadata: {
+        correctionReason,
+        batchId,
+        scan
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Process step reversed and corrected successfully",
+      step: afterStep,
+      batchId,
+      correction: {
+        reason: correctionReason
+      }
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Reverse and correct process step error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process step reverse and correction failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.put("/process/steps/:id/correct", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const stepId = Number(req.params.id || 0);
+    const correctionReason = String(req.body.correctionReason || req.body.correction_reason || "").trim();
+
+    if (!stepId) {
+      return res.status(400).json({
+        success: false,
+        message: "Process step id is required"
+      });
+    }
+
+    if (!correctionReason) {
+      return res.status(400).json({
+        success: false,
+        message: "Correction reason is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [stepRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [stepId, access.companyScope]
+    );
+
+    if (!stepRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Process step not found"
+      });
+    }
+
+    const beforeStep = normalizeProcessStepRow(stepRows[0]);
+    const processLot = await getProcessLotById(connection, access.companyScope, beforeStep.process_lot_id);
+    if (isManualProcessLot(processLot)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Manual lots are not available in the process workflow yet"
+      });
+    }
+
+    const lock = await getProcessStepCorrectionLock(connection, access.companyScope, beforeStep, processLot, {
+      forUpdateRecovery: true
+    });
+    if (lock.locked) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: lock.reason,
+        lockReason: lock.reason,
+        lockCode: lock.code,
+        details: lock.details || {}
+      });
+    }
+
+    const processNameRaw = req.body.processName ?? req.body.process_name;
+    const karigarNameRaw = req.body.karigarName ?? req.body.karigar_name;
+    const outputWeightRaw = req.body.outputWeight ?? req.body.output_weight;
+    const recoveryWeightRaw = req.body.recoveryWeight ?? req.body.recovery_weight;
+    const outputQtyRaw = req.body.outputQty ?? req.body.output_qty;
+    const lossReasonRaw = req.body.lossReason ?? req.body.loss_reason;
+
+    const processName = hasProvidedValue(processNameRaw)
+      ? normalizeProcessName(processNameRaw)
+      : String(beforeStep.process_name || "").trim();
+    const karigarName = hasProvidedValue(karigarNameRaw)
+      ? normalizeKarigarName(karigarNameRaw)
+      : String(beforeStep.karigar_name || "").trim();
+    const lossReason = hasProvidedValue(lossReasonRaw)
+      ? String(lossReasonRaw || "").trim()
+      : String(beforeStep.loss_reason || "").trim();
+
+    if (!processName) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Process name is required"
+      });
+    }
+
+    const parsedOutputWeight = parseRequiredNumber(outputWeightRaw, "Output weight");
+    if (!parsedOutputWeight.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: parsedOutputWeight.message
+      });
+    }
+
+    const parsedRecoveryWeight = parseOptionalNumber(recoveryWeightRaw, "Recovery weight", toNumber(beforeStep.recovery_weight));
+    if (!parsedRecoveryWeight.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: parsedRecoveryWeight.message
+      });
+    }
+
+    const parsedOutputQty = parseRequiredNumber(outputQtyRaw, "Output quantity");
+    if (!parsedOutputQty.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: parsedOutputQty.message
+      });
+    }
+
+    const outputWeight = parsedOutputWeight.value;
+    const recoveryWeight = parsedRecoveryWeight.value;
+    const outputQty = parsedOutputQty.value;
+    const inputQty = toNumber(beforeStep.input_qty);
+    const weightValidation = validateProcessStepWeightBalance({
+      inputWeight: beforeStep.input_weight,
+      outputWeight,
+      recoveryWeight,
+      additiveUsedWeight: beforeStep.additive_used_weight
+    });
+
+    if (outputWeight < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output weight cannot be negative"
+      });
+    }
+
+    if (recoveryWeight < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Recovery weight cannot be negative"
+      });
+    }
+
+    if (!weightValidation.ok) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: weightValidation.message
+      });
+    }
+
+    if (outputQty < 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be negative"
+      });
+    }
+
+    if (inputQty > 0 && outputQty > inputQty + 0.0005) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Output quantity cannot be greater than input quantity"
+      });
+    }
+
+    const lossWeight = weightValidation.lossWeight;
+    const lossQty = Math.max(0, inputQty - outputQty);
+
+    await connection.query(
+      `
+      UPDATE process_steps
+      SET process_name = ?,
+          karigar_name = ?,
+          output_weight = ?,
+          recovery_weight = ?,
+          loss_weight = ?,
+          output_qty = ?,
+          loss_qty = ?,
+          loss_reason = ?,
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [
+        processName,
+        karigarName,
+        Number(format3(outputWeight)),
+        Number(format3(recoveryWeight)),
+        Number(format3(lossWeight)),
+        outputQty,
+        lossQty,
+        lossReason,
+        stepId,
+        access.companyScope
+      ]
+    );
+
+    const recoverySync = await syncCorrectedRecoveryStockEntry(connection, {
+      companyId: access.companyScope,
+      createdBy: access.actingUserId,
+      lotNo: beforeStep.lot_no,
+      stepId,
+      recoveryWeight,
+      processName
+    });
+
+    const [updatedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_steps
+      WHERE id = ?
+        AND company_id = ?
+      LIMIT 1
+      `,
+      [stepId, access.companyScope]
+    );
+
+    const afterStep = updatedRows.length ? normalizeProcessStepRow(updatedRows[0]) : null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "PROCESS_STEP_CORRECTED",
+      entityType: "process_step",
+      entityId: String(stepId),
+      moduleName: "process",
+      status: "success",
+      message: "Process step corrected",
+      beforeData: beforeStep,
+      afterData: afterStep,
+      metadata: {
+        correctionReason,
+        dependencyCheck: {
+          latestCompletedOnly: true,
+          downstreamBlocked: true,
+          stickerStockBlocked: true,
+          recoveryDependencyBlocked: true,
+          ledgerDependencyBlocked: true
+        },
+        recoverySync
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Process step corrected successfully",
+      step: afterStep,
+      correction: {
+        reason: correctionReason
+      }
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Correct process step error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process step correction failed",
       error: getErrorDetail(error)
     });
   } finally {
@@ -14246,6 +16173,325 @@ app.post("/process/manual-lots", authMiddleware, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Manual lot creation failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/job-slips", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const companyId = access.companyScope;
+    const userId = access.actingUserId;
+    const lotNo = normalizeProcessLotNo(req.body.lotNo || req.body.lot_no || req.body.lot);
+    const workCategory = normalizeWorkCategory(req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+    const karigarIdRaw = req.body.karigarId ?? req.body.karigar_id ?? null;
+    const karigarId = karigarIdRaw === null || karigarIdRaw === undefined || karigarIdRaw === "" ? null : Number(karigarIdRaw);
+    const karigarName = normalizeKarigarDisplayName(req.body.karigarName || req.body.karigar_name || req.body.karigar || "");
+    const givenWeight = toNumber(req.body.givenWeight ?? req.body.given_weight);
+    const targetItemWeight = toNumber(req.body.targetItemWeight ?? req.body.target_item_weight ?? req.body.targetWeight);
+    const allowanceWeight = toNumber(req.body.allowanceWeight ?? req.body.allowance_weight ?? req.body.allowance);
+    const calculationDivisor = toNumber(req.body.calculationDivisor ?? req.body.calculation_divisor ?? req.body.divisor);
+    const expectedQty = toNumber(req.body.expectedQty ?? req.body.expected_qty);
+    const expectedOutputWeight = toNumber(req.body.expectedOutputWeight ?? req.body.expected_output_weight ?? req.body.expectedOutput);
+    const expectedReturnLossWeight = toNumber(req.body.expectedReturnLossWeight ?? req.body.expected_return_loss_weight ?? req.body.expectedReturnLoss);
+    const rawMaterialName = String(req.body.rawMaterialName || req.body.raw_material_name || workCategory || "").trim();
+    const targetProductName = String(req.body.targetProductName || req.body.target_product_name || req.body.workName || "").trim();
+    const calculationNote = String(req.body.calculationNote || req.body.calculation_note || "").trim();
+    const remarks = String(req.body.remarks || "").trim();
+    const requestedProcessLotId = Number(req.body.processLotId ?? req.body.process_lot_id ?? 0) || null;
+    const requestedProcessStepId = Number(req.body.processStepId ?? req.body.process_step_id ?? 0) || null;
+
+    if (!lotNo) {
+      return res.status(400).json({ success: false, message: "Lot No is required" });
+    }
+
+    if (givenWeight <= 0) {
+      return res.status(400).json({ success: false, message: "Given weight must be greater than zero" });
+    }
+
+    if (karigarIdRaw !== null && karigarIdRaw !== undefined && karigarIdRaw !== "" && (!Number.isInteger(karigarId) || karigarId <= 0)) {
+      return res.status(400).json({ success: false, message: "Karigar id must be valid" });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    let processLotId = requestedProcessLotId;
+    if (!processLotId) {
+      const processLot = await getProcessLotForSteps(connection, companyId, lotNo, workCategory);
+      processLotId = Number(processLot?.id || 0) || null;
+    }
+
+    const slipNo = await generateKarigarJobSlipNo(connection, companyId);
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_job_slips
+      (
+        company_id, slip_no, process_lot_id, process_step_id, lot_no, work_category,
+        karigar_id, karigar_name, raw_material_name, given_weight, target_product_name,
+        target_item_weight, allowance_weight, calculation_divisor, expected_qty,
+        expected_output_weight, expected_return_loss_weight, calculation_note, remarks,
+        issued_by, issued_at, printed_at, created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NULL, ?)
+      `,
+      [
+        companyId,
+        slipNo,
+        processLotId,
+        requestedProcessStepId,
+        lotNo,
+        workCategory,
+        karigarId,
+        karigarName,
+        rawMaterialName,
+        Number(format3(givenWeight)),
+        targetProductName,
+        Number(format3(targetItemWeight)),
+        Number(format3(allowanceWeight)),
+        Number(format3(calculationDivisor)),
+        Number(format3(expectedQty)),
+        Number(format3(expectedOutputWeight)),
+        Number(format3(expectedReturnLossWeight)),
+        calculationNote,
+        remarks,
+        userId,
+        userId
+      ]
+    );
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_job_slips
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [insertResult.insertId, companyId]
+    );
+
+    const savedSlip = savedRows.length ? normalizeProcessJobSlipRow(savedRows[0]) : null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "PROCESS_JOB_SLIP_CREATED",
+      entityType: "process_job_slip",
+      entityId: String(insertResult.insertId),
+      moduleName: "process",
+      status: "success",
+      message: `Karigar job slip ${slipNo} saved`,
+      afterData: savedSlip
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Karigar job slip saved",
+      jobSlip: savedSlip
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Save process job slip error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Karigar job slip save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/process/job-slips", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const lotNo = normalizeProcessLotNo(req.query.lotNo || req.query.lot_no || req.query.lot);
+    const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500);
+    const params = [access.companyScope];
+    const whereParts = ["company_id = ?"];
+
+    if (lotNo) {
+      whereParts.push("lot_no = ?");
+      params.push(lotNo);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM process_job_slips
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY issued_at DESC, id DESC
+      LIMIT ${limit}
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      jobSlips: rows.map(normalizeProcessJobSlipRow)
+    });
+  } catch (error) {
+    console.error("Get process job slips error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Karigar job slip history fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/process/job-slips/:id", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const slipId = Number(req.params.id || 0);
+    if (!slipId) {
+      return res.status(400).json({ success: false, message: "Job slip id is required" });
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT *
+      FROM process_job_slips
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [slipId, access.companyScope]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "Karigar job slip not found" });
+    }
+
+    return res.json({
+      success: true,
+      jobSlip: normalizeProcessJobSlipRow(rows[0])
+    });
+  } catch (error) {
+    console.error("Get process job slip error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Karigar job slip fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/process/job-slips/:id/print", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const slipId = Number(req.params.id || 0);
+    if (!slipId) {
+      return res.status(400).json({ success: false, message: "Job slip id is required" });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      `
+      SELECT *
+      FROM process_job_slips
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [slipId, access.companyScope]
+    );
+
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Karigar job slip not found" });
+    }
+
+    await connection.query(
+      `
+      UPDATE process_job_slips
+      SET printed_at = COALESCE(printed_at, NOW())
+      WHERE id = ? AND company_id = ?
+      `,
+      [slipId, access.companyScope]
+    );
+
+    const [updatedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_job_slips
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [slipId, access.companyScope]
+    );
+
+    const jobSlip = normalizeProcessJobSlipRow(updatedRows[0]);
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "PROCESS_JOB_SLIP_PRINTED",
+      entityType: "process_job_slip",
+      entityId: String(slipId),
+      moduleName: "process",
+      status: "success",
+      message: `Karigar job slip ${jobSlip.slipNo} printed/reprinted`,
+      afterData: {
+        slipNo: jobSlip.slipNo,
+        printedAt: jobSlip.printedAt
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      jobSlip
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Print process job slip error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Karigar job slip print fetch failed",
       error: getErrorDetail(error)
     });
   } finally {
@@ -18089,6 +20335,1228 @@ app.post("/sales-history/update-payment", authMiddleware, checkRole(["SUPERADMIN
     return res.status(500).json({
       success: false,
       message: "Payment update failed"
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+function buildSaleCancellationSnapshot({
+  sale = null,
+  saleItems = [],
+  stockRows = [],
+  linkedTransactions = [],
+  cashLedgerRows = [],
+  metalLedgerRows = [],
+  returnRows = []
+} = {}) {
+  return {
+    sale,
+    saleItems,
+    stockRows,
+    linkedTransactions,
+    cashLedgerRows,
+    metalLedgerRows,
+    returnRows,
+    capturedAt: new Date().toISOString()
+  };
+}
+
+function buildStockRestorePlan(companyId, invoiceNumber, saleItems = [], stockRows = [], userContext = {}) {
+  const blockingReasons = [];
+  const warnings = [];
+  const stockByBarcode = new Map();
+
+  stockRows.forEach((row) => {
+    const key = String(row.barcode || "").trim();
+    if (!key) return;
+    if (!stockByBarcode.has(key)) stockByBarcode.set(key, []);
+    stockByBarcode.get(key).push(row);
+  });
+
+  const stockImpact = saleItems.map((item) => {
+    const barcode = String(item.barcode || "").trim();
+    const rows = barcode ? stockByBarcode.get(barcode) || [] : [];
+    const stock = rows[0] || null;
+    const stockStatus = String(stock?.status || "").trim().toUpperCase();
+    const effectiveStockState = stock ? getEffectiveStockState(stock) : "";
+    const itemReasons = [];
+    const itemWarnings = [];
+
+    if (!barcode) {
+      itemWarnings.push("Sale item has no barcode");
+    }
+
+    if (rows.length > 1) {
+      itemReasons.push("Duplicate stock rows found for barcode");
+    }
+
+    if (barcode && !stock) {
+      itemReasons.push("Stock row not found for barcode");
+    }
+
+    if (stock && Number(stock.company_id || 0) !== Number(companyId || 0)) {
+      itemReasons.push("Stock row belongs to another company");
+    }
+
+    if (stock && stockStatus !== "SOLD") {
+      itemReasons.push("Stock is not currently SOLD");
+    }
+
+    if (stock && String(stock.invoice_number || "").trim() !== invoiceNumber) {
+      itemReasons.push("Stock invoice number does not match this invoice");
+    }
+
+    if (stock && ["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(effectiveStockState)) {
+      itemReasons.push("Stock is already transferred or in branch-transfer exception state");
+    }
+
+    if (stock && ["RETURN_TO_STOCK", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(stockStatus)) {
+      itemReasons.push("Stock is already returned, damaged, or deleted");
+    }
+
+    if (stock && userContext.isBranchLocked && Number(stock.current_branch_id || 0) !== Number(userContext.userBranchId || 0)) {
+      itemReasons.push("Stock branch does not match the user's assigned branch");
+    }
+
+    if (itemReasons.length) {
+      blockingReasons.push(...itemReasons.map((reason) => `${barcode || "Unbarcoded item"}: ${reason}`));
+    }
+
+    if (itemWarnings.length) {
+      warnings.push(...itemWarnings.map((warning) => `${barcode || "Unbarcoded item"}: ${warning}`));
+    }
+
+    return {
+      saleItemId: item.id,
+      barcode,
+      productName: item.product_name || "",
+      lotNumber: item.lot_number || "",
+      saleItemStatus: item.item_status || "",
+      currentStockStatus: stock?.status || "",
+      currentStockState: effectiveStockState,
+      currentBranchId: stock?.current_branch_id ?? null,
+      stockInvoiceNumber: stock?.invoice_number || "",
+      restorePreview: stock
+        ? {
+            fromStatus: stock.status || "",
+            toStatus: "IN_STOCK",
+            clearInvoiceNumber: true,
+            clearSoldAt: true
+          }
+        : null,
+      blockingReasons: itemReasons,
+      warnings: itemWarnings
+    };
+  });
+
+  return {
+    stockImpact,
+    blockingReasons,
+    warnings
+  };
+}
+
+function buildLedgerReversalPlan(linkedTransactions = [], cashLedgerRows = [], metalLedgerRows = []) {
+  const paymentTransactions = linkedTransactions.filter((row) => {
+    const type = String(row.transaction_type || "").trim().toUpperCase();
+    return type === "PAYMENT_RECEIVED" || type === "METAL_SETTLEMENT_RECEIVED";
+  });
+  const blockingReasons = [];
+
+  if (paymentTransactions.length) {
+    blockingReasons.push("Settlement/payment transaction exists and needs a controlled reversal flow");
+  }
+
+  const cashDebit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.debit_amount), 0);
+  const cashCredit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+  const metalSummary = metalLedgerRows.reduce((acc, row) => {
+    const metalType = normalizeMetalType(row.metal_type) || "UNKNOWN";
+    if (!acc[metalType]) {
+      acc[metalType] = {
+        grossIn: 0,
+        grossOut: 0,
+        fineIn: 0,
+        fineOut: 0
+      };
+    }
+    acc[metalType].grossIn += toNumber(row.gross_in);
+    acc[metalType].grossOut += toNumber(row.gross_out);
+    acc[metalType].fineIn += toNumber(row.fine_in);
+    acc[metalType].fineOut += toNumber(row.fine_out);
+    return acc;
+  }, {});
+
+  return {
+    blockingReasons,
+    ledgerImpact: {
+      linkedTransactions: linkedTransactions.map((row) => ({
+        id: row.id,
+        voucherNo: row.voucher_no || "",
+        transactionType: row.transaction_type || "",
+        status: row.status || "",
+        linkType: row.link_type || "",
+        paymentMode: row.payment_mode || "",
+        paymentStatus: row.payment_status || "",
+        voucherDate: row.voucher_date || ""
+      })),
+      cash: {
+        rows: cashLedgerRows,
+        totalDebit: cashDebit,
+        totalCredit: cashCredit,
+        netReceivableImpact: cashDebit - cashCredit,
+        reversalPreview: {
+          debitToCredit: cashDebit,
+          creditToDebit: cashCredit
+        }
+      },
+      metal: {
+        rows: metalLedgerRows,
+        summary: metalSummary,
+        reversalPreview: Object.entries(metalSummary).map(([metalType, summary]) => ({
+          metalType,
+          grossInToOut: summary.grossIn,
+          grossOutToIn: summary.grossOut,
+          fineInToOut: summary.fineIn,
+          fineOutToIn: summary.fineOut
+        }))
+      }
+    }
+  };
+}
+
+async function buildSaleCancellationPreview(companyId, invoiceNumber, userContext = {}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanInvoiceNumber = String(invoiceNumber || "").trim();
+  const existingConnection = userContext.connection;
+  const connection = existingConnection || await pool.getConnection();
+
+  try {
+    const [saleRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ? AND company_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [cleanInvoiceNumber, cleanCompanyId]
+    );
+
+    if (!saleRows.length) {
+      return {
+        ok: false,
+        status: 404,
+        body: {
+          success: false,
+          message: "Sale record not found"
+        }
+      };
+    }
+
+    const sale = saleRows[0];
+    const [saleItems] = await connection.query(
+      `
+      SELECT *
+      FROM sales_items
+      WHERE invoice_number = ? AND company_id = ?
+      ORDER BY id ASC
+      `,
+      [cleanInvoiceNumber, cleanCompanyId]
+    );
+
+    const barcodes = [
+      ...new Set(
+        saleItems
+          .map((item) => String(item.barcode || "").trim())
+          .filter(Boolean)
+      )
+    ];
+
+    let stockRows = [];
+    if (barcodes.length) {
+      const placeholders = barcodes.map(() => "?").join(", ");
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM stock
+        WHERE company_id = ?
+          AND barcode IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [cleanCompanyId, ...barcodes]
+      );
+      stockRows = rows;
+    }
+
+    const [linkedTransactions] = await connection.query(
+      `
+      SELECT
+        itl.id AS link_id,
+        itl.link_type,
+        itl.remarks AS link_remarks,
+        tm.*
+      FROM invoice_transaction_link itl
+      INNER JOIN transaction_master tm
+        ON tm.id = itl.transaction_id
+       AND tm.company_id = itl.company_id
+      WHERE itl.company_id = ?
+        AND itl.invoice_no = ?
+      ORDER BY tm.id ASC
+      `,
+      [cleanCompanyId, cleanInvoiceNumber]
+    );
+
+    const linkedTransactionIds = linkedTransactions.map((row) => Number(row.id || 0)).filter(Boolean);
+    let cashLedgerRows = [];
+    let metalLedgerRows = [];
+
+    if (linkedTransactionIds.length) {
+      const placeholders = linkedTransactionIds.map(() => "?").join(", ");
+      const [cashRows] = await connection.query(
+        `
+        SELECT *
+        FROM cash_ledger
+        WHERE company_id = ?
+          AND transaction_id IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [cleanCompanyId, ...linkedTransactionIds]
+      );
+      cashLedgerRows = cashRows;
+
+      const [metalRows] = await connection.query(
+        `
+        SELECT *
+        FROM metal_ledger
+        WHERE company_id = ?
+          AND transaction_id IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [cleanCompanyId, ...linkedTransactionIds]
+      );
+      metalLedgerRows = metalRows;
+    }
+
+    let returnRows = [];
+    if (barcodes.length) {
+      const placeholders = barcodes.map(() => "?").join(", ");
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM return_history
+        WHERE company_id = ?
+          AND (
+            invoice_number = ?
+            OR barcode IN (${placeholders})
+          )
+        ORDER BY id ASC
+        `,
+        [cleanCompanyId, cleanInvoiceNumber, ...barcodes]
+      );
+      returnRows = rows;
+    } else {
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM return_history
+        WHERE company_id = ?
+          AND invoice_number = ?
+        ORDER BY id ASC
+        `,
+        [cleanCompanyId, cleanInvoiceNumber]
+      );
+      returnRows = rows;
+    }
+
+    const blockingReasons = [];
+    const warnings = [];
+    const saleStatus = String(sale.status || "").trim().toUpperCase();
+
+    if (Number(sale.is_deleted || 0) === 1) {
+      blockingReasons.push("Invoice is already deleted");
+    }
+
+    if (saleStatus === "CANCELLED") {
+      blockingReasons.push("Invoice is already cancelled");
+    }
+
+    if (!saleItems.length) {
+      blockingReasons.push("Invoice has no sale items to inspect");
+    }
+
+    if (returnRows.length) {
+      blockingReasons.push("Return already exists for this invoice or one of its barcodes");
+    }
+
+    const stockPlan = buildStockRestorePlan(cleanCompanyId, cleanInvoiceNumber, saleItems, stockRows, userContext);
+    blockingReasons.push(...stockPlan.blockingReasons);
+    warnings.push(...stockPlan.warnings);
+
+    const ledgerPlan = buildLedgerReversalPlan(linkedTransactions, cashLedgerRows, metalLedgerRows);
+    blockingReasons.push(...ledgerPlan.blockingReasons);
+    const saleTransactions = linkedTransactions.filter((row) => String(row.transaction_type || "").trim().toUpperCase() === "SALE_INVOICE");
+    const nonSaleTransactions = linkedTransactions.filter((row) => String(row.transaction_type || "").trim().toUpperCase() !== "SALE_INVOICE");
+    const cashCredit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+    if (!saleTransactions.length) {
+      blockingReasons.push("Original SALE_INVOICE transaction was not found");
+    }
+    if (saleTransactions.length > 1) {
+      blockingReasons.push("Multiple SALE_INVOICE transactions found");
+    }
+    if (nonSaleTransactions.length) {
+      blockingReasons.push("Only unpaid/simple invoices can be cancelled in this phase");
+    }
+    if (metalLedgerRows.length) {
+      blockingReasons.push("Metal ledger impact exists and is not supported in this phase");
+    }
+    if (cashCredit > 0) {
+      blockingReasons.push("Cash credit/payment ledger impact exists and is not supported in this phase");
+    }
+
+    const beforeSnapshot = buildSaleCancellationSnapshot({
+      sale,
+      saleItems,
+      stockRows,
+      linkedTransactions,
+      cashLedgerRows,
+      metalLedgerRows,
+      returnRows
+    });
+
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        success: true,
+        canCancel: blockingReasons.length === 0,
+        invoiceNumber: cleanInvoiceNumber,
+        saleSummary: {
+          id: sale.id,
+          invoiceNumber: sale.invoice_number,
+          customerName: sale.customer_name || "",
+          invoiceDate: sale.invoice_date || "",
+          status: sale.status || "",
+          isDeleted: Number(sale.is_deleted || 0) === 1,
+          paymentStatus: sale.payment_status || "",
+          paymentMode: sale.payment_mode || "",
+          paidAmount: toNumber(sale.paid_amount),
+          dueAmount: toNumber(sale.due_amount),
+          totalAmount: toNumber(sale.total_amount),
+          totalItems: saleItems.length,
+          totalWeight: toNumber(sale.total_weight)
+        },
+        stockImpact: stockPlan.stockImpact,
+        ledgerImpact: ledgerPlan.ledgerImpact,
+        returnImpact: {
+          rows: returnRows,
+          count: returnRows.length
+        },
+        cancellationSnapshot: beforeSnapshot,
+        blockingReasons: [...new Set(blockingReasons)],
+        warnings: [...new Set(warnings)]
+      }
+    };
+  } finally {
+    if (!existingConnection) connection.release();
+  }
+}
+
+async function cancelSimpleUnpaidSaleInvoice({
+  connection,
+  req,
+  access,
+  companyId,
+  invoiceNumber,
+  reason
+}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanInvoiceNumber = String(invoiceNumber || "").trim();
+  const cleanReason = String(reason || "").trim();
+  const cancelledBy = access.actingUserId ?? getRequestedUserId(req) ?? null;
+
+  const preview = await buildSaleCancellationPreview(cleanCompanyId, cleanInvoiceNumber, {
+    ...access,
+    connection
+  });
+
+  if (!preview.ok || !preview.body?.success) {
+    return {
+      ok: false,
+      status: preview.status || 400,
+      body: preview.body || {
+        success: false,
+        message: "Cancel preview failed"
+      }
+    };
+  }
+
+  if (!preview.body.canCancel) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        success: false,
+        message: "Invoice cannot be cancelled safely",
+        blockingReasons: preview.body.blockingReasons || [],
+        warnings: preview.body.warnings || [],
+        preview: preview.body
+      }
+    };
+  }
+
+  const snapshot = preview.body.cancellationSnapshot || {};
+  const sale = snapshot.sale || null;
+  const saleItems = Array.isArray(snapshot.saleItems) ? snapshot.saleItems : [];
+  const stockRows = Array.isArray(snapshot.stockRows) ? snapshot.stockRows : [];
+  const linkedTransactions = Array.isArray(snapshot.linkedTransactions) ? snapshot.linkedTransactions : [];
+  const cashLedgerRows = Array.isArray(snapshot.cashLedgerRows) ? snapshot.cashLedgerRows : [];
+  const metalLedgerRows = Array.isArray(snapshot.metalLedgerRows) ? snapshot.metalLedgerRows : [];
+  const returnRows = Array.isArray(snapshot.returnRows) ? snapshot.returnRows : [];
+
+  const saleTransactions = linkedTransactions.filter((row) => String(row.transaction_type || "").trim().toUpperCase() === "SALE_INVOICE");
+  const nonSaleTransactions = linkedTransactions.filter((row) => String(row.transaction_type || "").trim().toUpperCase() !== "SALE_INVOICE");
+  const cashDebit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.debit_amount), 0);
+  const cashCredit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+  const blocked = [];
+
+  if (!sale?.id) blocked.push("Sale row is missing");
+  if (Number(sale?.is_deleted || 0) === 1) blocked.push("Invoice is already deleted");
+  if (String(sale?.status || "").trim().toUpperCase() === "CANCELLED") blocked.push("Invoice is already cancelled");
+  if (returnRows.length) blocked.push("Return already exists for this invoice");
+  if (!saleTransactions.length) blocked.push("Original SALE_INVOICE transaction was not found");
+  if (saleTransactions.length > 1) blocked.push("Multiple SALE_INVOICE transactions found");
+  if (nonSaleTransactions.length) blocked.push("Only unpaid/simple invoices can be cancelled in this phase");
+  if (metalLedgerRows.length) blocked.push("Metal ledger impact exists and is not supported in this phase");
+  if (cashCredit > 0) blocked.push("Cash credit/payment ledger impact exists and is not supported in this phase");
+  if (!stockRows.length && saleItems.some((item) => String(item.barcode || "").trim())) blocked.push("Stock rows are missing");
+
+  if (blocked.length) {
+    return {
+      ok: false,
+      status: 409,
+      body: {
+        success: false,
+        message: "Invoice cannot be cancelled in simple unpaid mode",
+        blockingReasons: [...new Set(blocked)],
+        preview: preview.body
+      }
+    };
+  }
+
+  const [insertCancellation] = await connection.query(
+    `
+    INSERT INTO sales_cancellations
+    (
+      company_id, invoice_number, sale_id, status, reason, blocked_reason,
+      before_snapshot, cancelled_by, cancelled_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, 'PENDING', ?, NULL, ?, ?, NOW(), NOW(), NOW())
+    `,
+    [
+      cleanCompanyId,
+      cleanInvoiceNumber,
+      sale.id,
+      cleanReason,
+      safeJsonStringify(snapshot),
+      cancelledBy
+    ]
+  );
+  const cancellationId = Number(insertCancellation.insertId || 0);
+
+  const barcodes = [
+    ...new Set(
+      saleItems
+        .map((item) => String(item.barcode || "").trim())
+        .filter(Boolean)
+    )
+  ];
+
+  for (const barcode of barcodes) {
+    const [stockUpdate] = await connection.query(
+      `
+      UPDATE stock
+      SET status = 'IN_STOCK',
+          stock_state = 'IN_STOCK',
+          invoice_number = '',
+          sold_at = NULL,
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND barcode = ?
+        AND UPPER(COALESCE(status, '')) = 'SOLD'
+        AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) NOT IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE', 'DAMAGED_RETURN', 'DAMAGED', 'DELETED')
+        AND invoice_number = ?
+      `,
+      [cleanCompanyId, barcode, cleanInvoiceNumber]
+    );
+
+    const affectedRows = assertSingleStockRowAffected(stockUpdate);
+    if (affectedRows !== 1) {
+      throw new Error(`Stock restore failed for barcode ${barcode}`);
+    }
+  }
+
+  const saleTxn = saleTransactions[0];
+  const reversalVoucherNo = `REV-${cleanInvoiceNumber}-${cancellationId}`;
+  const [reversalInsert] = await connection.query(
+    `
+    INSERT INTO transaction_master
+    (
+      company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+      status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+      remarks, note, reversal_of_transaction_id, created_by
+    )
+    VALUES (?, ?, CURDATE(), 'SALE_INVOICE_REVERSAL', ?, ?, 'POSTED', ?, ?, 'sales-cancellation', ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      cleanCompanyId,
+      reversalVoucherNo,
+      saleTxn.party_id,
+      saleTxn.party_type || "CUSTOMER",
+      cleanInvoiceNumber,
+      cleanInvoiceNumber,
+      saleTxn.payment_mode || "",
+      "CANCELLED",
+      "Auto reversal for cancelled unpaid invoice",
+      cleanReason,
+      saleTxn.id,
+      cancelledBy
+    ]
+  );
+  const reversalTransactionId = Number(reversalInsert.insertId || 0);
+
+  await connection.query(
+    `
+    INSERT INTO invoice_transaction_link
+    (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
+    VALUES (?, ?, ?, 'SALE_INVOICE_REVERSAL', ?, ?)
+    `,
+    [cleanCompanyId, cleanInvoiceNumber, reversalTransactionId, "Sale cancellation reversal", cancelledBy]
+  );
+
+  if (cashDebit > 0) {
+    await createCashLedgerEntry(connection, {
+      companyId: cleanCompanyId,
+      partyId: saleTxn.party_id,
+      transactionId: reversalTransactionId,
+      entryDate: getTodayDateOnly(),
+      entryType: "CREDIT",
+      debitAmount: 0,
+      creditAmount: cashDebit,
+      referenceType: "SALE_INVOICE_REVERSAL",
+      referenceNo: reversalVoucherNo,
+      remarks: `Cancelled invoice ${cleanInvoiceNumber}`,
+      createdBy: cancelledBy
+    });
+  }
+
+  await connection.query(
+    `
+    UPDATE sales_history
+    SET status = 'CANCELLED',
+        is_deleted = 1,
+        deleted_at = COALESCE(deleted_at, NOW()),
+        deleted_by = COALESCE(deleted_by, ?),
+        delete_reason = ?,
+        cancelled_at = NOW(),
+        cancelled_by = ?,
+        cancellation_reason = ?,
+        cancellation_id = ?
+    WHERE id = ?
+      AND company_id = ?
+    `,
+    [cancelledBy, cleanReason, cancelledBy, cleanReason, cancellationId, sale.id, cleanCompanyId]
+  );
+
+  await connection.query(
+    `
+    UPDATE sales_items
+    SET item_status = 'CANCELLED',
+        is_deleted = 1,
+        deleted_at = COALESCE(deleted_at, NOW()),
+        deleted_by = COALESCE(deleted_by, ?),
+        delete_reason = ?,
+        cancelled_at = NOW(),
+        cancelled_by = ?
+    WHERE invoice_number = ?
+      AND company_id = ?
+    `,
+    [cancelledBy, cleanReason, cancelledBy, cleanInvoiceNumber, cleanCompanyId]
+  );
+
+  await recalcPartyBalanceSummary(connection, cleanCompanyId, saleTxn.party_id, reversalTransactionId);
+
+  const afterSnapshot = buildSaleCancellationSnapshot({
+    sale: {
+      ...sale,
+      status: "CANCELLED",
+      is_deleted: 1,
+      cancellation_id: cancellationId,
+      cancellation_reason: cleanReason,
+      cancelled_by: cancelledBy
+    },
+    saleItems: saleItems.map((item) => ({
+      ...item,
+      item_status: "CANCELLED",
+      is_deleted: 1,
+      cancelled_by: cancelledBy
+    })),
+    stockRows: stockRows.map((stock) => ({
+      ...stock,
+      status: "IN_STOCK",
+      stock_state: "IN_STOCK",
+      invoice_number: "",
+      sold_at: null
+    })),
+    linkedTransactions: [
+      ...linkedTransactions,
+      {
+        id: reversalTransactionId,
+        voucher_no: reversalVoucherNo,
+        transaction_type: "SALE_INVOICE_REVERSAL",
+        reversal_of_transaction_id: saleTxn.id
+      }
+    ],
+    cashLedgerRows,
+    metalLedgerRows,
+    returnRows
+  });
+
+  await connection.query(
+    `
+    UPDATE sales_cancellations
+    SET status = 'APPLIED',
+        after_snapshot = ?,
+        updated_at = NOW()
+    WHERE id = ?
+      AND company_id = ?
+    `,
+    [safeJsonStringify(afterSnapshot), cancellationId, cleanCompanyId]
+  );
+
+  await writeAuditLogSafe(connection, req, {
+    companyId: cleanCompanyId,
+    userId: cancelledBy,
+    actionType: "CANCEL",
+    entityType: "SALE",
+    entityId: cleanInvoiceNumber,
+    moduleName: "sales-history",
+    status: "success",
+    message: "Sale invoice cancelled",
+    beforeData: snapshot,
+    afterData: afterSnapshot,
+    metadata: {
+      cancellationId,
+      reversalTransactionId,
+      reason: cleanReason
+    }
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      success: true,
+      message: "Invoice cancelled successfully",
+      invoiceNumber: cleanInvoiceNumber,
+      cancellationId,
+      reversalTransactionId,
+      restoredStockCount: barcodes.length
+    }
+  };
+}
+
+app.get("/sales-history/:invoiceNumber/cancel-preview", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  let connection;
+
+  try {
+    const invoiceNumber = String(req.params.invoiceNumber || "").trim();
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (!invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number is required"
+      });
+    }
+
+    const preview = await buildSaleCancellationPreview(access.companyScope, invoiceNumber, access);
+    return res.status(preview.status || 200).json(preview.body);
+
+    const companyId = access.companyScope;
+    connection = await pool.getConnection();
+
+    const [saleRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ? AND company_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    if (!saleRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale record not found"
+      });
+    }
+
+    const sale = saleRows[0];
+    const [itemRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_items
+      WHERE invoice_number = ? AND company_id = ?
+      ORDER BY id ASC
+      `,
+      [invoiceNumber, companyId]
+    );
+
+    const barcodes = [
+      ...new Set(
+        itemRows
+          .map((item) => String(item.barcode || "").trim())
+          .filter(Boolean)
+      )
+    ];
+
+    let stockRows = [];
+    if (barcodes.length) {
+      const placeholders = barcodes.map(() => "?").join(", ");
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM stock
+        WHERE company_id = ?
+          AND barcode IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [companyId, ...barcodes]
+      );
+      stockRows = rows;
+    }
+
+    const [linkedTransactionRows] = await connection.query(
+      `
+      SELECT
+        itl.id AS link_id,
+        itl.link_type,
+        itl.remarks AS link_remarks,
+        tm.*
+      FROM invoice_transaction_link itl
+      INNER JOIN transaction_master tm
+        ON tm.id = itl.transaction_id
+       AND tm.company_id = itl.company_id
+      WHERE itl.company_id = ?
+        AND itl.invoice_no = ?
+      ORDER BY tm.id ASC
+      `,
+      [companyId, invoiceNumber]
+    );
+
+    const linkedTransactionIds = linkedTransactionRows.map((row) => Number(row.id || 0)).filter(Boolean);
+    let cashLedgerRows = [];
+    let metalLedgerRows = [];
+
+    if (linkedTransactionIds.length) {
+      const placeholders = linkedTransactionIds.map(() => "?").join(", ");
+      const [cashRows] = await connection.query(
+        `
+        SELECT *
+        FROM cash_ledger
+        WHERE company_id = ?
+          AND transaction_id IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [companyId, ...linkedTransactionIds]
+      );
+      cashLedgerRows = cashRows;
+
+      const [metalRows] = await connection.query(
+        `
+        SELECT *
+        FROM metal_ledger
+        WHERE company_id = ?
+          AND transaction_id IN (${placeholders})
+        ORDER BY id ASC
+        `,
+        [companyId, ...linkedTransactionIds]
+      );
+      metalLedgerRows = metalRows;
+    }
+
+    let returnRows = [];
+    if (barcodes.length) {
+      const placeholders = barcodes.map(() => "?").join(", ");
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM return_history
+        WHERE company_id = ?
+          AND (
+            invoice_number = ?
+            OR barcode IN (${placeholders})
+          )
+        ORDER BY id ASC
+        `,
+        [companyId, invoiceNumber, ...barcodes]
+      );
+      returnRows = rows;
+    } else {
+      const [rows] = await connection.query(
+        `
+        SELECT *
+        FROM return_history
+        WHERE company_id = ?
+          AND invoice_number = ?
+        ORDER BY id ASC
+        `,
+        [companyId, invoiceNumber]
+      );
+      returnRows = rows;
+    }
+
+    const blockingReasons = [];
+    const warnings = [];
+    const saleStatus = String(sale.status || "").trim().toUpperCase();
+
+    if (Number(sale.is_deleted || 0) === 1) {
+      blockingReasons.push("Invoice is already deleted");
+    }
+
+    if (saleStatus === "CANCELLED") {
+      blockingReasons.push("Invoice is already cancelled");
+    }
+
+    if (!itemRows.length) {
+      blockingReasons.push("Invoice has no sale items to inspect");
+    }
+
+    if (returnRows.length) {
+      blockingReasons.push("Return already exists for this invoice or one of its barcodes");
+    }
+
+    const paymentTransactions = linkedTransactionRows.filter((row) => {
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      return type === "PAYMENT_RECEIVED" || type === "METAL_SETTLEMENT_RECEIVED";
+    });
+
+    if (paymentTransactions.length) {
+      blockingReasons.push("Settlement/payment transaction exists and needs a controlled reversal flow");
+    }
+
+    const stockByBarcode = new Map();
+    stockRows.forEach((row) => {
+      const key = String(row.barcode || "").trim();
+      if (!key) return;
+      if (!stockByBarcode.has(key)) stockByBarcode.set(key, []);
+      stockByBarcode.get(key).push(row);
+    });
+
+    const stockImpact = itemRows.map((item) => {
+      const barcode = String(item.barcode || "").trim();
+      const rows = barcode ? stockByBarcode.get(barcode) || [] : [];
+      const stock = rows[0] || null;
+      const stockStatus = String(stock?.status || "").trim().toUpperCase();
+      const effectiveStockState = stock ? getEffectiveStockState(stock) : "";
+      const itemReasons = [];
+      const itemWarnings = [];
+
+      if (!barcode) {
+        itemWarnings.push("Sale item has no barcode");
+      }
+
+      if (rows.length > 1) {
+        itemReasons.push("Duplicate stock rows found for barcode");
+      }
+
+      if (barcode && !stock) {
+        itemReasons.push("Stock row not found for barcode");
+      }
+
+      if (stock && Number(stock.company_id || 0) !== Number(companyId || 0)) {
+        itemReasons.push("Stock row belongs to another company");
+      }
+
+      if (stock && stockStatus !== "SOLD") {
+        itemReasons.push("Stock is not currently SOLD");
+      }
+
+      if (stock && String(stock.invoice_number || "").trim() !== invoiceNumber) {
+        itemReasons.push("Stock invoice number does not match this invoice");
+      }
+
+      if (stock && ["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(effectiveStockState)) {
+        itemReasons.push("Stock is already transferred or in branch-transfer exception state");
+      }
+
+      if (stock && ["RETURN_TO_STOCK", "DAMAGED_RETURN", "DAMAGED", "DELETED"].includes(stockStatus)) {
+        itemReasons.push("Stock is already returned, damaged, or deleted");
+      }
+
+      if (stock && access.isBranchLocked && Number(stock.current_branch_id || 0) !== Number(access.userBranchId || 0)) {
+        itemReasons.push("Stock branch does not match the user's assigned branch");
+      }
+
+      if (itemReasons.length) {
+        blockingReasons.push(...itemReasons.map((reason) => `${barcode || "Unbarcoded item"}: ${reason}`));
+      }
+
+      if (itemWarnings.length) {
+        warnings.push(...itemWarnings.map((warning) => `${barcode || "Unbarcoded item"}: ${warning}`));
+      }
+
+      return {
+        saleItemId: item.id,
+        barcode,
+        productName: item.product_name || "",
+        lotNumber: item.lot_number || "",
+        saleItemStatus: item.item_status || "",
+        currentStockStatus: stock?.status || "",
+        currentStockState: effectiveStockState,
+        currentBranchId: stock?.current_branch_id ?? null,
+        stockInvoiceNumber: stock?.invoice_number || "",
+        restorePreview: stock
+          ? {
+              fromStatus: stock.status || "",
+              toStatus: "IN_STOCK",
+              clearInvoiceNumber: true,
+              clearSoldAt: true
+            }
+          : null,
+        blockingReasons: itemReasons,
+        warnings: itemWarnings
+      };
+    });
+
+    const cashDebit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.debit_amount), 0);
+    const cashCredit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+    const metalSummary = metalLedgerRows.reduce((acc, row) => {
+      const metalType = normalizeMetalType(row.metal_type) || "UNKNOWN";
+      if (!acc[metalType]) {
+        acc[metalType] = {
+          grossIn: 0,
+          grossOut: 0,
+          fineIn: 0,
+          fineOut: 0
+        };
+      }
+      acc[metalType].grossIn += toNumber(row.gross_in);
+      acc[metalType].grossOut += toNumber(row.gross_out);
+      acc[metalType].fineIn += toNumber(row.fine_in);
+      acc[metalType].fineOut += toNumber(row.fine_out);
+      return acc;
+    }, {});
+
+    return res.json({
+      success: true,
+      canCancel: blockingReasons.length === 0,
+      invoiceNumber,
+      saleSummary: {
+        id: sale.id,
+        invoiceNumber: sale.invoice_number,
+        customerName: sale.customer_name || "",
+        invoiceDate: sale.invoice_date || "",
+        status: sale.status || "",
+        isDeleted: Number(sale.is_deleted || 0) === 1,
+        paymentStatus: sale.payment_status || "",
+        paymentMode: sale.payment_mode || "",
+        paidAmount: toNumber(sale.paid_amount),
+        dueAmount: toNumber(sale.due_amount),
+        totalAmount: toNumber(sale.total_amount),
+        totalItems: itemRows.length,
+        totalWeight: toNumber(sale.total_weight)
+      },
+      stockImpact,
+      ledgerImpact: {
+        linkedTransactions: linkedTransactionRows.map((row) => ({
+          id: row.id,
+          voucherNo: row.voucher_no || "",
+          transactionType: row.transaction_type || "",
+          status: row.status || "",
+          linkType: row.link_type || "",
+          paymentMode: row.payment_mode || "",
+          paymentStatus: row.payment_status || "",
+          voucherDate: row.voucher_date || ""
+        })),
+        cash: {
+          rows: cashLedgerRows,
+          totalDebit: cashDebit,
+          totalCredit: cashCredit,
+          netReceivableImpact: cashDebit - cashCredit,
+          reversalPreview: {
+            debitToCredit: cashDebit,
+            creditToDebit: cashCredit
+          }
+        },
+        metal: {
+          rows: metalLedgerRows,
+          summary: metalSummary,
+          reversalPreview: Object.entries(metalSummary).map(([metalType, summary]) => ({
+            metalType,
+            grossInToOut: summary.grossIn,
+            grossOutToIn: summary.grossOut,
+            fineInToOut: summary.fineIn,
+            fineOutToIn: summary.fineOut
+          }))
+        }
+      },
+      returnImpact: {
+        rows: returnRows,
+        count: returnRows.length
+      },
+      blockingReasons: [...new Set(blockingReasons)],
+      warnings: [...new Set(warnings)]
+    });
+  } catch (error) {
+    console.error("Cancel preview error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Cancel preview failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/sales-history/:invoiceNumber/cancel", authMiddleware, checkRole(["OWNER", "ACCOUNTS"]), async (req, res) => {
+  let connection;
+
+  try {
+    const invoiceNumber = String(req.params.invoiceNumber || "").trim();
+    const reason = String(req.body?.reason || "").trim();
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (!invoiceNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number is required"
+      });
+    }
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation reason is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [saleRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE invoice_number = ?
+        AND company_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [invoiceNumber, access.companyScope]
+    );
+
+    if (!saleRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Sale record not found"
+      });
+    }
+
+    const [saleItemRows] = await connection.query(
+      `
+      SELECT *
+      FROM sales_items
+      WHERE invoice_number = ?
+        AND company_id = ?
+      ORDER BY id ASC
+      FOR UPDATE
+      `,
+      [invoiceNumber, access.companyScope]
+    );
+
+    const barcodes = [
+      ...new Set(
+        saleItemRows
+          .map((item) => String(item.barcode || "").trim())
+          .filter(Boolean)
+      )
+    ];
+
+    if (barcodes.length) {
+      const placeholders = barcodes.map(() => "?").join(", ");
+      await connection.query(
+        `
+        SELECT id
+        FROM stock
+        WHERE company_id = ?
+          AND barcode IN (${placeholders})
+        FOR UPDATE
+        `,
+        [access.companyScope, ...barcodes]
+      );
+    }
+
+    await connection.query(
+      `
+      SELECT tm.id
+      FROM invoice_transaction_link itl
+      INNER JOIN transaction_master tm
+        ON tm.id = itl.transaction_id
+       AND tm.company_id = itl.company_id
+      WHERE itl.company_id = ?
+        AND itl.invoice_no = ?
+      FOR UPDATE
+      `,
+      [access.companyScope, invoiceNumber]
+    );
+
+    const cancelResult = await cancelSimpleUnpaidSaleInvoice({
+      connection,
+      req,
+      access,
+      companyId: access.companyScope,
+      invoiceNumber,
+      reason
+    });
+
+    if (!cancelResult.ok) {
+      await connection.rollback();
+      return res.status(cancelResult.status || 409).json(cancelResult.body);
+    }
+
+    await connection.commit();
+    return res.status(cancelResult.status || 200).json(cancelResult.body);
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Sale cancellation error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Sale cancellation failed",
+      error: getErrorDetail(error)
     });
   } finally {
     if (connection) connection.release();
