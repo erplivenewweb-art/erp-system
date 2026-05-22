@@ -1322,6 +1322,15 @@
       };
     }
 
+    function getStickerPrintExtraWeight() {
+      const extraWeight = Number(document.getElementById("printExtraWeight")?.value || 0);
+      return Number.isFinite(extraWeight) ? extraWeight : 0;
+    }
+
+    function getFinalStickerWeight(item) {
+      return format3(Number(item?.weight || 0) + getStickerPrintExtraWeight());
+    }
+
     function clearStickerFormForNext() {
       const weightInput = document.getElementById("stickerWeight");
       const barcodeInput = document.getElementById("stickerBarcode");
@@ -1545,7 +1554,7 @@
             sku: item.sku || "",
             mm: item.mm || "",
             size: item.size || "",
-            weight: format3(item.weight || 0),
+            weight: getFinalStickerWeight(item),
             lot: item.lot_number || item.lot || "",
             metalType: item.metal_type || item.metalType || "Silver",
             processType: item.process_type || item.processType || "",
@@ -1723,13 +1732,15 @@
 
       tbody.innerHTML = "";
       let totalWeight = 0;
+      const extraWeight = getStickerPrintExtraWeight();
 
       if (!pendingStickerItems.length) {
         tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No sticker items found</td></tr>`;
       }
 
       pendingStickerItems.forEach((item, index) => {
-        totalWeight += Number(item.weight || 0);
+        const finalWeight = getFinalStickerWeight(item);
+        totalWeight += Number(finalWeight || 0);
         const itemBarcode = getBarcodeValue(item);
         const isEditing = editingPendingBarcode === itemBarcode;
         const badge = item.saved_to_server
@@ -1767,7 +1778,7 @@
               <td>${escapeHtml(item.sku || "")}</td>
               <td>${escapeHtml(item.mm || "")}</td>
               <td>${escapeHtml(item.size || "")}</td>
-              <td>${escapeHtml(format3(item.weight || 0))}</td>
+              <td>${escapeHtml(finalWeight)}${extraWeight ? `<br><span class="muted">Base ${escapeHtml(format3(item.weight || 0))}</span>` : ""}</td>
               <td>
                 <div class="action-wrap">
                   <button type="button" class="mini-btn edit-btn" onclick="startInlineEdit('${escapeHtml(itemBarcode)}')">Edit</button>
@@ -1782,7 +1793,7 @@
       });
 
       totalWeightEl.innerHTML =
-        "Sticker List Total Weight: <span style='color:#b7791f; font-weight:700;'>" +
+        `${extraWeight ? "Final " : ""}Sticker List Total Weight: <span style='color:#b7791f; font-weight:700;'>` +
         format3(totalWeight) +
         "</span>";
 
@@ -1851,9 +1862,7 @@
           html += `<div class="label empty"></div>`;
         } else {
           const item = visibleItems[itemIndex];
-          const extraWeight = Number(document.getElementById("printExtraWeight")?.value || 0);
-          const actualWeight = Number(item.weight || 0) + extraWeight;
-          const itemWeight = format3(actualWeight);
+          const itemWeight = getFinalStickerWeight(item);
           const itemSize = String(item.size || "").trim();
           const itemPurity = String(item.purity || "").trim();
           const itemBarcode = String(item.barcode || "").trim();
@@ -2131,6 +2140,8 @@
 
       generateBarcodeNow(true);
       moveNextOnEnter();
+
+      document.getElementById("printExtraWeight")?.addEventListener("input", renderStickerList);
 
       document.getElementById("lotSelector")?.addEventListener("blur", function () {
         const lotValue = this.value.trim();

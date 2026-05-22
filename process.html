@@ -412,6 +412,197 @@
       width: 100%;
     }
 
+    .job-slip-card {
+      background: #fffdf8;
+      border: 1px solid #eadfca;
+    }
+
+    .job-slip-header-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .job-slip-header-row h3 {
+      margin: 0;
+    }
+
+    .job-slip-header-row p {
+      margin: 5px 0 0;
+      color: #6f6555;
+      font-size: 13px;
+    }
+
+    .job-slip-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .job-slip-history-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(17, 24, 39, 0.54);
+    }
+
+    .job-slip-history-modal.show {
+      display: flex;
+    }
+
+    .job-slip-history-panel {
+      width: min(980px, 100%);
+      max-height: min(720px, 92vh);
+      overflow: auto;
+      background: #fffdf8;
+      border: 1px solid #eadfca;
+      border-radius: 8px;
+      box-shadow: 0 20px 55px rgba(17, 24, 39, 0.22);
+    }
+
+    .job-slip-history-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      background: #fff8e8;
+      border-bottom: 1px solid #eadfca;
+    }
+
+    .job-slip-history-head h3 {
+      margin: 0;
+    }
+
+    .job-slip-history-body {
+      padding: 14px 16px 16px;
+    }
+
+    .job-slip-preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+      padding: 10px;
+      border: 1px dashed #d8c18b;
+      background: #fff9eb;
+    }
+
+    .job-slip-preview-grid .job-slip-ticket {
+      min-height: 148px;
+    }
+
+    .job-slip-ticket {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #1f2937;
+      background: #fff;
+      color: #111827;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.2;
+      overflow: hidden;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .job-slip-ticket-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      align-items: start;
+      border-bottom: 1px solid #1f2937;
+      padding: 5px 6px 4px;
+    }
+
+    .job-slip-company {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      word-break: break-word;
+    }
+
+    .job-slip-title {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .job-slip-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      border-bottom: 1px solid #1f2937;
+      flex: 1;
+    }
+
+    .job-slip-field {
+      min-width: 0;
+      padding: 3px 5px;
+      border-right: 1px solid #1f2937;
+      border-bottom: 1px solid #d1d5db;
+    }
+
+    .job-slip-field:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .job-slip-label {
+      display: block;
+      color: #4b5563;
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .job-slip-value {
+      display: block;
+      color: #111827;
+      font-size: 10px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .job-slip-wide {
+      grid-column: 1 / -1;
+      border-right: 0;
+    }
+
+    .job-slip-foot {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 88px;
+      gap: 8px;
+      align-items: end;
+      padding: 5px 6px 6px;
+      min-height: 28px;
+    }
+
+    .job-slip-remarks {
+      color: #374151;
+      font-size: 9px;
+      word-break: break-word;
+    }
+
+    .job-slip-signature {
+      border-top: 1px solid #111827;
+      color: #4b5563;
+      font-size: 8px;
+      font-weight: 700;
+      text-align: center;
+      padding-top: 2px;
+      text-transform: uppercase;
+    }
+
     .workflow-card,
     .step-section,
     .step-section .summary,
@@ -486,6 +677,7 @@
 
       .process-guide-grid,
       .form-grid,
+      .job-slip-preview-grid,
       #additiveQuickFields,
       #additiveIssuePanel .form-grid {
         grid-template-columns: 1fr;
@@ -835,10 +1027,42 @@
                   <label for="processFinalWeight">Final Weight</label>
                   <input id="processFinalWeight" type="number" step="0.001" placeholder="Enter Final Weight" />
                 </div>
+
+                <div class="input-box">
+                  <label for="jobSlipTargetWeight">Target Weight</label>
+                  <input id="jobSlipTargetWeight" type="number" step="0.001" placeholder="Target per qty" />
+                </div>
+
+                <div class="input-box">
+                  <label for="jobSlipAllowance">Allowance</label>
+                  <input id="jobSlipAllowance" type="number" step="0.001" placeholder="Allowance per qty" />
+                </div>
+
+                <div class="input-box">
+                  <label for="jobSlipExpectedQty">Expected Qty</label>
+                  <input id="jobSlipExpectedQty" type="number" step="1" min="0" placeholder="Auto or edit" />
+                </div>
+
+                <div class="input-box">
+                  <label>Expected Output</label>
+                  <input id="jobSlipExpectedOutput" type="text" readonly />
+                </div>
+
+                <div class="input-box">
+                  <label>Expected Return/Loss</label>
+                  <input id="jobSlipExpectedReturnLoss" type="text" readonly />
+                </div>
+
+                <div class="input-box">
+                  <label for="jobSlipRemarks">Remarks</label>
+                  <input id="jobSlipRemarks" type="text" placeholder="Optional slip note" />
+                </div>
               </div>
 
               <div class="btn-row" style="margin-top:12px;">
                 <button class="primary-btn" type="button" onclick="saveProcessLot()">Save Process</button>
+                <button class="secondary-btn" type="button" onclick="saveAndPrintJobSlip()">Save &amp; Print Job Slip</button>
+                <button class="secondary-btn" type="button" onclick="openJobSlipHistory()">View Slip History</button>
                 <button class="secondary-btn" type="button" onclick="clearProcessForm()">Clear</button>
               </div>
 
@@ -868,6 +1092,103 @@
                   </thead>
                   <tbody id="processTableBody"></tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+
+          <div id="jobSlipHistoryModal" class="job-slip-history-modal" aria-hidden="true">
+            <div class="job-slip-history-panel" role="dialog" aria-modal="true" aria-labelledby="jobSlipHistoryTitle">
+              <div class="job-slip-history-head">
+                <h3 id="jobSlipHistoryTitle">Job Slip History</h3>
+                <button class="secondary-btn" type="button" onclick="closeJobSlipHistory()">Close</button>
+              </div>
+              <div class="job-slip-history-body">
+                <div class="table-wrap process-summary-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Slip No</th>
+                        <th>Date</th>
+                        <th>Lot No</th>
+                        <th>Karigar</th>
+                        <th>Given Weight</th>
+                        <th>Expected Qty</th>
+                        <th>Print/Reprint</th>
+                      </tr>
+                    </thead>
+                    <tbody id="jobSlipHistoryBody">
+                      <tr><td colspan="7">No saved slips found</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="processStepCorrectionModal" class="job-slip-history-modal" aria-hidden="true">
+            <div class="job-slip-history-panel" role="dialog" aria-modal="true" aria-labelledby="processStepCorrectionTitle">
+              <div class="job-slip-history-head">
+                <h3 id="processStepCorrectionTitle">Correct Process Step</h3>
+                <button class="secondary-btn" type="button" onclick="closeProcessStepCorrectionModal()">Close</button>
+              </div>
+              <div class="job-slip-history-body">
+                <div class="form-grid">
+                  <div class="input-box">
+                    <label for="correctStepProcessName">Process Name</label>
+                    <input id="correctStepProcessName" type="text" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepKarigarName">Karigar</label>
+                    <input id="correctStepKarigarName" type="text" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepOutputWeight">Output Weight</label>
+                    <input id="correctStepOutputWeight" type="number" step="0.001" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepRecoveryWeight">Recovery Weight</label>
+                    <input id="correctStepRecoveryWeight" type="number" step="0.001" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepOutputQty">Output Qty</label>
+                    <input id="correctStepOutputQty" type="number" step="1" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepLossReason">Loss Reason</label>
+                    <input id="correctStepLossReason" type="text" />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepLossWeight">Loss Weight</label>
+                    <input id="correctStepLossWeight" type="number" step="0.001" readonly />
+                  </div>
+                  <div class="input-box">
+                    <label for="correctStepLossQty">Loss Qty</label>
+                    <input id="correctStepLossQty" type="number" step="1" readonly />
+                  </div>
+                  <div class="input-box" style="grid-column:1 / -1;">
+                    <label for="correctStepReason">Correction Reason</label>
+                    <input id="correctStepReason" type="text" placeholder="Required" />
+                  </div>
+                </div>
+                <div id="processStepCorrectionImpact" class="summary" style="display:none; margin-top:12px;"></div>
+                <div class="btn-row" style="margin-top:12px;">
+                  <button id="saveProcessStepCorrectionBtn" class="primary-btn" type="button" onclick="submitProcessStepCorrection()">Save Correction</button>
+                  <button class="secondary-btn" type="button" onclick="closeProcessStepCorrectionModal()">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="processStepLockDetailsModal" class="job-slip-history-modal" aria-hidden="true">
+            <div class="job-slip-history-panel" role="dialog" aria-modal="true" aria-labelledby="processStepLockDetailsTitle">
+              <div class="job-slip-history-head">
+                <h3 id="processStepLockDetailsTitle">Correction Lock Details</h3>
+                <button class="secondary-btn" type="button" onclick="closeProcessStepLockDetailsModal()">Close</button>
+              </div>
+              <div class="job-slip-history-body">
+                <div id="processStepLockDetailsBody">
+                  Select a locked step to view dependency details.
+                </div>
               </div>
             </div>
           </div>
@@ -995,8 +1316,9 @@
                 </div>
 
                 <div id="stepRecoveryWeightBox" class="input-box">
-                  <label for="stepRecoveryWeight">Cut Pieces / Recovery Silver</label>
+                  <label for="stepRecoveryWeight">New Recovery From This Step</label>
                   <input id="stepRecoveryWeight" type="number" step="0.001" placeholder="Recovery weight" />
+                  <p class="additive-issue-note">This recovery will be saved as recovery stock after Save/Complete Step.</p>
                 </div>
 
                 <div id="stepOutputQtyBox" class="input-box">
@@ -1049,6 +1371,7 @@
                     <th>Loss Qty</th>
                     <th>Status</th>
                     <th>Completed</th>
+                    <th>Correction</th>
                   </tr>
                 </thead>
                 <tbody id="processStepTableBody"></tbody>
@@ -1208,9 +1531,10 @@
                 <div class="summary">
                   <p>
                     Base Input Weight: <span id="recoveryBaseInputWeight">0.000</span>g |
-                    Recovery Added: <span id="recoveryAddedWeight">0.000</span>g |
+                    Previous Recovery Reused: <span id="recoveryAddedWeight">0.000</span>g |
                     Total Input Weight: <span id="recoveryTotalInputWeight">0.000</span>g
                   </p>
+                  <p class="additive-issue-note">Select old recovery stock only when you want to reuse it as extra input.</p>
                   <div id="recoveryStockList" style="margin-top:8px;"></div>
                   <div class="btn-row" style="margin-top:10px;">
                     <button class="secondary-btn" type="button" onclick="loadRecoveryStockOptions()">Refresh Recovery</button>
@@ -1433,6 +1757,12 @@
     };
     let processLotLoadTimer = null;
     let selectedStepWorkCategory = "REGULAR_SANKHA";
+    let jobSlipExpectedQtyEdited = false;
+    let jobSlipTargetWeightEdited = false;
+    let jobSlipHistoryData = [];
+    let correctingProcessStep = null;
+    let processStepCorrectionMode = "correct";
+    let processStepLockScanData = null;
     let lotLedgerUiState = {
       totalGiven: 0,
       totalReturned: 0,
@@ -1513,6 +1843,9 @@
     syncSidebarUi();
     window.addEventListener("resize", syncSidebarUi);
     document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeJobSlipHistory();
+      if (event.key === "Escape") closeProcessStepCorrectionModal();
+      if (event.key === "Escape") closeProcessStepLockDetailsModal();
       if (event.key === "Escape") closeSidebarMobile();
     });
 
@@ -1615,10 +1948,418 @@
       return Number.isFinite(num) ? num.toFixed(3) : "0.000";
     }
 
+    const PROCESS_WEIGHT_TOLERANCE = 0.0005;
+    const PROCESS_WEIGHT_BALANCE_MESSAGE = "Output plus recovery cannot be greater than input weight plus additive material used weight";
+
+    function validateProcessWeightBalance({ inputWeight = 0, outputWeight = 0, recoveryWeight = 0, additiveUsedWeight = 0 } = {}) {
+      const input = Number(inputWeight || 0);
+      const output = Number(outputWeight || 0);
+      const recovery = Number(recoveryWeight || 0);
+      const additiveUsed = Number(additiveUsedWeight || 0);
+      const allowedInputWeight = input + additiveUsed;
+      const balance = allowedInputWeight - output - recovery;
+
+      return {
+        ok: balance >= -PROCESS_WEIGHT_TOLERANCE,
+        balance,
+        lossWeight: Math.max(balance, 0),
+        allowedInputWeight
+      };
+    }
+
     function formatProcessQty(value) {
       const num = Number(value || 0);
       if (!Number.isFinite(num)) return "0";
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
+    }
+
+    function getCurrentJobSlipSource() {
+      const lotNo = document.getElementById("processLotNo")?.value?.trim()
+        || document.getElementById("stepLotNo")?.value?.trim()
+        || document.getElementById("karigarLot")?.value?.trim()
+        || "";
+      const karigarName = document.getElementById("stepKarigarName")?.value?.trim()
+        || document.getElementById("karigarName")?.value?.trim()
+        || document.getElementById("additiveIssueKarigarName")?.value?.trim()
+        || "";
+      const workCategory = document.getElementById("processWorkCategory")?.value?.trim() || "";
+      const workName = workCategory
+        || document.getElementById("stepProcessName")?.value?.trim()
+        || "Process Work";
+      const stepInputWeight = Number(document.getElementById("stepInputWeight")?.value || 0);
+      const karigarGivenWeight = Number(document.getElementById("karigarGivenWeight")?.value || 0);
+      const rawWeight = Number(document.getElementById("processRawWeight")?.value || 0);
+      const givenWeight = rawWeight > 0 ? rawWeight : (stepInputWeight > 0 ? stepInputWeight : karigarGivenWeight);
+      const existingExpectedQty = Number(document.getElementById("processExpectedQty")?.value || document.getElementById("stepInputQty")?.value || 0);
+      const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
+      const outputWeight = Number(document.getElementById("stepOutputWeight")?.value || 0);
+      const outputQty = Number(document.getElementById("stepOutputQty")?.value || 0);
+      const inferredTarget = existingExpectedQty > 0 && finalWeight > 0
+        ? finalWeight / existingExpectedQty
+        : (outputQty > 0 && outputWeight > 0 ? outputWeight / outputQty : 0);
+
+      return {
+        lotNo,
+        karigarName,
+        workCategory,
+        workName,
+        givenWeight,
+        existingExpectedQty,
+        inferredTarget,
+        companyName: getCurrentCompanyName() || document.getElementById("pageCompanyTitle")?.textContent?.trim() || "RPJ MANUFACTURER"
+      };
+    }
+
+    function setJobSlipValue(id, value) {
+      const input = document.getElementById(id);
+      if (input) input.value = value;
+    }
+
+    function readJobSlipNumbers() {
+      const source = getCurrentJobSlipSource();
+      const targetInput = document.getElementById("jobSlipTargetWeight");
+      const allowanceInput = document.getElementById("jobSlipAllowance");
+      const qtyInput = document.getElementById("jobSlipExpectedQty");
+
+      if (targetInput && !jobSlipTargetWeightEdited && source.inferredTarget > 0) {
+        targetInput.value = formatProcessWeight(source.inferredTarget);
+      }
+      if (allowanceInput && allowanceInput.value === "") {
+        allowanceInput.value = "0.000";
+      }
+
+      const targetWeight = Number(targetInput?.value || 0);
+      const allowance = Number(allowanceInput?.value || 0);
+      const divisor = targetWeight + allowance;
+      const autoQty = divisor > 0 && source.givenWeight > 0 ? Math.floor(source.givenWeight / divisor) : 0;
+
+      if (qtyInput && !jobSlipExpectedQtyEdited) {
+        qtyInput.value = String(autoQty || source.existingExpectedQty || "");
+      }
+
+      const expectedQty = Math.max(Math.floor(Number(qtyInput?.value || 0)), 0);
+      const expectedOutput = expectedQty * targetWeight;
+      const expectedReturnLoss = source.givenWeight - expectedOutput;
+
+      return {
+        ...source,
+        targetWeight,
+        allowance,
+        divisor,
+        expectedQty,
+        expectedOutput,
+        expectedReturnLoss,
+        remarks: document.getElementById("jobSlipRemarks")?.value?.trim() || "",
+        dateText: new Date().toLocaleDateString("en-IN")
+      };
+    }
+
+    function buildJobSlipTicketHtml(data) {
+      return `
+        <section class="job-slip-ticket">
+          <div class="job-slip-ticket-head">
+            <div class="job-slip-company">${escapeHtml(data.companyName || "RPJ MANUFACTURER")}</div>
+            <div class="job-slip-title">Karigar Job Slip</div>
+          </div>
+          <div class="job-slip-body">
+            <div class="job-slip-field"><span class="job-slip-label">Lot No</span><span class="job-slip-value">${escapeHtml(data.lotNo || "-")}</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Date</span><span class="job-slip-value">${escapeHtml(data.dateText || "-")}</span></div>
+            <div class="job-slip-field job-slip-wide"><span class="job-slip-label">Karigar Name</span><span class="job-slip-value">${escapeHtml(data.karigarName || "-")}</span></div>
+            <div class="job-slip-field job-slip-wide"><span class="job-slip-label">Work/Product Name</span><span class="job-slip-value">${escapeHtml(data.workName || "-")}</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Given Weight</span><span class="job-slip-value">${formatProcessWeight(data.givenWeight)}g</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Target Weight</span><span class="job-slip-value">${formatProcessWeight(data.targetWeight)}g</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Allowance</span><span class="job-slip-value">${formatProcessWeight(data.allowance)}g</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Divisor</span><span class="job-slip-value">${formatProcessWeight(data.divisor)}g</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Expected Qty</span><span class="job-slip-value">${formatProcessQty(data.expectedQty)}</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Expected Output</span><span class="job-slip-value">${formatProcessWeight(data.expectedOutput)}g</span></div>
+            <div class="job-slip-field job-slip-wide"><span class="job-slip-label">Expected Return/Loss</span><span class="job-slip-value">${formatProcessWeight(data.expectedReturnLoss)}g</span></div>
+          </div>
+          <div class="job-slip-foot">
+            <div class="job-slip-remarks">${data.remarks ? `Remarks: ${escapeHtml(data.remarks)}` : "&nbsp;"}</div>
+            <div class="job-slip-signature">Signature</div>
+          </div>
+        </section>
+      `;
+    }
+
+    function renderJobSlipPreview() {
+      const data = readJobSlipNumbers();
+      setJobSlipValue("jobSlipLotNo", data.lotNo || "");
+      setJobSlipValue("jobSlipKarigarName", data.karigarName || "");
+      setJobSlipValue("jobSlipWorkName", data.workName || "");
+      setJobSlipValue("jobSlipGivenWeight", `${formatProcessWeight(data.givenWeight)}g`);
+      setJobSlipValue("jobSlipDivisor", `${formatProcessWeight(data.divisor)}g`);
+      setJobSlipValue("jobSlipExpectedOutput", `${formatProcessWeight(data.expectedOutput)}g`);
+      setJobSlipValue("jobSlipExpectedReturnLoss", `${formatProcessWeight(data.expectedReturnLoss)}g`);
+
+      const preview = document.getElementById("jobSlipPreviewGrid");
+      if (preview) {
+        preview.innerHTML = Array.from({ length: 8 }, () => buildJobSlipTicketHtml(data)).join("");
+      }
+
+      return data;
+    }
+
+    function resetJobSlipCalculationFields() {
+      jobSlipExpectedQtyEdited = false;
+      jobSlipTargetWeightEdited = false;
+      ["jobSlipTargetWeight", "jobSlipAllowance", "jobSlipExpectedQty", "jobSlipRemarks"].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = "";
+      });
+      renderJobSlipPreview();
+    }
+
+    function getJobSlipPrintStyles() {
+      return `
+        <style>
+          @page { size: A4 portrait; margin: 8mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #f3f4f6; color: #111827; font-family: Arial, Helvetica, sans-serif; }
+          .print-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; background: #111827; color: #fff; font-size: 13px; }
+          .print-toolbar button { border: 0; border-radius: 6px; padding: 8px 12px; background: #d4af37; color: #111827; font-weight: 800; cursor: pointer; }
+          .job-slip-sheet { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 8mm; background: #fff; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); gap: 5mm; }
+          ${document.querySelector("style")?.textContent?.match(/\.job-slip-ticket[\s\S]*?\.job-slip-signature[\s\S]*?\}/)?.[0] || ""}
+          .job-slip-ticket { min-height: 63mm; }
+          .job-slip-company { font-size: 10px; }
+          .job-slip-title { font-size: 9px; }
+          .job-slip-label { font-size: 7.5px; }
+          .job-slip-value { font-size: 9.5px; }
+          @media print {
+            body { background: #fff; }
+            .print-toolbar { display: none !important; }
+            .job-slip-sheet { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+          }
+        </style>
+      `;
+    }
+
+    function writeJobSlipPrintWindow(printWindow, data) {
+      if (!printWindow) return;
+      const toolbarTitle = data.slipNo ? `Karigar Job Slip ${escapeHtml(data.slipNo)} - 8 slips on A4` : "Karigar Job Slip - 8 slips on A4";
+      const slips = Array.from({ length: 8 }, () => buildJobSlipTicketHtml(data)).join("");
+      printWindow.document.open();
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Karigar Job Slip</title>
+          ${getJobSlipPrintStyles()}
+        </head>
+        <body>
+          <div class="print-toolbar">
+            <strong>${toolbarTitle}</strong>
+            <button type="button" onclick="window.print()">Print</button>
+          </div>
+          <main class="job-slip-sheet">${slips}</main>
+        </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 350);
+    }
+
+    function printJobSlipSheet() {
+      const data = renderJobSlipPreview();
+      if (!data.givenWeight || data.givenWeight <= 0) {
+        showToast("Please enter given/raw weight before printing the job slip.", "error", "Missing Weight");
+        return;
+      }
+
+      const printWindow = window.open("", "karigarJobSlipPrint", "width=900,height=700");
+      if (!printWindow) {
+        showToast("Please allow popup printing for the job slip.", "error", "Print Blocked");
+        return;
+      }
+
+      writeJobSlipPrintWindow(printWindow, data);
+    }
+
+    function normalizeJobSlipSnapshot(item) {
+      return {
+        id: Number(item?.id || 0),
+        slipNo: String(item?.slipNo ?? item?.slip_no ?? ""),
+        lotNo: String(item?.lotNo ?? item?.lot_no ?? ""),
+        karigarName: String(item?.karigarName ?? item?.karigar_name ?? ""),
+        workCategory: String(item?.workCategory ?? item?.work_category ?? "REGULAR_SANKHA").trim().toUpperCase() || "REGULAR_SANKHA",
+        workName: String(item?.targetProductName ?? item?.target_product_name ?? item?.workName ?? ""),
+        rawMaterialName: String(item?.rawMaterialName ?? item?.raw_material_name ?? ""),
+        givenWeight: Number(item?.givenWeight ?? item?.given_weight ?? 0),
+        targetWeight: Number(item?.targetItemWeight ?? item?.target_item_weight ?? item?.targetWeight ?? 0),
+        allowance: Number(item?.allowanceWeight ?? item?.allowance_weight ?? item?.allowance ?? 0),
+        divisor: Number(item?.calculationDivisor ?? item?.calculation_divisor ?? item?.divisor ?? 0),
+        expectedQty: Number(item?.expectedQty ?? item?.expected_qty ?? 0),
+        expectedOutput: Number(item?.expectedOutputWeight ?? item?.expected_output_weight ?? item?.expectedOutput ?? 0),
+        expectedReturnLoss: Number(item?.expectedReturnLossWeight ?? item?.expected_return_loss_weight ?? item?.expectedReturnLoss ?? 0),
+        remarks: String(item?.remarks || ""),
+        issuedAt: item?.issuedAt ?? item?.issued_at ?? item?.createdAt ?? item?.created_at ?? "",
+        printedAt: item?.printedAt ?? item?.printed_at ?? "",
+        companyName: getCurrentCompanyName() || document.getElementById("pageCompanyTitle")?.textContent?.trim() || "RPJ MANUFACTURER"
+      };
+    }
+
+    function getJobSlipDateText(value) {
+      const date = value ? new Date(value) : new Date();
+      if (Number.isNaN(date.getTime())) return new Date().toLocaleDateString("en-IN");
+      return date.toLocaleDateString("en-IN");
+    }
+
+    function mapSavedJobSlipToPrintData(item) {
+      const saved = normalizeJobSlipSnapshot(item);
+      return {
+        ...saved,
+        dateText: getJobSlipDateText(saved.issuedAt)
+      };
+    }
+
+    function buildJobSlipPayload(data) {
+      return buildAuthPayload({
+        lotNo: data.lotNo,
+        workCategory: data.workCategory,
+        processLotId: currentOpenProcessStep?.processLotId || processGuideData?.processLot?.id || null,
+        processStepId: currentOpenProcessStep?.id || null,
+        karigarName: data.karigarName,
+        rawMaterialName: data.workCategory || data.rawMaterialName || "",
+        givenWeight: data.givenWeight,
+        targetProductName: data.workName,
+        targetItemWeight: data.targetWeight,
+        allowanceWeight: data.allowance,
+        calculationDivisor: data.divisor,
+        expectedQty: data.expectedQty,
+        expectedOutputWeight: data.expectedOutput,
+        expectedReturnLossWeight: data.expectedReturnLoss,
+        calculationNote: "Expected Qty = floor(Given Weight / (Target Weight + Allowance))",
+        remarks: data.remarks
+      });
+    }
+
+    async function fetchPrintableJobSlip(id) {
+      const params = buildAuthParams();
+      const res = await fetch(`${API_BASE}/process/job-slips/${encodeURIComponent(id)}/print${params.toString() ? `?${params.toString()}` : ""}`, {
+        cache: "no-store"
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.message || "Job slip print fetch failed");
+      }
+      return data?.jobSlip;
+    }
+
+    async function saveAndPrintJobSlip() {
+      const data = renderJobSlipPreview();
+      if (!data.givenWeight || data.givenWeight <= 0) {
+        showToast("Please enter given/raw weight before printing the job slip.", "error", "Missing Weight");
+        return;
+      }
+
+      const printWindow = window.open("", "karigarJobSlipPrint", "width=900,height=700");
+      if (!printWindow) {
+        showToast("Please allow popup printing for the job slip.", "error", "Print Blocked");
+        return;
+      }
+      printWindow.document.write("<p style=\"font-family:Arial;padding:16px;\">Saving job slip...</p>");
+
+      try {
+        const res = await fetch(`${API_BASE}/process/job-slips`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildJobSlipPayload(data))
+        });
+        const savedData = await res.json();
+        if (!res.ok || savedData?.success === false) {
+          throw new Error(savedData?.message || "Job slip save failed");
+        }
+
+        const printable = await fetchPrintableJobSlip(savedData?.jobSlip?.id);
+        const printData = mapSavedJobSlipToPrintData(printable || savedData?.jobSlip);
+        writeJobSlipPrintWindow(printWindow, printData);
+        showToast(`Job slip ${printData.slipNo || ""} saved`, "success", "Saved");
+        await loadJobSlipHistory();
+      } catch (error) {
+        console.log("Job slip save failed, falling back to print-only:", error);
+        showToast("Save failed. Opening print-only slip instead.", "warning", "Print Only");
+        writeJobSlipPrintWindow(printWindow, data);
+      }
+    }
+
+    function renderJobSlipHistory() {
+      const body = document.getElementById("jobSlipHistoryBody");
+      if (!body) return;
+
+      if (!jobSlipHistoryData.length) {
+        body.innerHTML = `<tr><td colspan="7">No saved slips found</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = jobSlipHistoryData.map((item) => {
+        const slip = normalizeJobSlipSnapshot(item);
+        return `
+          <tr>
+            <td>${escapeHtml(slip.slipNo || "-")}</td>
+            <td>${escapeHtml(getJobSlipDateText(slip.issuedAt))}</td>
+            <td>${escapeHtml(slip.lotNo || "-")}</td>
+            <td>${escapeHtml(slip.karigarName || "-")}</td>
+            <td>${formatProcessWeight(slip.givenWeight)}g</td>
+            <td>${formatProcessQty(slip.expectedQty)}</td>
+            <td><button class="secondary-btn" type="button" onclick="reprintSavedJobSlip(${slip.id})">Print/Reprint</button></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadJobSlipHistory() {
+      try {
+        const params = buildAuthParams();
+        const res = await fetch(`${API_BASE}/process/job-slips${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Job slip history fetch failed");
+        }
+        jobSlipHistoryData = Array.isArray(data?.jobSlips) ? data.jobSlips : [];
+      } catch (error) {
+        console.log("Job slip history load error:", error);
+        jobSlipHistoryData = [];
+      }
+      renderJobSlipHistory();
+    }
+
+    async function openJobSlipHistory() {
+      const modal = document.getElementById("jobSlipHistoryModal");
+      if (modal) {
+        modal.classList.add("show");
+        modal.setAttribute("aria-hidden", "false");
+      }
+      await loadJobSlipHistory();
+    }
+
+    function closeJobSlipHistory() {
+      const modal = document.getElementById("jobSlipHistoryModal");
+      if (modal) {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+      }
+    }
+
+    async function reprintSavedJobSlip(id) {
+      const printWindow = window.open("", "karigarJobSlipPrint", "width=900,height=700");
+      if (!printWindow) {
+        showToast("Please allow popup printing for the job slip.", "error", "Print Blocked");
+        return;
+      }
+      printWindow.document.write("<p style=\"font-family:Arial;padding:16px;\">Loading saved job slip...</p>");
+
+      try {
+        const saved = await fetchPrintableJobSlip(id);
+        writeJobSlipPrintWindow(printWindow, mapSavedJobSlipToPrintData(saved));
+        await loadJobSlipHistory();
+      } catch (error) {
+        console.log("Saved job slip reprint error:", error);
+        printWindow.close();
+        showToast(error.message || "Saved slip could not be loaded", "error", "Reprint Failed");
+      }
     }
 
     function normalizeWorkCategory(value = "") {
@@ -2747,6 +3488,7 @@
         return `
           <label style="display:block; margin:6px 0;">
             <input type="checkbox" ${checked} onchange="toggleRecoveryStockSelection(${id}, this.checked)" />
+            ${escapeHtml(item.product_name || "Recovery Silver")} |
             Lot ${escapeHtml(item.lot_number || "-")} |
             ${formatProcessWeight(item.weight)}g |
             Step ${escapeHtml(item.reference_step_id || "-")}
@@ -2809,11 +3551,16 @@
         outputWeight: Number(item?.outputWeight ?? item?.output_weight ?? 0),
         recoveryWeight: Number(item?.recoveryWeight ?? item?.recovery_weight ?? 0),
         lossWeight: Number(item?.lossWeight ?? item?.loss_weight ?? 0),
+        additiveUsedWeight: Number(item?.additiveUsedWeight ?? item?.additive_used_weight ?? 0),
         inputQty: Number(item?.inputQty ?? item?.input_qty ?? 0),
         outputQty: Number(item?.outputQty ?? item?.output_qty ?? 0),
         lossQty: Number(item?.lossQty ?? item?.loss_qty ?? 0),
         lossReason: String(item?.lossReason ?? item?.loss_reason ?? "").trim(),
         status: String(item?.status || "COMPLETED").toUpperCase(),
+        canCorrect: Boolean(item?.canCorrect ?? item?.can_correct ?? false),
+        correctionLocked: Boolean(item?.correctionLocked ?? item?.correction_locked ?? false),
+        correctionLockReason: String(item?.correctionLockReason ?? item?.correction_lock_reason ?? "").trim(),
+        correctionLockCode: String(item?.correctionLockCode ?? item?.correction_lock_code ?? "").trim(),
         completedAt: item?.completedAt ?? item?.completed_at ?? "",
         createdAt: item?.createdAt ?? item?.created_at ?? ""
       };
@@ -2888,6 +3635,7 @@
       }
 
       renderLiveProcessSummary();
+      renderJobSlipPreview();
     }
 
     async function saveProcessLot() {
@@ -2986,6 +3734,7 @@
       document.getElementById("processExpectedQty").value = "";
       document.getElementById("processWorkCategory").value = "REGULAR_SANKHA";
       document.getElementById("processFinalWeight").value = "";
+      resetJobSlipCalculationFields();
       applyWorkCategoryMode();
 
       const summary = document.getElementById("processSummary");
@@ -3088,6 +3837,78 @@
       document.getElementById("stepLossReason").value = step?.lossReason || "";
       renderRecoveryStockOptions();
       renderProcessGuide();
+      renderJobSlipPreview();
+    }
+
+    function getLatestCompletedProcessStepForUi() {
+      return processStepData
+        .filter((step) => String(step.status || "").trim().toUpperCase() === "COMPLETED")
+        .sort((a, b) => {
+          const stepNoDiff = Number(b.stepNo || 0) - Number(a.stepNo || 0);
+          if (stepNoDiff) return stepNoDiff;
+          return Number(b.id || 0) - Number(a.id || 0);
+        })[0] || null;
+    }
+
+    function getProcessStepCorrectionUiLock(step) {
+      const status = String(step?.status || "").trim().toUpperCase();
+      if (status !== "COMPLETED") {
+        return { locked: true, reason: "Only completed steps can be corrected" };
+      }
+
+      if (step?.correctionLocked) {
+        return { locked: true, reason: step.correctionLockReason || "Step is locked" };
+      }
+
+      const latestCompleted = getLatestCompletedProcessStepForUi();
+      if (!latestCompleted || Number(latestCompleted.id || 0) !== Number(step.id || 0)) {
+        return { locked: true, reason: "Not latest completed step" };
+      }
+
+      const hasLaterStep = processStepData.some((candidate) => {
+        if (Number(candidate.id || 0) === Number(step.id || 0)) return false;
+        const candidateStepNo = Number(candidate.stepNo || 0);
+        const stepNo = Number(step.stepNo || 0);
+        return candidateStepNo > stepNo || (candidateStepNo === stepNo && Number(candidate.id || 0) > Number(step.id || 0));
+      });
+
+      if (hasLaterStep) {
+        return { locked: true, reason: "Later step exists" };
+      }
+
+      const activeCategory = getActiveStepWorkCategory();
+      const activeLot = lotData.find((lot) => getLotIdentityKey(lot.lotNo, lot.workCategory) === getLotIdentityKey(step.lotNo, activeCategory));
+      if (String(activeLot?.status || "").trim().toUpperCase() === "COMPLETED") {
+        return { locked: true, reason: "Lot already completed" };
+      }
+
+      return { locked: false, reason: "" };
+    }
+
+    function renderProcessStepCorrectionAction(step) {
+      const status = String(step?.status || "").trim().toUpperCase();
+      if (status !== "COMPLETED") return "-";
+
+      const lock = getProcessStepCorrectionUiLock(step);
+      if (lock.locked) {
+        if (String(step.correctionLockCode || "").trim().toUpperCase() === "ADDITIVE_STOCK_MOVEMENT_EXISTS") {
+          return `
+            <button class="primary-btn" type="button" title="${escapeHtml(lock.reason)}" onclick="openProcessStepCorrectionModal(${Number(step.id || 0)}, 'reverse')">
+              Reverse & Correct
+            </button>
+            <button class="secondary-btn" type="button" title="${escapeHtml(lock.reason)}" onclick="openProcessStepLockDetailsModal(${Number(step.id || 0)})">
+              Details
+            </button>
+          `;
+        }
+        return `
+          <button class="secondary-btn" type="button" title="${escapeHtml(lock.reason)}" onclick="openProcessStepLockDetailsModal(${Number(step.id || 0)})">
+            View Lock Details
+          </button>
+        `;
+      }
+
+      return `<button class="secondary-btn" type="button" onclick="openProcessStepCorrectionModal(${Number(step.id || 0)})">Correct</button>`;
     }
 
     function renderProcessStepTable() {
@@ -3095,7 +3916,7 @@
       if (!tbody) return;
 
       if (!processStepData.length) {
-        tbody.innerHTML = `<tr><td colspan="12">No process steps found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13">No process steps found</td></tr>`;
         renderProcessGuide();
         return;
       }
@@ -3116,11 +3937,359 @@
             <td>${isOpen ? "-" : formatProcessQty(step.lossQty)}</td>
             <td>${escapeHtml(step.status || "")}</td>
             <td>${escapeHtml(step.completedAt || "")}</td>
+            <td>${renderProcessStepCorrectionAction(step)}</td>
           </tr>
         `;
       }).join("");
 
       renderProcessGuide();
+    }
+
+    function getDependencyClassificationLabel(classification) {
+      const clean = String(classification || "CLEAN").trim().toUpperCase();
+      if (clean === "AUTO_REVERSIBLE_FUTURE") return "Auto reversible later";
+      if (clean === "NEEDS_ADMIN_APPROVAL_FUTURE") return "Needs admin approval later";
+      if (clean === "HARD_BLOCKED") return "Hard blocked";
+      return "Clean";
+    }
+
+    function formatDependencyDetail(dependencyKey, item) {
+      if (!item) return "";
+
+      if (dependencyKey === "downstreamSteps") {
+        return `Step ${item.stepNo || item.id || ""} ${item.processName || ""} (${item.status || ""})`.trim();
+      }
+
+      if (dependencyKey === "additiveIssues") {
+        return `${item.materialLabel || "KDM/Solder"} given ${formatProcessWeight(item.givenWeight)}g, returned ${formatProcessWeight(item.returnedWeight)}g`;
+      }
+
+      if (dependencyKey === "recoveryStock") {
+        return `Stock #${item.id || ""} ${formatProcessWeight(item.weight)}g, status ${item.status || "-"}`;
+      }
+
+      if (dependencyKey === "recoveryConsumed") {
+        return `Recovery stock #${item.stockId || ""} consumed ${formatProcessWeight(item.weight)}g`;
+      }
+
+      if (dependencyKey === "outsideLedger") {
+        return `Ledger #${item.id || ""} ${item.status || ""}, pending ${formatProcessWeight(item.pendingWeight)}g`;
+      }
+
+      if (dependencyKey === "stickerStock") {
+        return `Stock #${item.id || ""} ${item.barcode || ""} ${formatProcessWeight(item.weight)}g, status ${item.status || "-"}`.trim();
+      }
+
+      if (dependencyKey === "directStock") {
+        return `Stock #${item.id || ""} ${item.source || ""} ${formatProcessWeight(item.weight)}g, status ${item.status || "-"}`;
+      }
+
+      return `Record #${item.id || ""}`;
+    }
+
+    function renderProcessStepLockDetails(scan) {
+      const body = document.getElementById("processStepLockDetailsBody");
+      if (!body) return;
+
+      if (!scan) {
+        body.innerHTML = "No scan data found.";
+        return;
+      }
+
+      const dependencyLabels = {
+        downstreamSteps: "Later step exists",
+        additiveIssues: "KDM/Solder issued in this step",
+        recoveryStock: "Recovery stock created",
+        recoveryConsumed: "Recovery stock consumed",
+        outsideLedger: "Outside karigar ledger linked",
+        stickerStock: "Sticker stock created",
+        directStock: "Direct stock created"
+      };
+      const dependencies = scan.dependencies || {};
+      const lockReasons = Array.isArray(scan.lockReasons) ? scan.lockReasons : [];
+      const reasonHtml = lockReasons.length
+        ? lockReasons.map((reason) => `<li>${escapeHtml(reason.reason || reason.code || "Locked")} <small>(${escapeHtml(getDependencyClassificationLabel(reason.classification))})</small></li>`).join("")
+        : "<li>No blocking dependency found.</li>";
+      const dependencyHtml = Object.keys(dependencyLabels).map((key) => {
+        const dependency = dependencies[key] || {};
+        const details = Array.isArray(dependency.details) ? dependency.details : [];
+        const detailHtml = details.length
+          ? `<ul>${details.slice(0, 8).map((item) => `<li>${escapeHtml(formatDependencyDetail(key, item))}</li>`).join("")}</ul>`
+          : "";
+
+        return `
+          <tr>
+            <td>${escapeHtml(dependencyLabels[key])}</td>
+            <td>${Number(dependency.count || 0)}</td>
+            <td>${escapeHtml(getDependencyClassificationLabel(dependency.classification))}</td>
+            <td>${escapeHtml(dependency.reason || (Number(dependency.count || 0) ? dependencyLabels[key] : "Clean"))}${detailHtml}</td>
+          </tr>
+        `;
+      }).join("");
+
+      body.innerHTML = `
+        <div class="summary">
+          <h3>${scan.canCorrectNow ? "Correction Available" : "Correction Locked"}</h3>
+          <p>${scan.canCorrectNow ? "This step has no blocking dependency under current rules." : "Review the dependency checklist below before any future reversal workflow."}</p>
+        </div>
+        <div class="summary" style="margin-top:12px;">
+          <h3>Lock Reasons</h3>
+          <ul>${reasonHtml}</ul>
+        </div>
+        <div class="table-wrap process-summary-table-wrap" style="margin-top:12px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Dependency</th>
+                <th>Count</th>
+                <th>Classification</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${dependencyHtml}
+              <tr>
+                <td>Lot completed</td>
+                <td>${dependencies.lotCompleted ? 1 : 0}</td>
+                <td>${dependencies.lotCompleted ? "Needs admin approval later" : "Clean"}</td>
+                <td>${dependencies.lotCompleted ? "Lot is already completed" : "Clean"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function openProcessStepLockDetailsModal(stepId) {
+      processStepLockScanData = null;
+      const modal = document.getElementById("processStepLockDetailsModal");
+      const body = document.getElementById("processStepLockDetailsBody");
+      if (body) body.innerHTML = "Loading dependency scan...";
+      if (modal) {
+        modal.classList.add("show");
+        modal.setAttribute("aria-hidden", "false");
+      }
+
+      try {
+        const params = buildAuthParams();
+        const res = await fetch(`${API_BASE}/process/steps/${Number(stepId || 0)}/correction-scan${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Correction scan failed");
+        }
+
+        processStepLockScanData = data;
+        renderProcessStepLockDetails(data);
+      } catch (error) {
+        console.log("Correction scan error:", error);
+        if (body) body.innerHTML = `<p>${escapeHtml(error.message || "Correction scan failed")}</p>`;
+      }
+    }
+
+    function closeProcessStepLockDetailsModal() {
+      processStepLockScanData = null;
+      const modal = document.getElementById("processStepLockDetailsModal");
+      if (modal) {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+      }
+    }
+
+    function updateProcessStepCorrectionPreview() {
+      if (!correctingProcessStep) return;
+
+      const outputWeight = Number(document.getElementById("correctStepOutputWeight")?.value || 0);
+      const recoveryWeight = Number(document.getElementById("correctStepRecoveryWeight")?.value || 0);
+      const outputQty = Number(document.getElementById("correctStepOutputQty")?.value || 0);
+      const validation = validateProcessWeightBalance({
+        inputWeight: correctingProcessStep.inputWeight,
+        outputWeight,
+        recoveryWeight,
+        additiveUsedWeight: correctingProcessStep.additiveUsedWeight
+      });
+      const inputQty = Number(correctingProcessStep.inputQty || 0);
+      const lossWeightInput = document.getElementById("correctStepLossWeight");
+      const lossQtyInput = document.getElementById("correctStepLossQty");
+
+      if (lossWeightInput) lossWeightInput.value = validation.lossWeight.toFixed(3);
+      if (lossQtyInput) lossQtyInput.value = formatProcessQty(Math.max(inputQty - outputQty, 0));
+    }
+
+    async function loadProcessStepCorrectionImpact(stepId) {
+      const impact = document.getElementById("processStepCorrectionImpact");
+      if (!impact) return;
+      if (processStepCorrectionMode !== "reverse") {
+        impact.style.display = "none";
+        impact.innerHTML = "";
+        return;
+      }
+
+      impact.style.display = "block";
+      impact.innerHTML = "<h3>Impact Preview</h3><p>Loading dependency scan...</p>";
+
+      try {
+        const params = buildAuthParams();
+        const res = await fetch(`${API_BASE}/process/steps/${Number(stepId || 0)}/correction-scan${params.toString() ? `?${params.toString()}` : ""}`, {
+          cache: "no-store"
+        });
+        const data = await res.json();
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Correction scan failed");
+        }
+
+        const dependencies = data.dependencies || {};
+        const additiveDetails = dependencies.additiveIssues?.details || [];
+        const recoveryDetails = dependencies.recoveryStock?.details || [];
+        const additiveRestore = additiveDetails.reduce((sum, item) => sum + Number(item.givenWeight || 0), 0);
+        const recoveryReverse = recoveryDetails.reduce((sum, item) => sum + Number(item.weight || 0), 0);
+        const nonAutoReasons = (data.lockReasons || [])
+          .filter((reason) => String(reason.classification || "").trim().toUpperCase() !== "AUTO_REVERSIBLE_FUTURE")
+          .map((reason) => reason.reason || reason.code || "Blocked");
+
+        impact.innerHTML = `
+          <h3>Impact Preview</h3>
+          <p>KDM/Solder stock restore: ${formatProcessWeight(additiveRestore)}g</p>
+          <p>Recovery stock reversal: ${formatProcessWeight(recoveryReverse)}g</p>
+          <p>${nonAutoReasons.length ? `Blocked: ${escapeHtml(nonAutoReasons.join(" | "))}` : "Only clean auto-reversible dependencies found."}</p>
+        `;
+      } catch (error) {
+        impact.innerHTML = `<h3>Impact Preview</h3><p>${escapeHtml(error.message || "Correction scan failed")}</p>`;
+      }
+    }
+
+    async function openProcessStepCorrectionModal(stepId, mode = "correct") {
+      const step = processStepData.find((item) => Number(item.id || 0) === Number(stepId || 0));
+      if (!step) {
+        showToast("Process step not found in current history", "error", "Correction");
+        return;
+      }
+
+      const lock = getProcessStepCorrectionUiLock(step);
+      processStepCorrectionMode = mode === "reverse" ? "reverse" : "correct";
+      if (lock.locked && processStepCorrectionMode !== "reverse") {
+        showToast(lock.reason, "warning", "Step Locked");
+        return;
+      }
+
+      correctingProcessStep = step;
+      document.getElementById("processStepCorrectionTitle").textContent = processStepCorrectionMode === "reverse" ? "Reverse & Correct Step" : "Correct Process Step";
+      document.getElementById("correctStepProcessName").value = step.processName || "";
+      document.getElementById("correctStepKarigarName").value = step.karigarName || "";
+      document.getElementById("correctStepOutputWeight").value = formatProcessWeight(step.outputWeight || 0);
+      document.getElementById("correctStepRecoveryWeight").value = formatProcessWeight(step.recoveryWeight || 0);
+      document.getElementById("correctStepOutputQty").value = formatProcessQty(step.outputQty || 0);
+      document.getElementById("correctStepLossReason").value = step.lossReason || "";
+      document.getElementById("correctStepReason").value = "";
+      updateProcessStepCorrectionPreview();
+
+      const modal = document.getElementById("processStepCorrectionModal");
+      if (modal) {
+        modal.classList.add("show");
+        modal.setAttribute("aria-hidden", "false");
+      }
+      await loadProcessStepCorrectionImpact(step.id);
+    }
+
+    function closeProcessStepCorrectionModal() {
+      correctingProcessStep = null;
+      processStepCorrectionMode = "correct";
+      const modal = document.getElementById("processStepCorrectionModal");
+      if (modal) {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+      }
+    }
+
+    async function submitProcessStepCorrection() {
+      if (!correctingProcessStep?.id) {
+        showToast("No process step selected for correction", "error", "Correction");
+        return;
+      }
+
+      const processName = document.getElementById("correctStepProcessName")?.value?.trim() || "";
+      const karigarName = document.getElementById("correctStepKarigarName")?.value?.trim() || "";
+      const outputWeight = Number(document.getElementById("correctStepOutputWeight")?.value || 0);
+      const recoveryWeight = Number(document.getElementById("correctStepRecoveryWeight")?.value || 0);
+      const outputQty = Number(document.getElementById("correctStepOutputQty")?.value || 0);
+      const lossReason = document.getElementById("correctStepLossReason")?.value?.trim() || "";
+      const correctionReason = document.getElementById("correctStepReason")?.value?.trim() || "";
+      const weightValidation = validateProcessWeightBalance({
+        inputWeight: correctingProcessStep.inputWeight,
+        outputWeight,
+        recoveryWeight,
+        additiveUsedWeight: correctingProcessStep.additiveUsedWeight
+      });
+
+      if (!processName) {
+        showToast("Process name is required", "error", "Missing Field");
+        return;
+      }
+
+      if (!correctionReason) {
+        showToast("Correction reason is required", "error", "Missing Field");
+        return;
+      }
+
+      if (outputWeight < 0 || recoveryWeight < 0 || outputQty < 0) {
+        showToast("Correction values cannot be negative", "error", "Invalid Value");
+        return;
+      }
+
+      if (!weightValidation.ok) {
+        showToast(PROCESS_WEIGHT_BALANCE_MESSAGE, "error", "Invalid Value");
+        return;
+      }
+
+      if (Number(correctingProcessStep.inputQty || 0) > 0 && outputQty > Number(correctingProcessStep.inputQty || 0)) {
+        showToast("Output quantity cannot be greater than input quantity", "error", "Invalid Value");
+        return;
+      }
+
+      const button = document.getElementById("saveProcessStepCorrectionBtn");
+      if (button) button.disabled = true;
+
+      try {
+        const actionPath = processStepCorrectionMode === "reverse"
+          ? "reverse-and-correct"
+          : "correct";
+        const res = await fetch(`${API_BASE}/process/steps/${correctingProcessStep.id}/${actionPath}`, {
+          method: processStepCorrectionMode === "reverse" ? "POST" : "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAuthPayload({
+            processName,
+            karigarName,
+            outputWeight,
+            recoveryWeight,
+            outputQty,
+            lossReason,
+            correctionReason
+          }))
+        });
+        const data = await res.json();
+
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.lockReason || data?.message || "Process step correction failed");
+        }
+
+        showToast(data?.message || "Process step corrected", "success", "Corrected");
+        closeProcessStepCorrectionModal();
+        await loadProcessData();
+        renderProcessTable();
+        await loadRecoveryStockOptions();
+        await loadProcessStepContext();
+        await loadOutsideKarigarLedger();
+        await loadProcessLossSummary();
+      } catch (error) {
+        console.log("Process step correction error:", error);
+        showToast(error.message || "Process step correction failed", "error", "Correction Failed");
+      } finally {
+        if (button) button.disabled = false;
+      }
     }
 
     async function loadProcessSteps(lotNo) {
@@ -3161,6 +4330,7 @@
         setProcessStepHint();
         renderRecoveryStockOptions();
         renderProcessGuide();
+        renderJobSlipPreview();
         return;
       }
 
@@ -3196,6 +4366,7 @@
         setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty: ${formatProcessQty(data?.inputQty || 0)}`);
         renderRecoveryStockOptions();
         renderProcessGuide();
+        renderJobSlipPreview();
       } catch (error) {
         console.log("Next process input error:", error);
         currentOpenProcessStep = null;
@@ -3207,6 +4378,7 @@
         setProcessStepHint(error.message || "Unable to load next input weight.");
         renderRecoveryStockOptions();
         renderProcessGuide();
+        renderJobSlipPreview();
       }
     }
 
@@ -3342,7 +4514,12 @@
       const hasOutputQty = outputQtyRaw !== "" && outputQtyRaw !== null && outputQtyRaw !== undefined;
       const finishedOutputWeight = Number(outputRaw || 0);
       const recoveryWeight = Number(recoveryRaw || 0);
-      const calculatedLossWeight = inputWeight + additivePayload.additiveUsedWeight - finishedOutputWeight - recoveryWeight;
+      const weightValidation = validateProcessWeightBalance({
+        inputWeight,
+        outputWeight: finishedOutputWeight,
+        recoveryWeight,
+        additiveUsedWeight: additivePayload.additiveUsedWeight
+      });
       const additiveValidation = validateAdditiveMaterialInputs(true);
 
       if (!lotNo) {
@@ -3369,8 +4546,8 @@
         return;
       }
 
-      if ((hasOutput || hasRecovery) && calculatedLossWeight < 0) {
-        showToast("Output plus recovery cannot be greater than input weight plus additive material used weight", "error");
+      if ((hasOutput || hasRecovery) && !weightValidation.ok) {
+        showToast(PROCESS_WEIGHT_BALANCE_MESSAGE, "error");
         return;
       }
 
@@ -3466,6 +4643,7 @@
       renderRecoveryStockOptions();
       renderProcessGuide();
       renderLiveProcessSummary();
+      resetJobSlipCalculationFields();
     }
 
     function renderSummaryTable(bodyId, rows, emptyText, labelKey, compact = false) {
@@ -3760,25 +4938,47 @@
     document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("jobSlipTargetWeight")?.addEventListener("input", () => {
+      jobSlipTargetWeightEdited = true;
+      if (!jobSlipExpectedQtyEdited) {
+        document.getElementById("jobSlipExpectedQty").value = "";
+      }
+      renderJobSlipPreview();
+    });
+    document.getElementById("jobSlipAllowance")?.addEventListener("input", () => {
+      if (!jobSlipExpectedQtyEdited) {
+        document.getElementById("jobSlipExpectedQty").value = "";
+      }
+      renderJobSlipPreview();
+    });
+    document.getElementById("jobSlipExpectedQty")?.addEventListener("input", () => {
+      jobSlipExpectedQtyEdited = true;
+      renderJobSlipPreview();
+    });
+    document.getElementById("jobSlipRemarks")?.addEventListener("input", renderJobSlipPreview);
     document.getElementById("processWorkCategory")?.addEventListener("change", () => {
       syncStepWorkCategoryFromSelector();
       applyWorkCategoryMode();
+      renderJobSlipPreview();
       if (document.getElementById("stepLotNo")?.value?.trim()) {
         loadProcessStepContext();
       }
     });
     document.getElementById("stepLotNo")?.addEventListener("input", () => {
       syncStepWorkCategoryFromSelector();
+      renderJobSlipPreview();
       scheduleProcessStepContextLoad();
     });
     document.getElementById("stepLotNo")?.addEventListener("change", () => {
       syncStepWorkCategoryFromSelector();
+      renderJobSlipPreview();
       loadProcessStepContext();
     });
     document.getElementById("stepProcessName")?.addEventListener("input", () => {
       applyStepEntryMode();
       renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
+      renderJobSlipPreview();
       loadAdditiveIssues();
     });
     document.getElementById("stepKarigarName")?.addEventListener("input", () => {
@@ -3786,13 +4986,29 @@
       if (issueKarigar && !issueKarigar.value.trim()) {
         issueKarigar.value = document.getElementById("stepKarigarName")?.value?.trim() || "";
       }
+      renderJobSlipPreview();
     });
-    document.getElementById("stepInputQty")?.addEventListener("input", updateProcessStepLoss);
-    document.getElementById("stepOutputWeight")?.addEventListener("input", updateProcessStepLoss);
+    document.getElementById("stepInputQty")?.addEventListener("input", () => {
+      updateProcessStepLoss();
+      renderJobSlipPreview();
+    });
+    document.getElementById("stepOutputWeight")?.addEventListener("input", () => {
+      updateProcessStepLoss();
+      renderJobSlipPreview();
+    });
     document.getElementById("stepAdditiveGivenWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
     document.getElementById("stepAdditiveReturnedWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
     document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
-    document.getElementById("stepOutputQty")?.addEventListener("input", updateProcessStepLoss);
+    document.getElementById("stepOutputQty")?.addEventListener("input", () => {
+      updateProcessStepLoss();
+      renderJobSlipPreview();
+    });
+    document.getElementById("correctStepOutputWeight")?.addEventListener("input", updateProcessStepCorrectionPreview);
+    document.getElementById("correctStepRecoveryWeight")?.addEventListener("input", updateProcessStepCorrectionPreview);
+    document.getElementById("correctStepOutputQty")?.addEventListener("input", updateProcessStepCorrectionPreview);
+    document.getElementById("karigarName")?.addEventListener("input", renderJobSlipPreview);
+    document.getElementById("karigarLot")?.addEventListener("change", renderJobSlipPreview);
+    document.getElementById("karigarGivenWeight")?.addEventListener("input", renderJobSlipPreview);
 
     window.addEventListener("load", async function () {
       renderProfileBox();
