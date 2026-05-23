@@ -3496,6 +3496,192 @@ function getEffectiveStockState(row = {}) {
   return String(row.stock_state || row.stockState || row.status || "IN_STOCK").trim().toUpperCase();
 }
 
+function normalizeStockLifecycleState(stockRow = {}) {
+  const status = normalizeStockReadStatus(stockRow.status || "IN_STOCK") || "IN_STOCK";
+  const stockState = normalizeStockReadStatus(stockRow.stock_state || stockRow.stockState || "") || status;
+  const source = normalizeStockReadStatus(stockRow.source || "");
+  const processType = normalizeStockReadStatus(stockRow.process_type || stockRow.processType || "");
+  const category = normalizeStockReadStatus(stockRow.category || "");
+  const productName = normalizeStockReadStatus(stockRow.product_name || stockRow.productName || "");
+  const invoiceNumber = String(stockRow.invoice_number || stockRow.invoiceNumber || "").trim();
+  const barcode = String(stockRow.barcode || "").trim();
+  const deletedAt = stockRow.deleted_at || stockRow.deletedAt || null;
+  const currentBranchId = stockRow.current_branch_id ?? stockRow.currentBranchId ?? null;
+
+  const isProcessRecovery =
+    source === "PROCESS_RECOVERY" ||
+    processType === "PROCESS_RECOVERY" ||
+    processType === "CUTTING_RECOVERY" ||
+    category === "RECOVERY" ||
+    productName === "RECOVERY" ||
+    productName.startsWith("RECOVERY SILVER");
+
+  let normalizedStatus = status;
+  let normalizedStockState = stockState;
+  let sellable = true;
+  let lifecycleType = "IN_STOCK";
+  const reasons = [];
+
+  if (isProcessRecovery) {
+    lifecycleType = "PROCESS_RECOVERY";
+    normalizedStatus = status === "DELETED" ? "DELETED" : "IN_STOCK";
+    normalizedStockState = status === "DELETED" ? "DELETED" : "PROCESS_RECOVERY";
+    sellable = false;
+    reasons.push("PROCESS_RECOVERY_STOCK_HANDLED_SEPARATELY");
+  } else if (status === "DELETED" || stockState === "DELETED" || deletedAt) {
+    lifecycleType = "DELETED";
+    normalizedStatus = "DELETED";
+    normalizedStockState = "DELETED";
+    sellable = false;
+  } else if (status === "SOLD" || stockState === "SOLD") {
+    lifecycleType = "SOLD";
+    normalizedStatus = "SOLD";
+    normalizedStockState = "SOLD";
+    sellable = false;
+  } else if (stockState === "IN_TRANSIT" || status === "IN_TRANSIT") {
+    lifecycleType = "IN_TRANSIT";
+    normalizedStatus = "IN_STOCK";
+    normalizedStockState = "IN_TRANSIT";
+    sellable = false;
+  } else if (stockState === "TRANSFER_SHORTAGE" || status === "TRANSFER_SHORTAGE") {
+    lifecycleType = "TRANSFER_SHORTAGE";
+    normalizedStatus = "IN_STOCK";
+    normalizedStockState = "TRANSFER_SHORTAGE";
+    sellable = false;
+  } else if (stockState === "DAMAGED_RETURN" || status === "DAMAGED_RETURN" || stockState === "DAMAGED" || status === "DAMAGED") {
+    lifecycleType = "DAMAGED_RETURN";
+    normalizedStatus = "DAMAGED_RETURN";
+    normalizedStockState = "DAMAGED_RETURN";
+    sellable = false;
+  } else if (stockState === "USED" || status === "USED") {
+    lifecycleType = "USED";
+    normalizedStatus = "USED";
+    normalizedStockState = "USED";
+    sellable = false;
+  } else if (stockState === "RETURN_TO_STOCK" || status === "RETURN_TO_STOCK") {
+    lifecycleType = "RETURN_TO_STOCK";
+    normalizedStatus = "IN_STOCK";
+    normalizedStockState = "IN_STOCK";
+    sellable = true;
+  } else {
+    lifecycleType = "IN_STOCK";
+    normalizedStatus = "IN_STOCK";
+    normalizedStockState = "IN_STOCK";
+    sellable = true;
+  }
+
+  const mismatches = [];
+  if (status === "SOLD" && stockState === "IN_STOCK") {
+    mismatches.push("SOLD_STOCK_STATE_IN_STOCK");
+  }
+  if (normalizedStatus === "SOLD" && !invoiceNumber) {
+    mismatches.push("SOLD_WITHOUT_INVOICE_NUMBER");
+  }
+  if (normalizedStatus === "IN_STOCK" && invoiceNumber) {
+    mismatches.push("IN_STOCK_WITH_INVOICE_NUMBER");
+  }
+  if ((status === "DELETED" || stockState === "DELETED") && !deletedAt) {
+    mismatches.push("DELETED_WITHOUT_DELETED_AT");
+  }
+  if (deletedAt && status !== "DELETED") {
+    mismatches.push("DELETED_AT_WITH_ACTIVE_STATUS");
+  }
+  if (!currentBranchId && normalizedStatus !== "DELETED" && !isProcessRecovery) {
+    mismatches.push("ACTIVE_STOCK_WITHOUT_BRANCH");
+  }
+  if ((stockState === "IN_TRANSIT" || stockState === "TRANSFER_SHORTAGE") && status !== "IN_STOCK") {
+    mismatches.push("TRANSFER_STATE_STATUS_MISMATCH");
+  }
+  if (stockState === "IN_STOCK" && !sellable) {
+    mismatches.push("NON_SELLABLE_STOCK_STATE_IN_STOCK");
+  }
+  if (!barcode && !isProcessRecovery && normalizedStatus !== "DELETED") {
+    mismatches.push("ACTIVE_STOCK_WITHOUT_BARCODE");
+  }
+
+  return {
+    lifecycleType,
+    sellable,
+    normalized: {
+      status: normalizedStatus,
+      stock_state: normalizedStockState,
+      invoice_number: normalizedStatus === "IN_STOCK" ? "" : invoiceNumber,
+      deleted_at_required: normalizedStatus === "DELETED"
+    },
+    current: {
+      status,
+      stock_state: stockState,
+      invoice_number: invoiceNumber,
+      deleted_at: deletedAt,
+      current_branch_id: currentBranchId
+    },
+    mismatches,
+    warnings: reasons
+  };
+}
+
+function getNormalizedBarcodeValue(barcode = "") {
+  return String(barcode || "").trim().toUpperCase();
+}
+
+function isProcessExcludedBarcodeStock(stockRow = {}) {
+  const source = normalizeStockReadStatus(stockRow.source || "");
+  const processType = normalizeStockReadStatus(stockRow.process_type || stockRow.processType || "");
+  const category = normalizeStockReadStatus(stockRow.category || "");
+  const productName = normalizeStockReadStatus(stockRow.product_name || stockRow.productName || "");
+
+  return (
+    ["PROCESS_RECOVERY", "PROCESS_KDM", "PROCESS_PIN"].includes(source) ||
+    ["PROCESS_RECOVERY", "CUTTING_RECOVERY", "PROCESS_KDM", "PROCESS_PIN"].includes(processType) ||
+    ["RECOVERY", "KDM", "PIN"].includes(category) ||
+    ["RECOVERY", "KDM", "PIN"].includes(productName) ||
+    productName.startsWith("RECOVERY SILVER")
+  );
+}
+
+function buildActiveBarcodeKey(stockRow = {}) {
+  const normalizedBarcode = getNormalizedBarcodeValue(stockRow.barcode || "");
+  if (!normalizedBarcode) return null;
+  if (isProcessExcludedBarcodeStock(stockRow)) return null;
+
+  const status = normalizeStockReadStatus(stockRow.status || "IN_STOCK") || "IN_STOCK";
+  const effectiveState = normalizeStockReadStatus(stockRow.stock_state || stockRow.stockState || status) || status;
+  const deletedAt = stockRow.deleted_at || stockRow.deletedAt || null;
+  const invoiceNumber = String(stockRow.invoice_number || stockRow.invoiceNumber || "").trim();
+
+  if (deletedAt) return null;
+  if (status === "DELETED" || effectiveState === "DELETED") return null;
+  if (["SOLD", "DAMAGED", "DAMAGED_RETURN", "USED"].includes(status)) return null;
+  if (["SOLD", "IN_TRANSIT", "TRANSFER_SHORTAGE", "DAMAGED", "DAMAGED_RETURN", "USED"].includes(effectiveState)) return null;
+  if (invoiceNumber) return null;
+
+  return normalizedBarcode;
+}
+
+function getNormalizedBarcodeSql(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return `UPPER(TRIM(COALESCE(${prefix}barcode, '')))`;
+}
+
+function getActiveBarcodeKeySql(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return `
+    CASE
+      WHEN ${prefix}barcode IS NULL OR TRIM(COALESCE(${prefix}barcode, '')) = '' THEN NULL
+      WHEN ${prefix}deleted_at IS NOT NULL THEN NULL
+      WHEN UPPER(COALESCE(${prefix}status, 'IN_STOCK')) IN ('DELETED', 'SOLD', 'DAMAGED', 'DAMAGED_RETURN', 'USED') THEN NULL
+      WHEN UPPER(COALESCE(NULLIF(TRIM(${prefix}stock_state), ''), ${prefix}status, 'IN_STOCK')) IN ('DELETED', 'SOLD', 'IN_TRANSIT', 'TRANSFER_SHORTAGE', 'DAMAGED', 'DAMAGED_RETURN', 'USED') THEN NULL
+      WHEN TRIM(COALESCE(${prefix}invoice_number, '')) <> '' THEN NULL
+      WHEN UPPER(COALESCE(${prefix}source, '')) IN ('PROCESS_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') THEN NULL
+      WHEN UPPER(COALESCE(${prefix}process_type, '')) IN ('PROCESS_RECOVERY', 'CUTTING_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') THEN NULL
+      WHEN UPPER(COALESCE(${prefix}category, '')) IN ('RECOVERY', 'KDM', 'PIN') THEN NULL
+      WHEN UPPER(COALESCE(${prefix}product_name, '')) IN ('RECOVERY', 'KDM', 'PIN') THEN NULL
+      WHEN UPPER(COALESCE(${prefix}product_name, '')) LIKE 'RECOVERY SILVER%' THEN NULL
+      ELSE UPPER(TRIM(${prefix}barcode))
+    END
+  `;
+}
+
 async function validateReadableBranchScope(access, requestedBranchId = null) {
   if (access.isBranchLocked) {
     if (requestedBranchId !== null && Number(requestedBranchId) !== Number(access.userBranchId)) {
@@ -3598,6 +3784,984 @@ function buildBranchStockWhere(access, { branchId = null, status = "", stockStat
     whereSql: whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "",
     params
   };
+}
+
+function getStockLifecycleAuditLimit(req) {
+  const parsed = Number(req.query.limit || 500);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 500;
+  return Math.min(Math.trunc(parsed), 1000);
+}
+
+function getStockLifecycleBranchFilter(branchScope, column = "s.current_branch_id") {
+  if (!branchScope?.branchId) return { sql: "", params: [] };
+  return { sql: ` AND ${column} = ?`, params: [branchScope.branchId] };
+}
+
+function mapStockLifecycleRow(row = {}) {
+  const normalized = normalizeStockLifecycleState(row);
+  return {
+    id: row.id ?? null,
+    company_id: row.company_id ?? null,
+    barcode: row.barcode || "",
+    lot_number: row.lot_number || "",
+    serial: row.serial || "",
+    product_name: row.product_name || "",
+    source: row.source || "",
+    process_type: row.process_type || "",
+    status: row.status || "",
+    stock_state: row.stock_state || "",
+    current_branch_id: row.current_branch_id ?? null,
+    invoice_number: row.invoice_number || "",
+    deleted_at: row.deleted_at || null,
+    lifecycleType: normalized.lifecycleType,
+    sellable: normalized.sellable,
+    mismatches: normalized.mismatches,
+    warnings: normalized.warnings,
+    normalized: normalized.normalized
+  };
+}
+
+async function buildStockLifecycleAudit({ companyId, branchScope = {}, limit = 500, db = pool }) {
+  const branchFilter = getStockLifecycleBranchFilter(branchScope, "s.current_branch_id");
+  const warnings = [];
+
+  const [summaryRows] = await db.query(
+    `
+    SELECT
+      COUNT(*) AS totalStock,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, 'IN_STOCK')) = 'IN_STOCK' THEN 1 ELSE 0 END) AS inStockStatus,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'SOLD' THEN 1 ELSE 0 END) AS soldStatus,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'DELETED' THEN 1 ELSE 0 END) AS deletedStatus,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_TRANSIT' THEN 1 ELSE 0 END) AS inTransitState,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'TRANSFER_SHORTAGE' THEN 1 ELSE 0 END) AS transferShortageState,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) IN ('DAMAGED', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS damagedState,
+      SUM(CASE WHEN s.current_branch_id IS NULL AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED' THEN 1 ELSE 0 END) AS branchlessActive
+    FROM stock s
+    WHERE s.company_id = ?
+      ${branchFilter.sql}
+    `,
+    [companyId, ...branchFilter.params]
+  );
+
+  const [duplicateBarcodes] = await db.query(
+    `
+    SELECT
+      s.company_id,
+      UPPER(TRIM(s.barcode)) AS normalized_barcode,
+      COUNT(*) AS count,
+      GROUP_CONCAT(CONCAT(s.id, ':', COALESCE(s.status, ''), '/', COALESCE(s.stock_state, ''), '/', COALESCE(s.invoice_number, '')) ORDER BY s.id SEPARATOR ', ') AS rows_found
+    FROM stock s
+    WHERE s.company_id = ?
+      AND s.barcode IS NOT NULL
+      AND TRIM(s.barcode) <> ''
+      AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      AND s.deleted_at IS NULL
+      AND UPPER(COALESCE(s.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+      AND UPPER(COALESCE(s.category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+      AND UPPER(COALESCE(s.product_name, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+      AND UPPER(COALESCE(s.product_name, '')) NOT LIKE 'RECOVERY SILVER%'
+      ${branchFilter.sql}
+    GROUP BY s.company_id, UPPER(TRIM(s.barcode))
+    HAVING COUNT(*) > 1
+    ORDER BY count DESC, normalized_barcode ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const [duplicateLotSerials] = await db.query(
+    `
+    SELECT
+      s.company_id,
+      UPPER(TRIM(s.lot_number)) AS normalized_lot_number,
+      UPPER(TRIM(s.serial)) AS normalized_serial,
+      COUNT(*) AS count,
+      GROUP_CONCAT(CONCAT(s.id, ':', COALESCE(s.barcode, ''), '/', COALESCE(s.status, ''), '/', COALESCE(s.stock_state, '')) ORDER BY s.id SEPARATOR ', ') AS rows_found
+    FROM stock s
+    WHERE s.company_id = ?
+      AND TRIM(COALESCE(s.lot_number, '')) <> ''
+      AND TRIM(COALESCE(s.serial, '')) <> ''
+      AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+      AND s.deleted_at IS NULL
+      ${branchFilter.sql}
+    GROUP BY s.company_id, UPPER(TRIM(s.lot_number)), UPPER(TRIM(s.serial))
+    HAVING COUNT(*) > 1
+    ORDER BY count DESC, normalized_lot_number ASC, normalized_serial ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const [soldButAvailableRows] = await db.query(
+    `
+    SELECT s.*
+    FROM stock s
+    WHERE s.company_id = ?
+      AND UPPER(COALESCE(s.status, '')) = 'SOLD'
+      AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK'
+      ${branchFilter.sql}
+    ORDER BY s.id ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const [branchlessRows] = branchScope?.branchId
+    ? [[]]
+    : await db.query(
+      `
+      SELECT s.*
+      FROM stock s
+      WHERE s.company_id = ?
+        AND s.current_branch_id IS NULL
+        AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED'
+        AND s.deleted_at IS NULL
+        AND UPPER(COALESCE(s.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+      ORDER BY s.id ASC
+      LIMIT ?
+      `,
+      [companyId, limit]
+    );
+
+  const [lifecycleRows] = await db.query(
+    `
+    SELECT s.*
+    FROM stock s
+    WHERE s.company_id = ?
+      AND (
+        (UPPER(COALESCE(s.status, '')) = 'SOLD' AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK')
+        OR (UPPER(COALESCE(s.status, '')) = 'SOLD' AND TRIM(COALESCE(s.invoice_number, '')) = '')
+        OR (UPPER(COALESCE(s.status, '')) = 'IN_STOCK' AND TRIM(COALESCE(s.invoice_number, '')) <> '')
+        OR (UPPER(COALESCE(s.status, '')) = 'DELETED' AND s.deleted_at IS NULL)
+        OR (s.deleted_at IS NOT NULL AND UPPER(COALESCE(s.status, '')) <> 'DELETED')
+        OR (s.current_branch_id IS NULL AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED' AND UPPER(COALESCE(s.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY'))
+        OR (UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE') AND UPPER(COALESCE(s.status, '')) <> 'IN_STOCK')
+        OR ((s.stock_state IS NULL OR TRIM(s.stock_state) = '') AND TRIM(COALESCE(s.status, '')) <> '')
+        OR (UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) IN ('DAMAGED_RETURN', 'DAMAGED', 'USED') AND UPPER(COALESCE(s.status, '')) = 'IN_STOCK')
+      )
+      ${branchFilter.sql}
+    ORDER BY s.id ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  if (duplicateBarcodes.length >= limit) warnings.push("DUPLICATE_BARCODE_RESULT_LIMIT_REACHED");
+  if (duplicateLotSerials.length >= limit) warnings.push("DUPLICATE_LOT_SERIAL_RESULT_LIMIT_REACHED");
+  if (lifecycleRows.length >= limit) warnings.push("LIFECYCLE_MISMATCH_RESULT_LIMIT_REACHED");
+
+  const summary = summaryRows[0] || {};
+  return {
+    summary: {
+      totalStock: Number(summary.totalStock || 0),
+      inStockStatus: Number(summary.inStockStatus || 0),
+      soldStatus: Number(summary.soldStatus || 0),
+      deletedStatus: Number(summary.deletedStatus || 0),
+      inTransitState: Number(summary.inTransitState || 0),
+      transferShortageState: Number(summary.transferShortageState || 0),
+      damagedState: Number(summary.damagedState || 0),
+      branchlessActive: Number(summary.branchlessActive || 0),
+      duplicateBarcodeGroups: duplicateBarcodes.length,
+      duplicateLotSerialGroups: duplicateLotSerials.length,
+      soldButAvailable: soldButAvailableRows.length,
+      lifecycleMismatch: lifecycleRows.length
+    },
+    duplicateBarcodes: duplicateBarcodes.map((row) => ({
+      company_id: row.company_id,
+      normalized_barcode: row.normalized_barcode,
+      count: Number(row.count || 0),
+      rows_found: row.rows_found || ""
+    })),
+    duplicateLotSerials: duplicateLotSerials.map((row) => ({
+      company_id: row.company_id,
+      normalized_lot_number: row.normalized_lot_number,
+      normalized_serial: row.normalized_serial,
+      count: Number(row.count || 0),
+      rows_found: row.rows_found || ""
+    })),
+    soldButAvailable: soldButAvailableRows.map(mapStockLifecycleRow),
+    branchlessStock: branchlessRows.map(mapStockLifecycleRow),
+    lifecycleMismatch: lifecycleRows.map(mapStockLifecycleRow),
+    warnings
+  };
+}
+
+async function buildStockLifecycleNormalizationPreview({ companyId, branchScope = {}, limit = 500, db = pool }) {
+  const branchFilter = getStockLifecycleBranchFilter(branchScope, "s.current_branch_id");
+  const [rows] = await db.query(
+    `
+    SELECT s.*
+    FROM stock s
+    WHERE s.company_id = ?
+      AND (
+        UPPER(COALESCE(s.status, '')) IN ('SOLD', 'DELETED', 'IN_TRANSIT', 'TRANSFER_SHORTAGE', 'RETURN_TO_STOCK', 'DAMAGED_RETURN', 'DAMAGED', 'USED')
+        OR UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) IN ('SOLD', 'DELETED', 'IN_TRANSIT', 'TRANSFER_SHORTAGE', 'RETURN_TO_STOCK', 'DAMAGED_RETURN', 'DAMAGED', 'USED')
+        OR UPPER(COALESCE(s.source, '')) = 'PROCESS_RECOVERY'
+        OR UPPER(COALESCE(s.process_type, '')) IN ('PROCESS_RECOVERY', 'CUTTING_RECOVERY')
+        OR TRIM(COALESCE(s.invoice_number, '')) <> ''
+        OR s.current_branch_id IS NULL
+        OR s.deleted_at IS NOT NULL
+      )
+      ${branchFilter.sql}
+    ORDER BY s.id ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const preview = rows
+    .map((row) => {
+      const normalized = normalizeStockLifecycleState(row);
+      const oldValues = {
+        status: normalized.current.status,
+        stock_state: normalized.current.stock_state,
+        invoice_number: normalized.current.invoice_number,
+        deleted_at: normalized.current.deleted_at,
+        current_branch_id: normalized.current.current_branch_id
+      };
+      const normalizedValues = {
+        status: normalized.normalized.status,
+        stock_state: normalized.normalized.stock_state,
+        invoice_number: normalized.normalized.invoice_number,
+        deleted_at_required: normalized.normalized.deleted_at_required
+      };
+      const wouldChange =
+        oldValues.status !== normalizedValues.status ||
+        oldValues.stock_state !== normalizedValues.stock_state ||
+        (normalizedValues.status === "IN_STOCK" && oldValues.invoice_number !== "") ||
+        (normalizedValues.deleted_at_required && !oldValues.deleted_at);
+
+      return {
+        id: row.id,
+        company_id: row.company_id,
+        barcode: row.barcode || "",
+        lot_number: row.lot_number || "",
+        serial: row.serial || "",
+        lifecycleType: normalized.lifecycleType,
+        sellable: normalized.sellable,
+        oldValues,
+        normalizedValues,
+        mismatches: normalized.mismatches,
+        warnings: normalized.warnings,
+        wouldChange
+      };
+    })
+    .filter((row) => row.wouldChange || row.mismatches.length || row.warnings.length);
+
+  return {
+    summary: {
+      scannedRows: rows.length,
+      previewRows: preview.length,
+      resultLimit: limit,
+      truncated: rows.length >= limit
+    },
+    preview,
+    warnings: rows.length >= limit ? ["NORMALIZATION_PREVIEW_RESULT_LIMIT_REACHED"] : []
+  };
+}
+
+function getStockLifecycleManualReviewReasons(row = {}, duplicateContext = {}) {
+  const normalized = normalizeStockLifecycleState(row);
+  const reasons = [];
+  const barcodeKey = normalizeBarcodeForComparison(row.barcode || "");
+  const lotKey = normalizeBarcodeForComparison(row.lot_number || "");
+  const serialKey = normalizeBarcodeForComparison(row.serial || "");
+  const lotSerialKey = lotKey && serialKey ? `${lotKey}::${serialKey}` : "";
+
+  if (barcodeKey && duplicateContext.duplicateBarcodeKeys?.has(barcodeKey)) {
+    reasons.push("DUPLICATE_BARCODE_MANUAL_REVIEW");
+  }
+  if (lotSerialKey && duplicateContext.duplicateLotSerialKeys?.has(lotSerialKey)) {
+    reasons.push("DUPLICATE_LOT_SERIAL_MANUAL_REVIEW");
+  }
+  if (normalized.mismatches.includes("IN_STOCK_WITH_INVOICE_NUMBER")) {
+    reasons.push("IN_STOCK_WITH_INVOICE_NUMBER_MANUAL_REVIEW");
+  }
+  if (normalized.mismatches.includes("ACTIVE_STOCK_WITHOUT_BRANCH")) {
+    reasons.push("BRANCHLESS_STOCK_MANUAL_REVIEW");
+  }
+  if (normalized.mismatches.includes("ACTIVE_STOCK_WITHOUT_BARCODE")) {
+    reasons.push("ACTIVE_STOCK_WITHOUT_BARCODE_MANUAL_REVIEW");
+  }
+
+  return reasons;
+}
+
+function buildSafeStockLifecycleNormalization(row = {}, duplicateContext = {}) {
+  const normalized = normalizeStockLifecycleState(row);
+  const status = normalizeStockReadStatus(row.status || "");
+  const stockState = normalizeStockReadStatus(row.stock_state || row.stockState || "") || status;
+  const deletedAt = row.deleted_at || row.deletedAt || null;
+  const manualReviewReasons = getStockLifecycleManualReviewReasons(row, duplicateContext);
+
+  if (manualReviewReasons.length) {
+    return {
+      safe: false,
+      reason: manualReviewReasons.join(", "),
+      normalized
+    };
+  }
+
+  if (status === "SOLD" && stockState === "IN_STOCK") {
+    return {
+      safe: true,
+      reason: "SOLD_STOCK_STATE_IN_STOCK",
+      updates: {
+        status: "SOLD",
+        stock_state: "SOLD",
+        deleted_at: deletedAt
+      },
+      normalized
+    };
+  }
+
+  if ((status === "DELETED" || stockState === "DELETED") && !deletedAt) {
+    return {
+      safe: true,
+      reason: "DELETED_WITHOUT_DELETED_AT",
+      updates: {
+        status: "DELETED",
+        stock_state: "DELETED",
+        deleted_at: "NOW"
+      },
+      normalized
+    };
+  }
+
+  if (deletedAt && status !== "DELETED") {
+    return {
+      safe: true,
+      reason: "DELETED_AT_WITH_ACTIVE_STATUS",
+      updates: {
+        status: "DELETED",
+        stock_state: "DELETED",
+        deleted_at: deletedAt
+      },
+      normalized
+    };
+  }
+
+  return {
+    safe: false,
+    reason: normalized.mismatches.length ? normalized.mismatches.join(", ") : "NO_SAFE_AUTO_NORMALIZATION",
+    normalized
+  };
+}
+
+async function getStockLifecycleDuplicateContext(connection, companyId, stockRows = []) {
+  const barcodeKeys = stockRows
+    .map((row) => normalizeBarcodeForComparison(row.barcode || ""))
+    .filter(Boolean);
+  const lotSerialKeys = stockRows
+    .map((row) => {
+      const lotKey = normalizeBarcodeForComparison(row.lot_number || "");
+      const serialKey = normalizeBarcodeForComparison(row.serial || "");
+      return lotKey && serialKey ? { lotKey, serialKey, combined: `${lotKey}::${serialKey}` } : null;
+    })
+    .filter(Boolean);
+  const duplicateBarcodeKeys = new Set();
+  const duplicateLotSerialKeys = new Set();
+
+  if (barcodeKeys.length) {
+    const uniqueBarcodeKeys = [...new Set(barcodeKeys)];
+    const [barcodeRows] = await connection.query(
+      `
+      SELECT UPPER(TRIM(barcode)) AS barcode_key, COUNT(*) AS count
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(TRIM(barcode)) IN (?)
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+        AND deleted_at IS NULL
+        AND UPPER(COALESCE(source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+        AND UPPER(COALESCE(category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+        AND UPPER(COALESCE(product_name, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+        AND UPPER(COALESCE(product_name, '')) NOT LIKE 'RECOVERY SILVER%'
+      GROUP BY UPPER(TRIM(barcode))
+      HAVING COUNT(*) > 1
+      `,
+      [companyId, uniqueBarcodeKeys]
+    );
+    barcodeRows.forEach((row) => duplicateBarcodeKeys.add(String(row.barcode_key || "").trim()));
+  }
+
+  if (lotSerialKeys.length) {
+    const uniqueLotSerialKeys = [...new Map(lotSerialKeys.map((item) => [item.combined, item])).values()];
+    const conditions = uniqueLotSerialKeys.map(() => "(UPPER(TRIM(lot_number)) = ? AND UPPER(TRIM(serial)) = ?)").join(" OR ");
+    const params = uniqueLotSerialKeys.flatMap((item) => [item.lotKey, item.serialKey]);
+    const [lotRows] = await connection.query(
+      `
+      SELECT UPPER(TRIM(lot_number)) AS lot_key, UPPER(TRIM(serial)) AS serial_key, COUNT(*) AS count
+      FROM stock
+      WHERE company_id = ?
+        AND (${conditions})
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+        AND deleted_at IS NULL
+      GROUP BY UPPER(TRIM(lot_number)), UPPER(TRIM(serial))
+      HAVING COUNT(*) > 1
+      `,
+      [companyId, ...params]
+    );
+    lotRows.forEach((row) => {
+      duplicateLotSerialKeys.add(`${String(row.lot_key || "").trim()}::${String(row.serial_key || "").trim()}`);
+    });
+  }
+
+  return { duplicateBarcodeKeys, duplicateLotSerialKeys };
+}
+
+async function applySafeStockLifecycleNormalization({ connection, req, access, stockIds = [] }) {
+  const uniqueIds = [...new Set(stockIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniqueIds.length) {
+    return {
+      updated: [],
+      skipped: [],
+      warnings: ["NO_VALID_STOCK_IDS"]
+    };
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM stock
+    WHERE company_id = ?
+      AND id IN (?)
+    FOR UPDATE
+    `,
+    [access.companyScope, uniqueIds]
+  );
+
+  const foundIds = new Set(rows.map((row) => Number(row.id)));
+  const skipped = uniqueIds
+    .filter((id) => !foundIds.has(id))
+    .map((id) => ({
+      id,
+      reason: "STOCK_NOT_FOUND_IN_COMPANY"
+    }));
+
+  const duplicateContext = await getStockLifecycleDuplicateContext(connection, access.companyScope, rows);
+  const updated = [];
+  const beforeAudit = [];
+  const afterAudit = [];
+
+  for (const row of rows) {
+    const plan = buildSafeStockLifecycleNormalization(row, duplicateContext);
+    if (!plan.safe) {
+      skipped.push({
+        id: row.id,
+        barcode: row.barcode || "",
+        reason: plan.reason,
+        mismatches: plan.normalized.mismatches,
+        warnings: plan.normalized.warnings
+      });
+      continue;
+    }
+
+    const before = {
+      id: row.id,
+      barcode: row.barcode || "",
+      status: row.status || "",
+      stock_state: row.stock_state || "",
+      deleted_at: row.deleted_at || null,
+      invoice_number: row.invoice_number || ""
+    };
+
+    if (plan.updates.deleted_at === "NOW") {
+      await connection.query(
+        `
+        UPDATE stock
+        SET status = ?,
+            stock_state = ?,
+            deleted_at = NOW()
+        WHERE company_id = ? AND id = ?
+        LIMIT 1
+        `,
+        [plan.updates.status, plan.updates.stock_state, access.companyScope, row.id]
+      );
+    } else {
+      await connection.query(
+        `
+        UPDATE stock
+        SET status = ?,
+            stock_state = ?
+        WHERE company_id = ? AND id = ?
+        LIMIT 1
+        `,
+        [plan.updates.status, plan.updates.stock_state, access.companyScope, row.id]
+      );
+    }
+
+    const after = {
+      ...before,
+      status: plan.updates.status,
+      stock_state: plan.updates.stock_state,
+      deleted_at: plan.updates.deleted_at === "NOW" ? "NOW()" : before.deleted_at
+    };
+
+    beforeAudit.push(before);
+    afterAudit.push(after);
+    updated.push({
+      id: row.id,
+      barcode: row.barcode || "",
+      reason: plan.reason,
+      oldValues: before,
+      normalizedValues: after
+    });
+  }
+
+  if (updated.length) {
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: access.actingUserId,
+      actorRole: access.actingUser?.role || access.role || "",
+      actionType: "STOCK_LIFECYCLE_NORMALIZED",
+      entityType: "STOCK",
+      entityId: updated.map((row) => row.id).join(","),
+      moduleName: "stock",
+      status: "success",
+      message: `Normalized ${updated.length} stock lifecycle row(s)`,
+      beforeData: beforeAudit,
+      afterData: afterAudit,
+      metadata: {
+        mode: "SAFE_ONLY",
+        requestedStockIds: uniqueIds,
+        skippedCount: skipped.length
+      }
+    });
+  }
+
+  return {
+    updated,
+    skipped,
+    warnings: skipped.length ? ["SOME_ROWS_REQUIRE_MANUAL_REVIEW"] : []
+  };
+}
+
+function getBarcodeUniquenessExclusionReasons(row = {}) {
+  const reasons = [];
+  const normalizedBarcode = getNormalizedBarcodeValue(row.barcode || "");
+  const status = normalizeStockReadStatus(row.status || "IN_STOCK") || "IN_STOCK";
+  const effectiveState = normalizeStockReadStatus(row.stock_state || row.stockState || status) || status;
+  const invoiceNumber = String(row.invoice_number || row.invoiceNumber || "").trim();
+
+  if (!normalizedBarcode) reasons.push("BLANK_BARCODE");
+  if (row.deleted_at || row.deletedAt || status === "DELETED" || effectiveState === "DELETED") reasons.push("DELETED");
+  if (isProcessExcludedBarcodeStock(row)) reasons.push("PROCESS_OR_RECOVERY_STOCK");
+  if (status === "SOLD" || effectiveState === "SOLD") reasons.push("SOLD_STOCK");
+  if (["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(effectiveState)) reasons.push("TRANSFER_STATE");
+  if (["DAMAGED", "DAMAGED_RETURN", "USED"].includes(status) || ["DAMAGED", "DAMAGED_RETURN", "USED"].includes(effectiveState)) {
+    reasons.push("NON_SELLABLE_STATE");
+  }
+  if (invoiceNumber) reasons.push("INVOICE_LINKED");
+
+  return reasons;
+}
+
+function mapBarcodeUniquenessStockRow(row = {}) {
+  const activeBarcodeKey = buildActiveBarcodeKey(row);
+  return {
+    id: row.id,
+    company_id: row.company_id,
+    barcode: row.barcode || "",
+    normalized_barcode: row.normalized_barcode || getNormalizedBarcodeValue(row.barcode || ""),
+    active_barcode_key: row.active_barcode_key || activeBarcodeKey || null,
+    lot_number: row.lot_number || "",
+    serial: row.serial || "",
+    status: row.status || "",
+    stock_state: row.stock_state || "",
+    source: row.source || "",
+    process_type: row.process_type || "",
+    category: row.category || "",
+    product_name: row.product_name || "",
+    invoice_number: row.invoice_number || "",
+    current_branch_id: row.current_branch_id ?? null,
+    deleted_at: row.deleted_at || null,
+    activeBarcodeKey,
+    lifecycle: normalizeStockLifecycleState(row)
+  };
+}
+
+async function buildStockBarcodeUniquenessPreview({ companyId, branchScope = {}, limit = 500, db = pool }) {
+  const branchFilter = getStockLifecycleBranchFilter(branchScope, "s.current_branch_id");
+  const activeBranchFilter = getStockLifecycleBranchFilter(branchScope, "current_branch_id");
+  const activeBarcodeKeySql = getActiveBarcodeKeySql();
+  const activeBarcodeKeySqlForStock = getActiveBarcodeKeySql("s");
+  const normalizedBarcodeSqlForStock = getNormalizedBarcodeSql("s");
+
+  const [activeDuplicateRows] = await db.query(
+    `
+    SELECT
+      company_id,
+      ${activeBarcodeKeySql} AS active_barcode_key,
+      COUNT(*) AS duplicate_count,
+      GROUP_CONCAT(id ORDER BY id SEPARATOR ',') AS stock_ids
+    FROM stock
+    WHERE company_id = ?
+      AND ${activeBarcodeKeySql} IS NOT NULL
+      ${activeBranchFilter.sql}
+    GROUP BY company_id, ${activeBarcodeKeySql}
+    HAVING COUNT(*) > 1
+    ORDER BY duplicate_count DESC, active_barcode_key ASC
+    LIMIT ?
+    `,
+    [companyId, ...activeBranchFilter.params, limit]
+  );
+
+  const [normalizedDuplicateRows] = await db.query(
+    `
+    SELECT
+      s.company_id,
+      ${normalizedBarcodeSqlForStock} AS normalized_barcode,
+      COUNT(*) AS row_count,
+      SUM(CASE WHEN ${activeBarcodeKeySqlForStock} IS NOT NULL THEN 1 ELSE 0 END) AS active_count,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_count,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'DELETED' OR s.deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS deleted_count,
+      SUM(CASE WHEN UPPER(COALESCE(s.source, '')) IN ('PROCESS_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') THEN 1 ELSE 0 END) AS process_count,
+      GROUP_CONCAT(s.id ORDER BY s.id SEPARATOR ',') AS stock_ids
+    FROM stock s
+    WHERE s.company_id = ?
+      AND ${normalizedBarcodeSqlForStock} <> ''
+      ${branchFilter.sql}
+    GROUP BY s.company_id, ${normalizedBarcodeSqlForStock}
+    HAVING COUNT(*) > 1
+    ORDER BY row_count DESC, normalized_barcode ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const [soldActiveConflictRows] = await db.query(
+    `
+    SELECT
+      s.company_id,
+      ${normalizedBarcodeSqlForStock} AS normalized_barcode,
+      SUM(CASE WHEN ${activeBarcodeKeySqlForStock} IS NOT NULL THEN 1 ELSE 0 END) AS active_count,
+      SUM(CASE WHEN UPPER(COALESCE(s.status, '')) = 'SOLD' OR UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_count,
+      GROUP_CONCAT(s.id ORDER BY s.id SEPARATOR ',') AS stock_ids
+    FROM stock s
+    WHERE s.company_id = ?
+      AND ${normalizedBarcodeSqlForStock} <> ''
+      ${branchFilter.sql}
+    GROUP BY s.company_id, ${normalizedBarcodeSqlForStock}
+    HAVING active_count > 0 AND sold_count > 0
+    ORDER BY active_count DESC, sold_count DESC, normalized_barcode ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const activeDuplicateKeys = activeDuplicateRows.map((row) => String(row.active_barcode_key || "").trim()).filter(Boolean);
+  const [wouldFailRows] = activeDuplicateKeys.length
+    ? await db.query(
+      `
+      SELECT s.*, ${normalizedBarcodeSqlForStock} AS normalized_barcode, ${activeBarcodeKeySqlForStock} AS active_barcode_key
+      FROM stock s
+      WHERE s.company_id = ?
+        AND ${activeBarcodeKeySqlForStock} IN (?)
+        ${branchFilter.sql}
+      ORDER BY active_barcode_key ASC, s.id ASC
+      LIMIT ?
+      `,
+      [companyId, activeDuplicateKeys, ...branchFilter.params, limit]
+    )
+    : [[]];
+
+  const [lifecycleConflictRows] = await db.query(
+    `
+    SELECT s.*, ${normalizedBarcodeSqlForStock} AS normalized_barcode, ${activeBarcodeKeySqlForStock} AS active_barcode_key
+    FROM stock s
+    WHERE s.company_id = ?
+      AND ${normalizedBarcodeSqlForStock} <> ''
+      AND (
+        (UPPER(COALESCE(s.status, '')) = 'SOLD' AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK')
+        OR (UPPER(COALESCE(s.status, '')) = 'IN_STOCK' AND TRIM(COALESCE(s.invoice_number, '')) <> '')
+        OR (UPPER(COALESCE(s.status, '')) = 'DELETED' AND s.deleted_at IS NULL)
+        OR (s.deleted_at IS NOT NULL AND UPPER(COALESCE(s.status, '')) <> 'DELETED')
+      )
+      ${branchFilter.sql}
+    ORDER BY s.id ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const [excludedRows] = await db.query(
+    `
+    SELECT s.*, ${normalizedBarcodeSqlForStock} AS normalized_barcode, ${activeBarcodeKeySqlForStock} AS active_barcode_key
+    FROM stock s
+    WHERE s.company_id = ?
+      AND (
+        ${normalizedBarcodeSqlForStock} = ''
+        OR ${activeBarcodeKeySqlForStock} IS NULL
+      )
+      ${branchFilter.sql}
+    ORDER BY s.id ASC
+    LIMIT ?
+    `,
+    [companyId, ...branchFilter.params, limit]
+  );
+
+  const wouldFailById = new Map();
+  [...wouldFailRows, ...lifecycleConflictRows].forEach((row) => {
+    const mapped = mapBarcodeUniquenessStockRow(row);
+    const reasons = [];
+    if (mapped.active_barcode_key && activeDuplicateKeys.includes(mapped.active_barcode_key)) {
+      reasons.push("ACTIVE_BARCODE_COLLISION");
+    }
+    if (mapped.lifecycle.mismatches.length) {
+      reasons.push(...mapped.lifecycle.mismatches);
+    }
+    wouldFailById.set(mapped.id, {
+      ...mapped,
+      reasons: [...new Set(reasons)]
+    });
+  });
+
+  return {
+    duplicates: normalizedDuplicateRows.map((row) => ({
+      company_id: row.company_id,
+      normalized_barcode: row.normalized_barcode,
+      row_count: Number(row.row_count || 0),
+      active_count: Number(row.active_count || 0),
+      sold_count: Number(row.sold_count || 0),
+      deleted_count: Number(row.deleted_count || 0),
+      process_count: Number(row.process_count || 0),
+      stock_ids: String(row.stock_ids || "").split(",").filter(Boolean).map((id) => Number(id))
+    })),
+    activeDuplicateCollisions: activeDuplicateRows.map((row) => ({
+      company_id: row.company_id,
+      active_barcode_key: row.active_barcode_key,
+      duplicate_count: Number(row.duplicate_count || 0),
+      stock_ids: String(row.stock_ids || "").split(",").filter(Boolean).map((id) => Number(id))
+    })),
+    soldActiveConflicts: soldActiveConflictRows.map((row) => ({
+      company_id: row.company_id,
+      normalized_barcode: row.normalized_barcode,
+      active_count: Number(row.active_count || 0),
+      sold_count: Number(row.sold_count || 0),
+      stock_ids: String(row.stock_ids || "").split(",").filter(Boolean).map((id) => Number(id))
+    })),
+    wouldFailRows: [...wouldFailById.values()],
+    excludedRows: excludedRows.map((row) => ({
+      ...mapBarcodeUniquenessStockRow(row),
+      exclusionReasons: getBarcodeUniquenessExclusionReasons(row)
+    })),
+    summary: {
+      duplicateGroups: normalizedDuplicateRows.length,
+      activeDuplicateGroups: activeDuplicateRows.length,
+      soldActiveConflictGroups: soldActiveConflictRows.length,
+      wouldFailRows: wouldFailById.size,
+      excludedRows: excludedRows.length,
+      resultLimit: limit,
+      truncated:
+        normalizedDuplicateRows.length >= limit ||
+        activeDuplicateRows.length >= limit ||
+        soldActiveConflictRows.length >= limit ||
+        wouldFailById.size >= limit ||
+        excludedRows.length >= limit
+    }
+  };
+}
+
+async function verifyActiveBarcodeUniquenessReadiness({ companyId = null, db = pool } = {}) {
+  const params = [];
+  const scopeSql = companyId !== null ? "company_id = ?" : "company_id IS NOT NULL";
+  if (companyId !== null) params.push(companyId);
+  const activeBarcodeKeySql = getActiveBarcodeKeySql();
+  const activeLotSerialSql = `
+    CASE
+      WHEN ${activeBarcodeKeySql} IS NULL THEN NULL
+      WHEN TRIM(COALESCE(lot_number, '')) = '' OR TRIM(COALESCE(serial, '')) = '' THEN NULL
+      ELSE CONCAT(UPPER(TRIM(lot_number)), '::', UPPER(TRIM(serial)))
+    END
+  `;
+
+  const [indexRows] = await db.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'stock'
+      AND index_name = 'uq_stock_company_active_barcode_key'
+    `
+  );
+
+  const [duplicateBarcodeRows] = await db.query(
+    `
+    SELECT COUNT(*) AS duplicate_groups
+    FROM (
+      SELECT company_id, ${activeBarcodeKeySql} AS active_barcode_key, COUNT(*) AS count
+      FROM stock
+      WHERE ${scopeSql}
+        AND ${activeBarcodeKeySql} IS NOT NULL
+      GROUP BY company_id, ${activeBarcodeKeySql}
+      HAVING COUNT(*) > 1
+    ) d
+    `,
+    params
+  );
+
+  const [duplicateLotSerialRows] = await db.query(
+    `
+    SELECT COUNT(*) AS duplicate_groups
+    FROM (
+      SELECT company_id, ${activeLotSerialSql} AS active_lot_serial_key, COUNT(*) AS count
+      FROM stock
+      WHERE ${scopeSql}
+        AND ${activeLotSerialSql} IS NOT NULL
+      GROUP BY company_id, ${activeLotSerialSql}
+      HAVING COUNT(*) > 1
+    ) d
+    `,
+    params
+  );
+
+  const [lifecycleRows] = await db.query(
+    `
+    SELECT COUNT(*) AS mismatch_count
+    FROM stock s
+    WHERE ${companyId !== null ? "s.company_id = ?" : "s.company_id IS NOT NULL"}
+      AND (
+        (UPPER(COALESCE(s.status, '')) = 'SOLD' AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK')
+        OR (UPPER(COALESCE(s.status, '')) = 'SOLD' AND TRIM(COALESCE(s.invoice_number, '')) = '')
+        OR (UPPER(COALESCE(s.status, '')) = 'IN_STOCK' AND TRIM(COALESCE(s.invoice_number, '')) <> '')
+        OR (UPPER(COALESCE(s.status, '')) = 'DELETED' AND s.deleted_at IS NULL)
+        OR (s.deleted_at IS NOT NULL AND UPPER(COALESCE(s.status, '')) <> 'DELETED')
+        OR (s.current_branch_id IS NULL AND UPPER(COALESCE(s.status, 'IN_STOCK')) <> 'DELETED' AND UPPER(COALESCE(s.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY'))
+        OR (UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE') AND UPPER(COALESCE(s.status, '')) <> 'IN_STOCK')
+        OR ((s.stock_state IS NULL OR TRIM(s.stock_state) = '') AND TRIM(COALESCE(s.status, '')) <> '')
+        OR (UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) IN ('DAMAGED_RETURN', 'DAMAGED', 'USED') AND UPPER(COALESCE(s.status, '')) = 'IN_STOCK')
+      )
+    `,
+    params
+  );
+
+  const [exclusionRows] = await db.query(
+    `
+    SELECT
+      SUM(CASE WHEN barcode IS NULL OR TRIM(COALESCE(barcode, '')) = '' THEN 1 ELSE 0 END) AS blank_barcode,
+      SUM(CASE WHEN deleted_at IS NOT NULL OR UPPER(COALESCE(status, '')) = 'DELETED' THEN 1 ELSE 0 END) AS deleted_rows,
+      SUM(CASE WHEN UPPER(COALESCE(source, '')) IN ('PROCESS_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') OR UPPER(COALESCE(category, '')) IN ('RECOVERY', 'KDM', 'PIN') THEN 1 ELSE 0 END) AS process_rows,
+      SUM(CASE WHEN UPPER(COALESCE(status, '')) = 'SOLD' OR UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, '')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_rows,
+      SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, '')) IN ('IN_TRANSIT', 'TRANSFER_SHORTAGE') THEN 1 ELSE 0 END) AS transfer_rows,
+      SUM(CASE WHEN UPPER(COALESCE(status, '')) IN ('DAMAGED', 'DAMAGED_RETURN', 'USED') OR UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, '')) IN ('DAMAGED', 'DAMAGED_RETURN', 'USED') THEN 1 ELSE 0 END) AS non_sellable_rows,
+      SUM(CASE WHEN TRIM(COALESCE(invoice_number, '')) <> '' THEN 1 ELSE 0 END) AS invoice_linked_rows,
+      SUM(CASE WHEN ${activeBarcodeKeySql} IS NOT NULL THEN 1 ELSE 0 END) AS active_key_rows
+    FROM stock
+    WHERE ${scopeSql}
+    `,
+    params
+  );
+
+  const duplicateActiveBarcodeGroups = Number(duplicateBarcodeRows[0]?.duplicate_groups || 0);
+  const duplicateActiveLotSerialGroups = Number(duplicateLotSerialRows[0]?.duplicate_groups || 0);
+  const lifecycleMismatch = Number(lifecycleRows[0]?.mismatch_count || 0);
+  const warnings = [];
+  if (duplicateActiveBarcodeGroups > 0) warnings.push("DUPLICATE_ACTIVE_BARCODE_GROUPS_EXIST");
+  if (duplicateActiveLotSerialGroups > 0) warnings.push("DUPLICATE_ACTIVE_LOT_SERIAL_GROUPS_EXIST");
+  if (lifecycleMismatch > 0) warnings.push("LIFECYCLE_MISMATCH_ROWS_EXIST");
+
+  return {
+    ready: duplicateActiveBarcodeGroups === 0 && duplicateActiveLotSerialGroups === 0 && lifecycleMismatch === 0,
+    duplicateActiveBarcodeGroups,
+    duplicateActiveLotSerialGroups,
+    lifecycleMismatch,
+    indexExists: Number(indexRows[0]?.total || 0) > 0,
+    warnings,
+    exclusionSummary: {
+      blankBarcode: Number(exclusionRows[0]?.blank_barcode || 0),
+      deletedRows: Number(exclusionRows[0]?.deleted_rows || 0),
+      processRows: Number(exclusionRows[0]?.process_rows || 0),
+      soldRows: Number(exclusionRows[0]?.sold_rows || 0),
+      transferRows: Number(exclusionRows[0]?.transfer_rows || 0),
+      nonSellableRows: Number(exclusionRows[0]?.non_sellable_rows || 0),
+      invoiceLinkedRows: Number(exclusionRows[0]?.invoice_linked_rows || 0),
+      activeKeyRows: Number(exclusionRows[0]?.active_key_rows || 0)
+    }
+  };
+}
+
+async function ensureActiveBarcodeUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("stock"))) return;
+    if (await indexExists("stock", "uq_stock_company_active_barcode_key")) {
+      console.log("Active barcode unique index already exists; skipping.");
+      return;
+    }
+    if (!(await columnExists("stock", "active_barcode_key"))) {
+      console.warn("Active barcode unique index skipped: stock.active_barcode_key column is missing.");
+      return;
+    }
+
+    const readiness = await verifyActiveBarcodeUniquenessReadiness();
+    if (!readiness.ready) {
+      console.warn("Active barcode unique index skipped: readiness check failed.", readiness);
+      return;
+    }
+
+    await pool.query("ALTER TABLE stock ADD UNIQUE INDEX uq_stock_company_active_barcode_key (company_id, active_barcode_key)");
+    console.log("Active barcode unique index added: stock.uq_stock_company_active_barcode_key");
+  } catch (error) {
+    console.warn("Active barcode unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function auditBarcodeUniquenessConflict(db, req, access, payload = {}) {
+  await writeAuditLogSafe(pool, req, {
+    companyId: payload.companyId ?? access?.companyScope ?? null,
+    userId: access?.actingUserId ?? null,
+    actorRole: access?.actingUser?.role || access?.role || "",
+    actionType: "BARCODE_UNIQUENESS_CONFLICT",
+    entityType: "STOCK",
+    entityId: payload.stockId ? String(payload.stockId) : "",
+    moduleName: "stock",
+    status: "blocked",
+    message: payload.message || "Active barcode uniqueness conflict blocked",
+    metadata: payload
+  });
+}
+
+async function assertActiveBarcodeAvailable(companyId, stockRow = {}, {
+  db = pool,
+  excludeStockId = null,
+  req = null,
+  access = null,
+  context = ""
+} = {}) {
+  const activeBarcodeKey = buildActiveBarcodeKey(stockRow);
+  if (!activeBarcodeKey) return;
+
+  const params = [companyId, activeBarcodeKey];
+  let excludeSql = "";
+  if (excludeStockId !== null && excludeStockId !== undefined) {
+    excludeSql = "AND id <> ?";
+    params.push(Number(excludeStockId));
+  }
+
+  const [rows] = await db.query(
+    `
+    SELECT id, barcode, status, stock_state, invoice_number, current_branch_id
+    FROM stock
+    WHERE company_id = ?
+      AND ${getActiveBarcodeKeySql()} = ?
+      ${excludeSql}
+    LIMIT 1
+    FOR UPDATE
+    `,
+    params
+  );
+
+  if (rows.length) {
+    await auditBarcodeUniquenessConflict(db, req || {}, access, {
+      companyId,
+      stockId: rows[0].id,
+      barcode: stockRow.barcode || "",
+      activeBarcodeKey,
+      existingStock: rows[0],
+      context,
+      message: `Active barcode ${activeBarcodeKey} already exists`
+    });
+    throw createBarcodeSafetyError(`Active barcode ${activeBarcodeKey} already exists`);
+  }
 }
 
 function parsePositiveInteger(value) {
@@ -5309,6 +6473,19 @@ async function addColumnIfMissing(tableName, columnName, definitionSql) {
   if (!exists) {
     await pool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definitionSql}`);
     console.log(`Column added: ${tableName}.${columnName}`);
+  }
+}
+
+async function addGeneratedColumnIfMissingSafe(tableName, columnName, definitionSql) {
+  const exists = await columnExists(tableName, columnName);
+  if (exists) return true;
+  try {
+    await pool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definitionSql}`);
+    console.log(`Generated column added: ${tableName}.${columnName}`);
+    return true;
+  } catch (error) {
+    console.warn(`Generated column skipped: ${tableName}.${columnName} (${error?.code || error?.message || "unknown error"})`);
+    return false;
   }
 }
 
@@ -8059,6 +9236,30 @@ async function ensureSchema() {
     await addColumnIfMissing("stock", "deleted_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("stock", "invoice_number", "VARCHAR(100) DEFAULT ''");
     await addColumnIfMissing("stock", "sold_at", "DATETIME DEFAULT NULL");
+    await addGeneratedColumnIfMissingSafe(
+      "stock",
+      "normalized_barcode",
+      "VARCHAR(255) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(barcode, '')))) STORED"
+    );
+    await addGeneratedColumnIfMissingSafe(
+      "stock",
+      "active_barcode_key",
+      `VARCHAR(255) GENERATED ALWAYS AS (
+        CASE
+          WHEN barcode IS NULL OR TRIM(COALESCE(barcode, '')) = '' THEN NULL
+          WHEN deleted_at IS NOT NULL THEN NULL
+          WHEN UPPER(COALESCE(status, 'IN_STOCK')) IN ('DELETED', 'SOLD', 'DAMAGED', 'DAMAGED_RETURN', 'USED') THEN NULL
+          WHEN UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) IN ('DELETED', 'SOLD', 'IN_TRANSIT', 'TRANSFER_SHORTAGE', 'DAMAGED', 'DAMAGED_RETURN', 'USED') THEN NULL
+          WHEN TRIM(COALESCE(invoice_number, '')) <> '' THEN NULL
+          WHEN UPPER(COALESCE(source, '')) IN ('PROCESS_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') THEN NULL
+          WHEN UPPER(COALESCE(process_type, '')) IN ('PROCESS_RECOVERY', 'CUTTING_RECOVERY', 'PROCESS_KDM', 'PROCESS_PIN') THEN NULL
+          WHEN UPPER(COALESCE(category, '')) IN ('RECOVERY', 'KDM', 'PIN') THEN NULL
+          WHEN UPPER(COALESCE(product_name, '')) IN ('RECOVERY', 'KDM', 'PIN') THEN NULL
+          WHEN UPPER(COALESCE(product_name, '')) LIKE 'RECOVERY SILVER%' THEN NULL
+          ELSE UPPER(TRIM(barcode))
+        END
+      ) STORED`
+    );
   }
 
   if (await tableExists("sales_history")) {
@@ -8694,6 +9895,13 @@ async function ensureSchema() {
     await addIndexIfMissing("stock", "idx_stock_company_branch_status", "(company_id, current_branch_id, status)");
     await addIndexIfMissing("stock", "idx_stock_company_stock_state", "(company_id, stock_state)");
     await addIndexIfMissing("stock", "idx_stock_company_barcode", "(company_id, barcode)");
+    if (await columnExists("stock", "normalized_barcode")) {
+      await addIndexIfMissing("stock", "idx_stock_company_normalized_barcode", "(company_id, normalized_barcode)");
+    }
+    if (await columnExists("stock", "active_barcode_key")) {
+      await addIndexIfMissing("stock", "idx_stock_company_active_barcode_key", "(company_id, active_barcode_key)");
+    }
+    await ensureActiveBarcodeUniqueIndexSafe();
   }
 
   if (await tableExists("users")) {
@@ -16899,10 +18107,25 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       returnType === "RETURN_TO_STOCK" ? "IN_STOCK" : "DAMAGED_RETURN";
 
     if (returnType === "RETURN_TO_STOCK") {
+      await assertActiveBarcodeAvailable(finalCompanyId, {
+        ...stockItem,
+        status: "IN_STOCK",
+        stock_state: "IN_STOCK",
+        invoice_number: "",
+        deleted_at: null
+      }, {
+        db: connection,
+        excludeStockId: stockItem.id,
+        req,
+        access,
+        context: "SAVE_RETURN_RESTORE_TO_STOCK"
+      });
+
       const [stockResult] = await connection.query(
         `
         UPDATE stock
         SET status = 'IN_STOCK',
+            stock_state = 'IN_STOCK',
             invoice_number = '',
             sold_at = NULL
         WHERE barcode = ? AND company_id = ?
@@ -17740,8 +18963,24 @@ function normalizeStickerSaveItem(item = {}, index = 0) {
   };
 }
 
-async function validateStickerSaveItemAgainstStock(connection, companyId, item) {
+async function validateStickerSaveItemAgainstStock(connection, companyId, item, { req = null, access = null } = {}) {
   await ensureSingleStockBarcode(companyId, item.barcode, connection);
+  await assertActiveBarcodeAvailable(companyId, {
+    barcode: item.barcode,
+    status: "IN_STOCK",
+    stock_state: "IN_STOCK",
+    source: "",
+    process_type: item.processType,
+    category: "",
+    product_name: item.productName,
+    invoice_number: "",
+    deleted_at: null
+  }, {
+    db: connection,
+    req,
+    access,
+    context: "ADD_STICKERS_BULK"
+  });
 
   const [dupLotSerial] = await connection.query(
     `
@@ -17760,21 +18999,6 @@ async function validateStickerSaveItemAgainstStock(connection, companyId, item) 
     throw createStickerBulkError(`${item.rowLabel}: Serial ${item.serial} already exists in lot ${item.lot}`);
   }
 
-  const [dupBarcode] = await connection.query(
-    `
-    SELECT id FROM stock
-    WHERE UPPER(TRIM(barcode)) = ?
-      AND company_id = ?
-      ${getSellableStockFilterSql()}
-    LIMIT 1
-    FOR UPDATE
-    `,
-    [item.normalizedBarcode, companyId]
-  );
-
-  if (dupBarcode.length > 0) {
-    throw createStickerBulkError(`${item.rowLabel}: Barcode ${item.barcode} already exists`);
-  }
 }
 
 async function insertStickerStockRow(connection, item, {
@@ -17911,7 +19135,7 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
     }
 
     for (const item of normalizedItems) {
-      await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item);
+      await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item, { req, access });
     }
 
     for (const total of lotTotals.values()) {
@@ -18054,24 +19278,6 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       });
     }
 
-    const [dupBarcode] = await pool.query(
-      `
-      SELECT id FROM stock
-      WHERE UPPER(TRIM(barcode)) = ?
-        AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [normalizeBarcodeForComparison(cleanBarcode), finalCompanyId]
-    );
-
-    if (dupBarcode.length > 0) {
-      return res.json({
-        success: false,
-        message: `Barcode ${cleanBarcode} already exists`
-      });
-    }
-
     const stickerLimit = await validateStickerAgainstProcessOutput(
       pool,
       finalCompanyId,
@@ -18090,6 +19296,22 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
     const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
     const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+
+    await assertActiveBarcodeAvailable(finalCompanyId, {
+      barcode: cleanBarcode,
+      status: "IN_STOCK",
+      stock_state: "IN_STOCK",
+      source: isManualStickerLot ? "MANUAL_ENTRY" : "",
+      process_type: String(processType || "").trim(),
+      product_name: String(productName).trim(),
+      invoice_number: "",
+      deleted_at: null
+    }, {
+      db: pool,
+      req,
+      access,
+      context: "ADD_STICKER"
+    });
 
     await pool.query(
       `
@@ -18287,25 +19509,6 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       });
     }
 
-    const [dupBarcode] = await pool.query(
-      `
-      SELECT id FROM stock
-      WHERE UPPER(TRIM(barcode)) = ?
-        AND company_id = ?
-        AND id <> ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [normalizeBarcodeForComparison(newBarcode), finalCompanyId, currentId]
-    );
-
-    if (dupBarcode.length > 0) {
-      return res.json({
-        success: false,
-        message: `Barcode ${newBarcode} already exists`
-      });
-    }
-
     const stickerLimit = await validateStickerAgainstProcessOutput(
       pool,
       finalCompanyId,
@@ -18324,6 +19527,22 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
 
     const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
     const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+    await assertActiveBarcodeAvailable(finalCompanyId, {
+      barcode: newBarcode,
+      status: String(status || "IN_STOCK").trim(),
+      stock_state: String(status || "IN_STOCK").trim(),
+      source: isManualStickerLot ? "MANUAL_ENTRY" : "",
+      process_type: String(processType || "").trim(),
+      product_name: String(productName).trim(),
+      invoice_number: String(invoiceNumber || "").trim(),
+      deleted_at: String(status || "IN_STOCK").trim().toUpperCase() === "DELETED" ? new Date().toISOString() : null
+    }, {
+      db: pool,
+      excludeStockId: currentId,
+      req,
+      access,
+      context: "UPDATE_STICKER"
+    });
 
     await pool.query(
       `
@@ -18466,14 +19685,49 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
     const companyId = access.companyScope;
     await ensureSingleStockBarcode(companyId, barcode);
 
-    const query = `
-      UPDATE stock
-      SET status = 'IN_STOCK', deleted_at = NULL
+    const [restoreRows] = await pool.query(
+      `
+      SELECT *
+      FROM stock
       WHERE barcode = ?
         AND company_id = ?
         ${getSellableStockFilterSql()}
+      LIMIT 1
+      `,
+      [barcode, companyId]
+    );
+
+    if (!restoreRows.length) {
+      return res.json({
+        success: false,
+        message: "No item was found to restore"
+      });
+    }
+
+    await assertActiveBarcodeAvailable(companyId, {
+      ...restoreRows[0],
+      status: "IN_STOCK",
+      stock_state: "IN_STOCK",
+      invoice_number: "",
+      deleted_at: null
+    }, {
+      db: pool,
+      excludeStockId: restoreRows[0].id,
+      req,
+      access,
+      context: "RESTORE_STICKER"
+    });
+
+    const query = `
+      UPDATE stock
+      SET status = 'IN_STOCK',
+          stock_state = 'IN_STOCK',
+          invoice_number = '',
+          deleted_at = NULL
+      WHERE id = ?
+        AND company_id = ?
     `;
-    const params = [barcode, companyId];
+    const params = [restoreRows[0].id, companyId];
 
     const [result] = await pool.query(query, params);
     const affectedRows = assertSingleStockRowAffected(result);
@@ -20873,6 +22127,37 @@ async function cancelSimpleUnpaidSaleInvoice({
   ];
 
   for (const barcode of barcodes) {
+    const [restoreStockRows] = await connection.query(
+      `
+      SELECT *
+      FROM stock
+      WHERE company_id = ?
+        AND barcode = ?
+        AND invoice_number = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [cleanCompanyId, barcode, cleanInvoiceNumber]
+    );
+
+    if (!restoreStockRows.length) {
+      throw new Error(`Stock restore preview row not found for barcode ${barcode}`);
+    }
+
+    await assertActiveBarcodeAvailable(cleanCompanyId, {
+      ...restoreStockRows[0],
+      status: "IN_STOCK",
+      stock_state: "IN_STOCK",
+      invoice_number: "",
+      deleted_at: null
+    }, {
+      db: connection,
+      excludeStockId: restoreStockRows[0].id,
+      req,
+      access,
+      context: "SALE_CANCELLATION_RESTORE"
+    });
+
     const [stockUpdate] = await connection.query(
       `
       UPDATE stock
@@ -21798,16 +23083,48 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
     const companyId = access.companyScope;
     await ensureSingleStockBarcode(companyId, barcode);
 
+    const [stockRows] = await pool.query(
+      `
+      SELECT *
+      FROM stock
+      WHERE barcode = ? AND company_id = ?
+        ${getSellableStockFilterSql()}
+      LIMIT 1
+      `,
+      [barcode, companyId]
+    );
+
+    if (!stockRows.length) {
+      return res.json({
+        success: false,
+        message: "Item not found"
+      });
+    }
+
+    await assertActiveBarcodeAvailable(companyId, {
+      ...stockRows[0],
+      status: "IN_STOCK",
+      stock_state: "IN_STOCK",
+      invoice_number: "",
+      deleted_at: null
+    }, {
+      db: pool,
+      excludeStockId: stockRows[0].id,
+      req,
+      access,
+      context: "RETURN_ITEM_RESTORE_TO_STOCK"
+    });
+
     const [result] = await pool.query(
       `
       UPDATE stock
       SET status = 'IN_STOCK',
+          stock_state = 'IN_STOCK',
           invoice_number = '',
           sold_at = NULL
-      WHERE barcode = ? AND company_id = ?
-        ${getSellableStockFilterSql()}
+      WHERE id = ? AND company_id = ?
       `,
-      [barcode, companyId]
+      [stockRows[0].id, companyId]
     );
     const affectedRows = assertSingleStockRowAffected(result);
 
@@ -23584,6 +24901,225 @@ app.get("/superadmin/module-unmapped-routes", authMiddleware, checkRole(["SUPERA
     return res.status(500).json({
       success: false,
       message: "Unmapped route audit fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/stock-lifecycle-audit", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const requestedBranchId = getRequestedBranchId(req);
+    const branchScope = await validateReadableBranchScope(access, requestedBranchId);
+    if (!branchScope.ok) {
+      return sendAccessError(res, branchScope);
+    }
+
+    const audit = await buildStockLifecycleAudit({
+      companyId: access.companyScope,
+      branchScope,
+      limit: getStockLifecycleAuditLimit(req)
+    });
+
+    return res.json({
+      success: true,
+      companyId: access.companyScope,
+      branchScope: branchScope.branchId,
+      ...audit
+    });
+  } catch (error) {
+    console.error("Stock lifecycle audit failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Stock lifecycle audit failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/stock-lifecycle-normalization-preview", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const requestedBranchId = getRequestedBranchId(req);
+    const branchScope = await validateReadableBranchScope(access, requestedBranchId);
+    if (!branchScope.ok) {
+      return sendAccessError(res, branchScope);
+    }
+
+    const preview = await buildStockLifecycleNormalizationPreview({
+      companyId: access.companyScope,
+      branchScope,
+      limit: getStockLifecycleAuditLimit(req)
+    });
+
+    return res.json({
+      success: true,
+      companyId: access.companyScope,
+      branchScope: branchScope.branchId,
+      ...preview
+    });
+  } catch (error) {
+    console.error("Stock lifecycle normalization preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Stock lifecycle normalization preview failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/stock-lifecycle-normalize", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const mode = String(req.body?.mode || "").trim().toUpperCase();
+    if (mode !== "SAFE_ONLY") {
+      return res.status(400).json({
+        success: false,
+        message: "Only SAFE_ONLY normalization mode is supported"
+      });
+    }
+
+    const stockIds = Array.isArray(req.body?.stockIds) ? req.body.stockIds : [];
+    const uniqueIds = [...new Set(stockIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+    if (!uniqueIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "stockIds must contain at least one valid stock id"
+      });
+    }
+    if (uniqueIds.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: "A maximum of 500 stock rows can be normalized at once"
+      });
+    }
+
+    await connection.beginTransaction();
+    const result = await applySafeStockLifecycleNormalization({
+      connection,
+      req,
+      access,
+      stockIds: uniqueIds
+    });
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      updated: result.updated,
+      skipped: result.skipped,
+      warnings: result.warnings
+    });
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      console.error("Stock lifecycle normalize rollback failed:", rollbackError);
+    }
+    console.error("Stock lifecycle normalize failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Stock lifecycle normalization failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+app.get("/stock-barcode-uniqueness-preview", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const requestedBranchId = getRequestedBranchId(req);
+    const branchScope = await validateReadableBranchScope(access, requestedBranchId);
+    if (!branchScope.ok) {
+      return sendAccessError(res, branchScope);
+    }
+
+    const preview = await buildStockBarcodeUniquenessPreview({
+      companyId: access.companyScope,
+      branchScope,
+      limit: getStockLifecycleAuditLimit(req)
+    });
+
+    return res.json({
+      success: true,
+      companyId: access.companyScope,
+      branchScope: branchScope.branchId,
+      ...preview
+    });
+  } catch (error) {
+    console.error("Stock barcode uniqueness preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Stock barcode uniqueness preview failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/stock-barcode-uniqueness-status", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const readiness = await verifyActiveBarcodeUniquenessReadiness({
+      companyId: access.companyScope
+    });
+
+    return res.json({
+      success: true,
+      companyId: access.companyScope,
+      ready: readiness.ready,
+      duplicateCounts: {
+        activeBarcodeGroups: readiness.duplicateActiveBarcodeGroups,
+        activeLotSerialGroups: readiness.duplicateActiveLotSerialGroups,
+        lifecycleMismatch: readiness.lifecycleMismatch
+      },
+      indexExists: readiness.indexExists,
+      warnings: readiness.warnings,
+      exclusionSummary: readiness.exclusionSummary
+    });
+  } catch (error) {
+    console.error("Stock barcode uniqueness status failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Stock barcode uniqueness status failed",
       error: getErrorDetail(error)
     });
   }
@@ -26539,6 +28075,20 @@ app.post("/branch-transfers/:id/receive-scan", authMiddleware, async (req, res) 
         scanStatus: "SOURCE_BRANCH_MISMATCH"
       });
     }
+
+    await assertActiveBarcodeAvailable(access.companyScope, {
+      ...stockItem,
+      stock_state: "IN_STOCK",
+      current_branch_id: transfer.to_branch_id,
+      invoice_number: "",
+      deleted_at: null
+    }, {
+      db: connection,
+      excludeStockId: stockItem.id,
+      req,
+      access,
+      context: "BRANCH_RECEIVE"
+    });
 
     const [stockUpdateResult] = await connection.query(
       `
