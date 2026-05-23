@@ -34931,6 +34931,758 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
   }
 });
 
+const RECONCILIATION_SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+function normalizeReconciliationSeverity(value = "MEDIUM") {
+  const clean = String(value || "").trim().toUpperCase();
+  return RECONCILIATION_SEVERITIES.includes(clean) ? clean : "MEDIUM";
+}
+
+function createReconciliationIssue(moduleName, check, severity, message, row = {}) {
+  return {
+    module: moduleName,
+    check,
+    severity: normalizeReconciliationSeverity(severity),
+    message,
+    row
+  };
+}
+
+function createReconciliationGroup(moduleName, check, title, issues = []) {
+  return {
+    module: moduleName,
+    check,
+    title,
+    issueCount: issues.length,
+    issues
+  };
+}
+
+function summarizeReconciliationGroups(groups = []) {
+  const flatIssues = groups.flatMap((group) => Array.isArray(group.issues) ? group.issues : []);
+  const severityCounts = flatIssues.reduce((acc, issue) => {
+    const severity = normalizeReconciliationSeverity(issue.severity);
+    acc[severity] = (acc[severity] || 0) + 1;
+    return acc;
+  }, { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 });
+  const modulesAffected = [...new Set(flatIssues.map((issue) => issue.module).filter(Boolean))];
+  const weightedPenalty =
+    severityCounts.CRITICAL * 20 +
+    severityCounts.HIGH * 10 +
+    severityCounts.MEDIUM * 5 +
+    severityCounts.LOW * 2;
+  return {
+    totalIssues: flatIssues.length,
+    criticalIssues: severityCounts.CRITICAL,
+    modulesAffected,
+    healthScore: Math.max(0, 100 - weightedPenalty),
+    severityCounts
+  };
+}
+
+async function resolveReconciliationAccess(req, action = "RECONCILIATION_SCAN") {
+  const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+  if (!access.ok) return { ok: false, access };
+
+  const role = normalizeRoleValue(access.actingUser?.role || "");
+  const canRead = access.isSuperAdmin || ["OWNER", "ACCOUNTS"].includes(role);
+  if (!canRead) {
+    return {
+      ok: false,
+      access,
+      response: {
+        status: 403,
+        body: {
+          success: false,
+          message: "Only Owner/Admin/Accounts can run reconciliation scans"
+        }
+      }
+    };
+  }
+
+  const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action });
+  if (!branchScope.ok) {
+    return {
+      ok: false,
+      access,
+      response: {
+        status: branchScope.status || 403,
+        body: {
+          success: false,
+          message: branchScope.message || "Branch access denied"
+        }
+      }
+    };
+  }
+
+  return { ok: true, access, branchScope };
+}
+
+async function runReconQuery(sql, params = []) {
+  const [rows] = await pool.query(sql, params);
+  return rows;
+}
+
+function stockBranchClause(alias, branchScope, params) {
+  if (!branchScope?.isBranchFiltered) return "";
+  params.push(branchScope.branchId);
+  return ` AND ${alias}.current_branch_id = ?`;
+}
+
+function salesItemBranchClause(alias, branchScope, params) {
+  if (!branchScope?.isBranchFiltered) return "";
+  params.push(branchScope.branchId, branchScope.branchId);
+  return `
+    AND (
+      ${alias}.branch_id = ?
+      OR (
+        ${alias}.branch_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM stock s_scope
+          WHERE s_scope.company_id = ${alias}.company_id
+            AND UPPER(TRIM(s_scope.barcode)) = UPPER(TRIM(${alias}.barcode))
+            AND s_scope.current_branch_id = ?
+        )
+      )
+    )
+  `;
+}
+
+function returnBranchClause(alias, branchScope, params) {
+  if (!branchScope?.isBranchFiltered) return "";
+  params.push(branchScope.branchId);
+  return ` AND ${alias}.branch_id = ?`;
+}
+
+async function buildStockSalesReconciliation(companyId, branchScope) {
+  const groups = [];
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT si.id AS sales_item_id, si.invoice_number, si.barcode, si.item_status, s.id AS stock_id, s.status AS stock_status, s.stock_state
+      FROM sales_items si
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE si.company_id = ?
+        AND UPPER(COALESCE(si.item_status, 'SOLD')) = 'SOLD'
+        AND COALESCE(si.is_deleted, 0) = 0
+        ${salesItemBranchClause("si", branchScope, params)}
+        AND (s.id IS NULL OR UPPER(COALESCE(s.status, '')) <> 'SOLD')
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "SOLD_SALES_ITEM_STOCK_NOT_SOLD", "Sold sales item but stock is not SOLD", rows.map((row) => createReconciliationIssue("stock-sales", "SOLD_SALES_ITEM_STOCK_NOT_SOLD", "HIGH", "Sold sales item is not backed by SOLD stock", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT s.id AS stock_id, s.barcode, s.invoice_number, s.status, s.stock_state, s.current_branch_id
+      FROM stock s
+      LEFT JOIN sales_items si ON si.company_id = s.company_id AND UPPER(TRIM(si.barcode)) = UPPER(TRIM(s.barcode)) AND si.invoice_number = s.invoice_number
+      WHERE s.company_id = ?
+        AND UPPER(COALESCE(s.status, '')) = 'SOLD'
+        ${stockBranchClause("s", branchScope, params)}
+        AND si.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "STOCK_SOLD_NO_SALES_ITEM", "Stock SOLD but no sales item", rows.map((row) => createReconciliationIssue("stock-sales", "STOCK_SOLD_NO_SALES_ITEM", "HIGH", "SOLD stock has no matching sales item", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT s.id AS stock_id, s.barcode, s.invoice_number AS stock_invoice, si.invoice_number AS sales_invoice, si.id AS sales_item_id
+      FROM stock s
+      INNER JOIN sales_items si ON si.company_id = s.company_id AND UPPER(TRIM(si.barcode)) = UPPER(TRIM(s.barcode))
+      WHERE s.company_id = ?
+        AND UPPER(COALESCE(s.status, '')) = 'SOLD'
+        ${stockBranchClause("s", branchScope, params)}
+        AND COALESCE(s.invoice_number, '') <> COALESCE(si.invoice_number, '')
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "STOCK_INVOICE_MISMATCH", "Stock invoice mismatch", rows.map((row) => createReconciliationIssue("stock-sales", "STOCK_INVOICE_MISMATCH", "HIGH", "Stock invoice does not match sales item invoice", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT UPPER(TRIM(barcode)) AS barcode_key, COUNT(*) AS active_count, GROUP_CONCAT(id ORDER BY id) AS stock_ids
+      FROM stock
+      WHERE company_id = ?
+        AND TRIM(COALESCE(barcode, '')) <> ''
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+        AND deleted_at IS NULL
+      GROUP BY UPPER(TRIM(barcode))
+      HAVING COUNT(*) > 1
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "DUPLICATE_ACTIVE_BARCODE", "Duplicate active barcode", rows.map((row) => createReconciliationIssue("stock-sales", "DUPLICATE_ACTIVE_BARCODE", "CRITICAL", "Multiple active stock rows share one barcode", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT si.id AS sales_item_id, si.barcode, si.invoice_number, si.branch_id AS sales_branch_id, s.id AS stock_id, s.current_branch_id
+      FROM sales_items si
+      INNER JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE si.company_id = ?
+        AND si.branch_id IS NOT NULL
+        AND s.current_branch_id IS NOT NULL
+        AND si.branch_id <> s.current_branch_id
+        ${salesItemBranchClause("si", branchScope, params)}
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "BRANCH_MISMATCH", "Sales item branch mismatch", rows.map((row) => createReconciliationIssue("stock-sales", "BRANCH_MISMATCH", "MEDIUM", "Sales item branch differs from stock branch", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT id AS stock_id, barcode, invoice_number, status, stock_state, deleted_at
+      FROM stock
+      WHERE company_id = ?
+        ${stockBranchClause("stock", branchScope, params)}
+        AND (
+          (TRIM(COALESCE(invoice_number, '')) <> '' AND UPPER(COALESCE(status, '')) <> 'SOLD')
+          OR (deleted_at IS NOT NULL AND UPPER(COALESCE(status, '')) <> 'DELETED')
+        )
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "STOCK_STATUS_INCONSISTENCY", "Invoice-linked/deleted stock status inconsistency", rows.map((row) => createReconciliationIssue("stock-sales", "STOCK_STATUS_INCONSISTENCY", "HIGH", "Stock state conflicts with invoice/deletion state", row))));
+  }
+
+  return groups;
+}
+
+async function buildReturnsReconciliation(companyId, branchScope) {
+  const groups = [];
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT si.id AS sales_item_id, si.barcode, si.invoice_number, si.item_status, s.id AS stock_id, s.status, s.stock_state
+      FROM sales_items si
+      LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      WHERE si.company_id = ?
+        AND UPPER(COALESCE(si.item_status, '')) IN ('RETURN_TO_STOCK', 'DAMAGED_RETURN')
+        ${salesItemBranchClause("si", branchScope, params)}
+        AND UPPER(COALESCE(s.status, '')) = 'SOLD'
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "RETURNED_ITEM_STOCK_STILL_SOLD", "Returned sale item but stock still SOLD", rows.map((row) => createReconciliationIssue("returns", "RETURNED_ITEM_STOCK_STILL_SOLD", "HIGH", "Returned sale item still has SOLD stock", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT rh.id AS return_id, rh.barcode, rh.invoice_number, rh.return_type, s.id AS stock_id, s.status, s.stock_state
+      FROM return_history rh
+      LEFT JOIN stock s ON s.company_id = rh.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
+      WHERE rh.company_id = ?
+        ${returnBranchClause("rh", branchScope, params)}
+        AND UPPER(COALESCE(rh.return_type, '')) = 'DAMAGED_RETURN'
+        AND UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, '')) <> 'DAMAGED_RETURN'
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "DAMAGED_RETURN_WITHOUT_STOCK_STATE", "DAMAGED_RETURN without stock_state", rows.map((row) => createReconciliationIssue("returns", "DAMAGED_RETURN_WITHOUT_STOCK_STATE", "MEDIUM", "Damaged return is not reflected in stock_state", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT rh.id AS return_id, rh.barcode, rh.invoice_number, rh.return_type
+      FROM return_history rh
+      LEFT JOIN sales_items si ON si.company_id = rh.company_id AND UPPER(TRIM(si.barcode)) = UPPER(TRIM(rh.barcode)) AND si.invoice_number = rh.invoice_number
+      WHERE rh.company_id = ?
+        ${returnBranchClause("rh", branchScope, params)}
+        AND si.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "RETURN_WITHOUT_SALE_ITEM", "Return without sale item", rows.map((row) => createReconciliationIssue("returns", "RETURN_WITHOUT_SALE_ITEM", "HIGH", "Return row has no matching sales item", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT barcode, invoice_number, COUNT(*) AS return_count, GROUP_CONCAT(id ORDER BY id) AS return_ids
+      FROM return_history
+      WHERE company_id = ?
+      GROUP BY barcode, invoice_number
+      HAVING COUNT(*) > 1
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "DUPLICATE_RETURN", "Duplicate return", rows.map((row) => createReconciliationIssue("returns", "DUPLICATE_RETURN", "CRITICAL", "Multiple returns exist for the same barcode/invoice", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT rh.id AS return_id, rh.barcode, rh.invoice_number, sh.status, sh.cancelled_at
+      FROM return_history rh
+      INNER JOIN sales_history sh ON sh.company_id = rh.company_id AND sh.invoice_number = rh.invoice_number
+      WHERE rh.company_id = ?
+        ${returnBranchClause("rh", branchScope, params)}
+        AND (UPPER(COALESCE(sh.status, '')) = 'CANCELLED' OR sh.cancelled_at IS NOT NULL OR COALESCE(sh.is_deleted, 0) = 1)
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "RETURN_ON_CANCELLED_INVOICE", "Return on cancelled invoice", rows.map((row) => createReconciliationIssue("returns", "RETURN_ON_CANCELLED_INVOICE", "HIGH", "Return exists against a cancelled/deleted invoice", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT rfp.id AS payable_id, rfp.return_id, rfp.barcode, rfp.invoice_number, rh.id AS return_id_found
+      FROM return_refund_payables rfp
+      LEFT JOIN return_history rh ON rh.id = rfp.return_id AND rh.company_id = rfp.company_id
+      WHERE rfp.company_id = ?
+        AND rh.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("returns", "REFUND_PAYABLE_RETURN_MISMATCH", "Refund payable mismatch", rows.map((row) => createReconciliationIssue("returns", "REFUND_PAYABLE_RETURN_MISMATCH", "HIGH", "Refund payable does not link to a valid return row", row))));
+  }
+
+  return groups;
+}
+
+async function buildRefundPayablesReconciliation(companyId, branchScope) {
+  const groups = [];
+  const baseBranchJoin = branchScope?.isBranchFiltered ? "LEFT JOIN return_history rh_scope ON rh_scope.id = rfp.return_id AND rh_scope.company_id = rfp.company_id" : "";
+  const branchWhere = branchScope?.isBranchFiltered ? " AND rh_scope.branch_id = ?" : "";
+
+  {
+    const params = branchScope?.isBranchFiltered ? [companyId, branchScope.branchId] : [companyId];
+    const rows = await runReconQuery(`
+      SELECT rfp.*
+      FROM return_refund_payables rfp
+      ${baseBranchJoin}
+      WHERE rfp.company_id = ?
+        ${branchWhere}
+        AND (
+          COALESCE(rfp.settled_cash_amount, 0) > COALESCE(rfp.refund_cash_amount, 0) + 0.009
+          OR COALESCE(rfp.settled_metal_weight, 0) > COALESCE(rfp.refund_metal_weight, 0) + 0.0005
+        )
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "PAYABLE_SETTLED_EXCEEDS_AMOUNT", "Payable settled exceeds payable amount", rows.map((row) => createReconciliationIssue("refund-payables", "PAYABLE_SETTLED_EXCEEDS_AMOUNT", "CRITICAL", "Settled value exceeds refund payable amount", row))));
+  }
+
+  {
+    const params = branchScope?.isBranchFiltered ? [companyId, branchScope.branchId] : [companyId];
+    const rows = await runReconQuery(`
+      SELECT rfp.*
+      FROM return_refund_payables rfp
+      ${baseBranchJoin}
+      WHERE rfp.company_id = ?
+        ${branchWhere}
+        AND UPPER(COALESCE(rfp.payable_status, '')) = 'SETTLED'
+        AND (COALESCE(rfp.remaining_cash_amount, 0) > 0.009 OR COALESCE(rfp.remaining_metal_weight, 0) > 0.0005)
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "SETTLED_PAYABLE_HAS_REMAINING", "Payable SETTLED but remaining exists", rows.map((row) => createReconciliationIssue("refund-payables", "SETTLED_PAYABLE_HAS_REMAINING", "CRITICAL", "Payable is SETTLED while cash/metal remains open", row))));
+  }
+
+  {
+    const params = branchScope?.isBranchFiltered ? [companyId, branchScope.branchId] : [companyId];
+    const rows = await runReconQuery(`
+      SELECT rfp.*
+      FROM return_refund_payables rfp
+      ${baseBranchJoin}
+      WHERE rfp.company_id = ?
+        ${branchWhere}
+        AND UPPER(COALESCE(rfp.refund_mode_hint, '')) = 'MIXED'
+        AND (
+          (COALESCE(rfp.remaining_cash_amount, 0) <= 0.009 AND COALESCE(rfp.remaining_metal_weight, 0) <= 0.0005 AND UPPER(COALESCE(rfp.payable_status, '')) <> 'SETTLED')
+          OR (UPPER(COALESCE(rfp.payable_status, '')) = 'SETTLED' AND (COALESCE(rfp.remaining_cash_amount, 0) > 0.009 OR COALESCE(rfp.remaining_metal_weight, 0) > 0.0005))
+        )
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "MIXED_PAYABLE_INCONSISTENT", "Mixed payable inconsistent", rows.map((row) => createReconciliationIssue("refund-payables", "MIXED_PAYABLE_INCONSISTENT", "HIGH", "Mixed payable status does not match cash/metal remaining state", row))));
+  }
+
+  {
+    const params = [companyId, companyId];
+    if (branchScope?.isBranchFiltered) params.push(branchScope.branchId);
+    const rows = await runReconQuery(`
+      SELECT rfp.id, rfp.invoice_number, rfp.refund_cash_amount, rfp.settled_cash_amount, COALESCE(hist.cash_debit, 0) AS history_cash_debit
+      FROM return_refund_payables rfp
+      ${baseBranchJoin}
+      LEFT JOIN (
+        SELECT tm.company_id, tm.reference_no, SUM(COALESCE(cl.debit_amount, 0)) AS cash_debit
+        FROM transaction_master tm
+        LEFT JOIN cash_ledger cl ON cl.company_id = tm.company_id AND cl.transaction_id = tm.id
+        WHERE tm.company_id = ? AND tm.transaction_type = 'CASH_REFUND_PAID'
+        GROUP BY tm.company_id, tm.reference_no
+      ) hist ON hist.company_id = rfp.company_id AND hist.reference_no = CONCAT('RFPAYABLE-', rfp.id)
+      WHERE rfp.company_id = ?
+        ${branchWhere}
+        AND ABS(COALESCE(rfp.settled_cash_amount, 0) - COALESCE(hist.cash_debit, 0)) > 0.009
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "CASH_REFUND_HISTORY_MISMATCH", "Cash refund history mismatch", rows.map((row) => createReconciliationIssue("refund-payables", "CASH_REFUND_HISTORY_MISMATCH", "HIGH", "Payable settled cash does not match CASH_REFUND_PAID ledger history", row))));
+  }
+
+  {
+    const params = [companyId, companyId];
+    if (branchScope?.isBranchFiltered) params.push(branchScope.branchId);
+    const rows = await runReconQuery(`
+      SELECT rfp.id, rfp.invoice_number, rfp.refund_metal_weight, rfp.settled_metal_weight, COALESCE(hist.gross_out, 0) AS history_gross_out
+      FROM return_refund_payables rfp
+      ${baseBranchJoin}
+      LEFT JOIN (
+        SELECT tm.company_id, tm.reference_no, SUM(COALESCE(ml.gross_out, 0)) AS gross_out
+        FROM transaction_master tm
+        LEFT JOIN metal_ledger ml ON ml.company_id = tm.company_id AND ml.transaction_id = tm.id
+        WHERE tm.company_id = ? AND tm.transaction_type = 'METAL_REFUND_GIVEN'
+        GROUP BY tm.company_id, tm.reference_no
+      ) hist ON hist.company_id = rfp.company_id AND hist.reference_no = CONCAT('RFPAYABLE-', rfp.id)
+      WHERE rfp.company_id = ?
+        ${branchWhere}
+        AND ABS(COALESCE(rfp.settled_metal_weight, 0) - COALESCE(hist.gross_out, 0)) > 0.0005
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "METAL_REFUND_HISTORY_MISMATCH", "Metal refund history mismatch", rows.map((row) => createReconciliationIssue("refund-payables", "METAL_REFUND_HISTORY_MISMATCH", "HIGH", "Payable settled metal does not match METAL_REFUND_GIVEN ledger history", row))));
+  }
+
+  {
+    const params = [companyId];
+    if (branchScope?.isBranchFiltered) params.push(branchScope.branchId);
+    const rows = await runReconQuery(`
+      SELECT tm.id AS transaction_id, tm.invoice_no, tm.reference_no
+      FROM transaction_master tm
+      LEFT JOIN return_refund_payables rfp ON rfp.company_id = tm.company_id AND tm.reference_no = CONCAT('RFPAYABLE-', rfp.id)
+      ${branchScope?.isBranchFiltered ? "LEFT JOIN return_history rh_scope ON rh_scope.id = rfp.return_id AND rh_scope.company_id = rfp.company_id" : ""}
+      LEFT JOIN cash_ledger cl ON cl.company_id = tm.company_id AND cl.transaction_id = tm.id AND COALESCE(cl.debit_amount, 0) > 0
+      WHERE tm.company_id = ?
+        AND tm.transaction_type = 'CASH_REFUND_PAID'
+        ${branchScope?.isBranchFiltered ? "AND rh_scope.branch_id = ?" : ""}
+        AND cl.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "MISSING_CASH_LEDGER_DEBIT", "Missing cash ledger debit", rows.map((row) => createReconciliationIssue("refund-payables", "MISSING_CASH_LEDGER_DEBIT", "CRITICAL", "CASH_REFUND_PAID transaction has no cash ledger debit", row))));
+  }
+
+  {
+    const params = [companyId];
+    if (branchScope?.isBranchFiltered) params.push(branchScope.branchId);
+    const rows = await runReconQuery(`
+      SELECT tm.id AS transaction_id, tm.invoice_no, tm.reference_no
+      FROM transaction_master tm
+      LEFT JOIN return_refund_payables rfp ON rfp.company_id = tm.company_id AND tm.reference_no = CONCAT('RFPAYABLE-', rfp.id)
+      ${branchScope?.isBranchFiltered ? "LEFT JOIN return_history rh_scope ON rh_scope.id = rfp.return_id AND rh_scope.company_id = rfp.company_id" : ""}
+      LEFT JOIN metal_ledger ml ON ml.company_id = tm.company_id AND ml.transaction_id = tm.id AND COALESCE(ml.gross_out, 0) > 0
+      WHERE tm.company_id = ?
+        AND tm.transaction_type = 'METAL_REFUND_GIVEN'
+        ${branchScope?.isBranchFiltered ? "AND rh_scope.branch_id = ?" : ""}
+        AND ml.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("refund-payables", "MISSING_METAL_LEDGER_OUT", "Missing metal ledger out", rows.map((row) => createReconciliationIssue("refund-payables", "MISSING_METAL_LEDGER_OUT", "CRITICAL", "METAL_REFUND_GIVEN transaction has no metal ledger OUT", row))));
+  }
+
+  return groups;
+}
+
+async function buildBranchTransferReconciliation(companyId, branchScope) {
+  const groups = [];
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT s.id AS stock_id, s.barcode, s.current_branch_id, s.stock_state, s.status
+      FROM stock s
+      LEFT JOIN branch_transfer_items bti ON bti.company_id = s.company_id AND UPPER(TRIM(bti.barcode)) = UPPER(TRIM(s.barcode)) AND UPPER(COALESCE(bti.item_status, '')) IN ('DISPATCHED', 'IN_TRANSIT', 'PENDING_RECEIVE')
+      LEFT JOIN branch_transfers bt ON bt.company_id = s.company_id AND bt.id = bti.transfer_id AND UPPER(COALESCE(bt.status, '')) IN ('IN_TRANSIT', 'PARTIALLY_RECEIVED', 'DISPATCHED')
+      WHERE s.company_id = ?
+        ${stockBranchClause("s", branchScope, params)}
+        AND UPPER(COALESCE(s.stock_state, '')) = 'IN_TRANSIT'
+        AND bt.id IS NULL
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("branch-transfer", "IN_TRANSIT_WITHOUT_OPEN_TRANSFER", "IN_TRANSIT stock without open transfer", rows.map((row) => createReconciliationIssue("branch-transfer", "IN_TRANSIT_WITHOUT_OPEN_TRANSFER", "HIGH", "Stock is IN_TRANSIT without an open transfer", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT bti.id AS transfer_item_id, bti.barcode, bti.from_branch_id, bti.to_branch_id, bti.item_status, s.current_branch_id
+      FROM branch_transfer_items bti
+      INNER JOIN stock s ON s.company_id = bti.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(bti.barcode))
+      WHERE bti.company_id = ?
+        AND UPPER(COALESCE(bti.item_status, '')) = 'RECEIVED'
+        ${branchScope?.isBranchFiltered ? "AND (bti.from_branch_id = ? OR bti.to_branch_id = ?)" : ""}
+        AND s.current_branch_id = bti.from_branch_id
+      LIMIT 200
+    `, branchScope?.isBranchFiltered ? [companyId, branchScope.branchId, branchScope.branchId] : params);
+    groups.push(createReconciliationGroup("branch-transfer", "RECEIVED_STILL_SOURCE_BRANCH", "Transfer received but stock still source branch", rows.map((row) => createReconciliationIssue("branch-transfer", "RECEIVED_STILL_SOURCE_BRANCH", "HIGH", "Received transfer item still points to source branch", row))));
+  }
+
+  {
+    const params = branchScope?.isBranchFiltered ? [companyId, branchScope.branchId, branchScope.branchId] : [companyId];
+    const rows = await runReconQuery(`
+      SELECT bti.id AS transfer_item_id, bti.transfer_id, bti.barcode, bti.item_status, bt.status AS transfer_status, bti.mismatch_reason
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt ON bt.company_id = bti.company_id AND bt.id = bti.transfer_id
+      WHERE bti.company_id = ?
+        ${branchScope?.isBranchFiltered ? "AND (bti.from_branch_id = ? OR bti.to_branch_id = ?)" : ""}
+        AND (
+          (UPPER(COALESCE(bti.item_status, '')) IN ('SHORTAGE', 'MISMATCH') AND UPPER(COALESCE(bt.status, '')) NOT IN ('PARTIALLY_RECEIVED', 'SHORTAGE', 'COMPLETED'))
+          OR (TRIM(COALESCE(bti.mismatch_reason, '')) <> '' AND UPPER(COALESCE(bti.item_status, '')) NOT IN ('SHORTAGE', 'MISMATCH'))
+        )
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("branch-transfer", "SHORTAGE_MISMATCH", "Shortage mismatch", rows.map((row) => createReconciliationIssue("branch-transfer", "SHORTAGE_MISMATCH", "MEDIUM", "Transfer shortage/mismatch state is inconsistent", row))));
+  }
+
+  {
+    const params = branchScope?.isBranchFiltered ? [companyId, branchScope.branchId, branchScope.branchId] : [companyId];
+    const rows = await runReconQuery(`
+      SELECT barcode, COUNT(*) AS open_transfer_count, GROUP_CONCAT(id ORDER BY id) AS transfer_item_ids
+      FROM branch_transfer_items
+      WHERE company_id = ?
+        ${branchScope?.isBranchFiltered ? "AND (from_branch_id = ? OR to_branch_id = ?)" : ""}
+        AND UPPER(COALESCE(item_status, '')) IN ('PENDING_DISPATCH', 'DISPATCHED', 'IN_TRANSIT', 'PENDING_RECEIVE')
+      GROUP BY barcode
+      HAVING COUNT(*) > 1
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("branch-transfer", "TRANSFER_ITEM_DUPLICATE_STATE", "Transfer item duplicate state", rows.map((row) => createReconciliationIssue("branch-transfer", "TRANSFER_ITEM_DUPLICATE_STATE", "HIGH", "Barcode exists in multiple open transfer item states", row))));
+  }
+
+  return groups;
+}
+
+async function buildProcessReconciliation(companyId, branchScope) {
+  const groups = [];
+  {
+    const rows = await runReconQuery(`
+      SELECT id AS process_step_id, lot_no, step_no, input_weight, output_weight, additive_used_weight
+      FROM process_steps
+      WHERE company_id = ?
+        AND output_weight > input_weight + additive_used_weight + 0.001
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("process", "OUTPUT_EXCEEDS_INPUT_ADDITIVE", "Output > input + additive", rows.map((row) => createReconciliationIssue("process", "OUTPUT_EXCEEDS_INPUT_ADDITIVE", "HIGH", "Process output exceeds input plus additive", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT id AS process_step_id, lot_no, step_no, loss_weight, loss_qty
+      FROM process_steps
+      WHERE company_id = ?
+        AND (loss_weight < 0 OR loss_qty < 0)
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("process", "NEGATIVE_LOSS", "Negative loss", rows.map((row) => createReconciliationIssue("process", "NEGATIVE_LOSS", "HIGH", "Process step has negative loss", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT ps.id AS process_step_id, ps.lot_no, ps.recovery_weight, COALESCE(SUM(pri.weight), 0) AS linked_recovery_weight
+      FROM process_steps ps
+      LEFT JOIN process_step_recovery_inputs pri ON pri.company_id = ps.company_id AND pri.process_step_id = ps.id
+      WHERE ps.company_id = ?
+      GROUP BY ps.id, ps.lot_no, ps.recovery_weight
+      HAVING ABS(COALESCE(ps.recovery_weight, 0) - linked_recovery_weight) > 0.001
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("process", "RECOVERY_STOCK_MISMATCH", "Recovery stock mismatch", rows.map((row) => createReconciliationIssue("process", "RECOVERY_STOCK_MISMATCH", "MEDIUM", "Process recovery weight does not match linked recovery stock", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
+      SELECT pl.id AS process_lot_id, pl.lot_no, pl.final_weight, COUNT(s.id) AS stock_output_count
+      FROM process_lots pl
+      LEFT JOIN stock s ON s.company_id = pl.company_id AND s.lot_number = pl.lot_no AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+      WHERE pl.company_id = ?
+      GROUP BY pl.id, pl.lot_no, pl.final_weight
+      HAVING stock_output_count > GREATEST(COALESCE(pl.expected_total_qty, 0), COALESCE(pl.total_khadi_count, 0), 0)
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("process", "STICKER_OUTPUT_EXCEEDS_PROCESS_OUTPUT", "Sticker output exceeds process output", rows.map((row) => createReconciliationIssue("process", "STICKER_OUTPUT_EXCEEDS_PROCESS_OUTPUT", "MEDIUM", "Stock/sticker output count exceeds process expected output", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT ps.id AS process_step_id, ps.lot_no, ps.step_no, ps.input_weight, prev.output_weight AS previous_output_weight
+      FROM process_steps ps
+      INNER JOIN process_steps prev ON prev.company_id = ps.company_id AND prev.process_lot_id = ps.process_lot_id AND prev.step_no = ps.step_no - 1
+      WHERE ps.company_id = ?
+        AND ps.input_weight > prev.output_weight + ps.additive_used_weight + 0.001
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("process", "DOWNSTREAM_DEPENDENCY_INCONSISTENCY", "Downstream dependency inconsistency", rows.map((row) => createReconciliationIssue("process", "DOWNSTREAM_DEPENDENCY_INCONSISTENCY", "MEDIUM", "Process step input exceeds previous output plus additive", row))));
+  }
+
+  return groups;
+}
+
+async function buildLedgerReconciliation(companyId) {
+  const groups = [];
+  {
+    const rows = await runReconQuery(`
+      SELECT pbs.party_id, pbs.cash_balance AS summary_cash, COALESCE(calc.cash_balance, 0) AS ledger_cash
+      FROM party_balance_summary pbs
+      LEFT JOIN (
+        SELECT company_id, party_id, SUM(COALESCE(debit_amount, 0)) - SUM(COALESCE(credit_amount, 0)) AS cash_balance
+        FROM cash_ledger
+        WHERE company_id = ?
+        GROUP BY company_id, party_id
+      ) calc ON calc.company_id = pbs.company_id AND calc.party_id = pbs.party_id
+      WHERE pbs.company_id = ?
+        AND ABS(COALESCE(pbs.cash_balance, 0) - COALESCE(calc.cash_balance, 0)) > 0.009
+      LIMIT 200
+    `, [companyId, companyId]);
+    groups.push(createReconciliationGroup("ledger", "PARTY_BALANCE_MISMATCH", "Party balance mismatch vs ledger recomputation", rows.map((row) => createReconciliationIssue("ledger", "PARTY_BALANCE_MISMATCH", "CRITICAL", "Party balance summary does not match cash ledger recomputation", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT
+        pbs.party_id,
+        pbs.gold_gross_balance AS summary_gold_gross,
+        COALESCE(calc.gold_gross_balance, 0) AS ledger_gold_gross,
+        pbs.gold_fine_balance AS summary_gold_fine,
+        COALESCE(calc.gold_fine_balance, 0) AS ledger_gold_fine,
+        pbs.silver_gross_balance AS summary_silver_gross,
+        COALESCE(calc.silver_gross_balance, 0) AS ledger_silver_gross,
+        pbs.silver_fine_balance AS summary_silver_fine,
+        COALESCE(calc.silver_fine_balance, 0) AS ledger_silver_fine
+      FROM party_balance_summary pbs
+      LEFT JOIN (
+        SELECT
+          company_id,
+          party_id,
+          SUM(CASE WHEN UPPER(COALESCE(metal_type, '')) = 'GOLD' THEN COALESCE(gross_in, 0) - COALESCE(gross_out, 0) ELSE 0 END) AS gold_gross_balance,
+          SUM(CASE WHEN UPPER(COALESCE(metal_type, '')) = 'GOLD' THEN COALESCE(fine_in, 0) - COALESCE(fine_out, 0) ELSE 0 END) AS gold_fine_balance,
+          SUM(CASE WHEN UPPER(COALESCE(metal_type, '')) = 'SILVER' THEN COALESCE(gross_in, 0) - COALESCE(gross_out, 0) ELSE 0 END) AS silver_gross_balance,
+          SUM(CASE WHEN UPPER(COALESCE(metal_type, '')) = 'SILVER' THEN COALESCE(fine_in, 0) - COALESCE(fine_out, 0) ELSE 0 END) AS silver_fine_balance
+        FROM metal_ledger
+        WHERE company_id = ?
+        GROUP BY company_id, party_id
+      ) calc ON calc.company_id = pbs.company_id AND calc.party_id = pbs.party_id
+      WHERE pbs.company_id = ?
+        AND (
+          ABS(COALESCE(pbs.gold_gross_balance, 0) - COALESCE(calc.gold_gross_balance, 0)) > 0.0005
+          OR ABS(COALESCE(pbs.gold_fine_balance, 0) - COALESCE(calc.gold_fine_balance, 0)) > 0.0005
+          OR ABS(COALESCE(pbs.silver_gross_balance, 0) - COALESCE(calc.silver_gross_balance, 0)) > 0.0005
+          OR ABS(COALESCE(pbs.silver_fine_balance, 0) - COALESCE(calc.silver_fine_balance, 0)) > 0.0005
+        )
+      LIMIT 200
+    `, [companyId, companyId]);
+    groups.push(createReconciliationGroup("ledger", "PARTY_METAL_BALANCE_MISMATCH", "Party metal balance mismatch vs ledger recomputation", rows.map((row) => createReconciliationIssue("ledger", "PARTY_METAL_BALANCE_MISMATCH", "CRITICAL", "Party balance summary does not match metal ledger recomputation", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT sh.invoice_number, sh.total_amount, COALESCE(cl.debit_amount, 0) AS sale_invoice_debit
+      FROM sales_history sh
+      LEFT JOIN invoice_transaction_link itl ON itl.company_id = sh.company_id AND itl.invoice_no = sh.invoice_number AND itl.link_type = 'SALE_INVOICE'
+      LEFT JOIN transaction_master tm ON tm.company_id = itl.company_id AND tm.id = itl.transaction_id
+      LEFT JOIN cash_ledger cl ON cl.company_id = tm.company_id AND cl.transaction_id = tm.id
+      WHERE sh.company_id = ?
+        AND COALESCE(sh.is_deleted, 0) = 0
+        AND ABS(COALESCE(sh.total_amount, 0) - COALESCE(cl.debit_amount, 0)) > 1
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("ledger", "INVOICE_TOTAL_TRANSACTION_MISMATCH", "Invoice total mismatch vs transactions", rows.map((row) => createReconciliationIssue("ledger", "INVOICE_TOTAL_TRANSACTION_MISMATCH", "HIGH", "Sales invoice total does not match SALE_INVOICE cash debit", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT itl.id AS link_id, itl.invoice_no, itl.transaction_id, itl.link_type
+      FROM invoice_transaction_link itl
+      LEFT JOIN transaction_master tm ON tm.company_id = itl.company_id AND tm.id = itl.transaction_id
+      WHERE itl.company_id = ?
+        AND tm.id IS NULL
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("ledger", "ORPHAN_INVOICE_TRANSACTION_LINK", "Orphan invoice_transaction_link", rows.map((row) => createReconciliationIssue("ledger", "ORPHAN_INVOICE_TRANSACTION_LINK", "HIGH", "Invoice transaction link points to a missing transaction", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT id AS transaction_id, voucher_no, invoice_no, transaction_type, reversal_of_transaction_id
+      FROM transaction_master
+      WHERE company_id = ?
+        AND transaction_type LIKE '%REVERSAL%'
+        AND reversal_of_transaction_id IS NULL
+      LIMIT 200
+    `, [companyId]);
+    groups.push(createReconciliationGroup("ledger", "MISSING_REVERSAL_LINKAGE", "Missing reversal linkage", rows.map((row) => createReconciliationIssue("ledger", "MISSING_REVERSAL_LINKAGE", "MEDIUM", "Reversal transaction is missing reversal_of_transaction_id", row))));
+  }
+
+  return groups;
+}
+
+async function buildReconciliationModuleGroups(moduleName, companyId, branchScope) {
+  if (moduleName === "stock-sales") return buildStockSalesReconciliation(companyId, branchScope);
+  if (moduleName === "returns") return buildReturnsReconciliation(companyId, branchScope);
+  if (moduleName === "refund-payables") return buildRefundPayablesReconciliation(companyId, branchScope);
+  if (moduleName === "branch-transfer") return buildBranchTransferReconciliation(companyId, branchScope);
+  if (moduleName === "process") return buildProcessReconciliation(companyId, branchScope);
+  if (moduleName === "ledger") return buildLedgerReconciliation(companyId);
+  return [];
+}
+
+async function handleReconciliationEndpoint(req, res, moduleName, { includeLedger = false } = {}) {
+  try {
+    const resolved = await resolveReconciliationAccess(req, `RECONCILIATION_${String(moduleName || "overview").toUpperCase()}`);
+    if (!resolved.ok) {
+      if (resolved.response) return res.status(resolved.response.status).json(resolved.response.body);
+      return sendAccessError(res, resolved.access);
+    }
+
+    const companyId = resolved.access.companyScope;
+    const modules = moduleName === "overview"
+      ? ["stock-sales", "returns", "refund-payables", "branch-transfer", "process", "ledger"]
+      : includeLedger
+        ? [moduleName, "ledger"]
+        : [moduleName];
+    const groupLists = await Promise.all(modules.map((name) => buildReconciliationModuleGroups(name, companyId, resolved.branchScope)));
+    const groups = groupLists.flat();
+    const summary = summarizeReconciliationGroups(groups);
+
+    await logActivitySafe(pool, req, resolved.access, {
+      companyId,
+      actionType: "RECONCILIATION_SCAN_RUN",
+      entityType: "RECONCILIATION",
+      entityId: moduleName,
+      moduleName: "reconciliation",
+      status: "success",
+      message: "Reconciliation scan run",
+      metadata: {
+        module: moduleName,
+        branchId: resolved.branchScope?.branchId ?? null,
+        totalIssues: summary.totalIssues,
+        criticalIssues: summary.criticalIssues
+      }
+    });
+
+    return res.json({
+      success: true,
+      company_id: companyId,
+      branch_id: resolved.branchScope?.branchId ?? null,
+      module: moduleName,
+      summary,
+      issueGroups: groups,
+      groups
+    });
+  } catch (error) {
+    console.error("Reconciliation scan error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Reconciliation scan failed",
+      error: getErrorDetail(error)
+    });
+  }
+}
+
+app.get("/reconciliation/overview", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "overview"));
+app.get("/reconciliation/stock-sales", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "stock-sales", { includeLedger: true }));
+app.get("/reconciliation/returns", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "returns"));
+app.get("/reconciliation/branch-transfer", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "branch-transfer"));
+app.get("/reconciliation/process", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "process"));
+app.get("/reconciliation/refund-payables", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "refund-payables"));
+
 app.get("/api/reports/profit", authMiddleware, async (req, res) => {
   try {
     const access = await resolveBranchAccessContext(req, {
