@@ -25,6 +25,13 @@
   --erp-radius-sm: 12px;
   --erp-radius-md: 18px;
   --erp-radius-lg: 24px;
+  --erp-card-radius: 16px;
+  --erp-panel-radius: 20px;
+  --erp-card-shadow: 0 10px 28px rgba(17, 24, 39, 0.07), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  --erp-card-shadow-hover: 0 18px 42px rgba(17, 24, 39, 0.11), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  --erp-gold-gradient: linear-gradient(90deg, #b88932 0%, #f1d99a 48%, #c58b2b 100%);
+  --erp-hover: rgba(197, 139, 43, 0.08);
+  --erp-focus-ring: 0 0 0 4px rgba(197, 139, 43, 0.16);
 }
 
 * {
@@ -68,6 +75,15 @@ textarea {
 
 button {
   outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--erp-focus-ring);
 }
 
 input,
@@ -398,25 +414,189 @@ textarea::placeholder {
   box-shadow: var(--erp-shadow-sm);
 }
 
-.section-box {
+.premium-card,
+.section-box,
+.panel,
+.summary-card,
+.report-summary-card,
+.history-card {
   position: relative;
-  margin-bottom: 16px;
-  padding: 20px;
-  border-radius: 22px;
-  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 250, 242, 0.9) 100%);
+  border: 1px solid var(--erp-border);
+  box-shadow: var(--erp-card-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
+.premium-card::before,
 .section-box::before,
 .panel::before,
-.summary-card::before {
+.summary-card::before,
+.report-summary-card::before,
+.history-card::before {
   content: "";
   position: absolute;
   left: 0;
+  right: 0;
   top: 0;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+.premium-card:hover,
+.panel:hover,
+.summary-card:hover,
+.report-summary-card:hover,
+.history-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(197, 139, 43, 0.3);
+  box-shadow: var(--erp-card-shadow-hover);
+}
+
+.premium-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.premium-btn,
+.premium-btn-primary,
+.premium-btn-secondary,
+.top-right button,
+.refresh-btn,
+.logout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border-radius: 13px;
+  border: 1px solid var(--erp-border);
+  padding: 10px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: var(--erp-shadow-xs);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, filter 0.18s ease;
+}
+
+.premium-btn-primary {
+  color: #fff;
+  border-color: rgba(166, 112, 32, 0.78);
+  background: linear-gradient(180deg, #d7a85d 0%, #b77b28 100%);
+}
+
+.premium-btn-secondary,
+.premium-btn {
+  color: #243146;
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ec 100%);
+}
+
+.premium-btn:hover,
+.premium-btn-primary:hover,
+.premium-btn-secondary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--erp-shadow-sm);
+  filter: saturate(1.04);
+}
+
+.premium-table {
   width: 100%;
-  height: 3px;
-  border-radius: 22px 22px 0 0;
-  background: linear-gradient(90deg, var(--erp-gold), var(--erp-gold-2));
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.premium-table th,
+.premium-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2f7;
+  text-align: left;
+  vertical-align: top;
+}
+
+.premium-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #475569;
+  background: linear-gradient(180deg, #fffaf1 0%, #f8fafc 100%);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.premium-table tbody tr:hover td {
+  background: var(--erp-hover);
+}
+
+.premium-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 9px;
+  border: 1px solid var(--erp-border);
+  background: #fffaf2;
+  color: #604719;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+}
+
+.metric-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+.metric-icon {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.metric-value,
+.metric-card strong {
+  color: #111827;
+  font-weight: 900;
+}
+
+.metric-label,
+.metric-card h4 {
+  color: #536176;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.section-box {
+  margin-bottom: 16px;
+  padding: 20px;
+  border-radius: var(--erp-panel-radius);
+  min-width: 0;
+}
+
+.section-box::before {
+  border-radius: var(--erp-panel-radius) var(--erp-panel-radius) 0 0;
 }
 
 .section-box h2,
@@ -1545,6 +1725,582 @@ table tbody tr:hover {
   }
 }
 
+/* ERP Premium UI Phase C: auth, staff management, final mobile polish */
+.auth-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(197, 139, 43, 0.16), transparent 30%),
+    radial-gradient(circle at 88% 18%, rgba(64, 95, 149, 0.12), transparent 28%),
+    linear-gradient(135deg, #f7efe4 0%, #fffaf2 45%, #f4eadb 100%);
+  overflow-x: hidden;
+}
+
+.auth-card,
+.auth-panel,
+.forgot-shell,
+.forgot-step,
+.auth-note,
+.status-box {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(255, 250, 242, 0.92) 100%);
+  box-shadow: var(--erp-card-shadow);
+}
+
+.auth-card::before,
+.auth-panel::before,
+.forgot-shell::before,
+.forgot-step::before,
+.auth-note::before,
+.status-box::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+.brand-icon,
+.auth-tab.active,
+.forgot-kicker,
+.forgot-step strong i {
+  background: linear-gradient(180deg, #d7a85d 0%, #b77b28 100%);
+  color: #fff;
+  box-shadow: 0 12px 26px rgba(197, 139, 43, 0.24);
+}
+
+.auth-tabs {
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--erp-border);
+  background: rgba(255, 250, 242, 0.8);
+  padding: 6px;
+}
+
+.auth-tab,
+.forgot-escape,
+.ghost-btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.auth-tab:hover,
+.forgot-escape:hover,
+.ghost-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--erp-shadow-xs);
+}
+
+.auth-card .input-wrap,
+.forgot-shell .input-wrap {
+  border-radius: 14px;
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #fffdf9 0%, #fffaf3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.auth-card .input-wrap:focus-within,
+.forgot-shell .input-wrap:focus-within {
+  border-color: var(--erp-gold);
+  box-shadow: var(--erp-focus-ring);
+  background: #fff;
+}
+
+body .layout .main .staff-toolbar,
+body .layout .main #attendanceSummaryBox,
+body .layout .main .time-row,
+body .layout .main .staff-status-badge,
+body .layout .main .staff-action-btn {
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ec 100%);
+  box-shadow: var(--erp-shadow-xs);
+}
+
+body .layout .main .staff-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+body .layout .main #attendanceSummaryBox {
+  padding: 12px 14px;
+  color: #2f3b4f;
+}
+
+body .layout .main .time-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+}
+
+body .layout .main .staff-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body .layout .main .staff-status-badge.active {
+  color: #166534;
+  background: linear-gradient(180deg, #ecfdf5, #dcfce7);
+  border-color: #bbf7d0;
+}
+
+body .layout .main .staff-status-badge.inactive {
+  color: #991b1b;
+  background: linear-gradient(180deg, #fff1f1, #fee2e2);
+  border-color: #fecaca;
+}
+
+body .layout .main .staff-action-btn {
+  min-height: 36px;
+  padding: 8px 11px;
+  cursor: pointer;
+  font-weight: 900;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+body .layout .main .staff-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--erp-shadow-sm);
+  filter: saturate(1.04);
+}
+
+body .layout .main .dashboard-grid .stat-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf2 100%);
+  box-shadow: var(--erp-card-shadow);
+}
+
+body .layout .main .dashboard-grid .stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+}
+
+@media (max-width: 900px) {
+  .auth-card {
+    width: min(100%, 720px);
+  }
+
+  .auth-tabs {
+    border-radius: var(--erp-card-radius);
+  }
+
+  body .layout .main .staff-toolbar {
+    align-items: stretch;
+  }
+
+  body .layout .main .staff-toolbar > * {
+    width: 100%;
+    max-width: none !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-shell {
+    padding: 12px;
+  }
+
+  .auth-card {
+    border-radius: var(--erp-card-radius);
+  }
+
+  .auth-body,
+  .auth-top,
+  .forgot-shell {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .auth-tabs,
+  .forgot-actions,
+  .action-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .auth-tab,
+  .forgot-actions button,
+  .action-stack button {
+    width: 100%;
+  }
+
+  body .layout .main .time-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  body .layout .main .table-wrap > table {
+    min-width: 720px;
+  }
+}
+
+/* ERP Premium UI Phase B: reports, branch workflows, admin, expenses, settings */
+body .layout .main .panel,
+body .layout .main .filters-panel,
+body .layout .main .report-header-card,
+body .layout .main .report-panel,
+body .layout .main .settings-card,
+body .layout .main .settings-preview-panel,
+body .layout .main .preview-box,
+body .layout .main .approval-card,
+body .layout .main .summary-box,
+body .layout .main .expense-card,
+body .layout .main .invoice-summary-box,
+body .layout .main .summary-wide-card,
+body .layout .main .product-summary-card,
+body .layout .main .scanner-left,
+body .layout .main .scanner-right,
+body .layout .main .sale-modal-box,
+body .layout .main .payment-summary-card,
+body .layout .main .payment-history-box,
+body .layout .main .cancel-preview-section,
+body .layout .main .branch-card,
+body .layout .main .transfer-card,
+body .layout .main .move,
+body .layout .main .stat-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 250, 242, 0.92) 100%);
+  box-shadow: var(--erp-card-shadow);
+}
+
+body .layout .main .panel::before,
+body .layout .main .filters-panel::before,
+body .layout .main .report-header-card::before,
+body .layout .main .report-panel::before,
+body .layout .main .settings-card::before,
+body .layout .main .preview-box::before,
+body .layout .main .approval-card::before,
+body .layout .main .summary-box::before,
+body .layout .main .expense-card::before,
+body .layout .main .invoice-summary-box::before,
+body .layout .main .summary-wide-card::before,
+body .layout .main .product-summary-card::before,
+body .layout .main .scanner-left::before,
+body .layout .main .scanner-right::before,
+body .layout .main .sale-modal-box::before,
+body .layout .main .payment-summary-card::before,
+body .layout .main .payment-history-box::before,
+body .layout .main .cancel-preview-section::before,
+body .layout .main .branch-card::before,
+body .layout .main .move::before,
+body .layout .main .stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+body .layout .main .panel:hover,
+body .layout .main .report-panel:hover,
+body .layout .main .settings-card:hover,
+body .layout .main .approval-card:hover,
+body .layout .main .invoice-summary-box:hover,
+body .layout .main .summary-wide-card:hover,
+body .layout .main .product-summary-card:hover,
+body .layout .main .scanner-left:hover,
+body .layout .main .scanner-right:hover,
+body .layout .main .payment-summary-card:hover,
+body .layout .main .move:hover,
+body .layout .main .stat-card:hover {
+  border-color: rgba(197, 139, 43, 0.3);
+  box-shadow: var(--erp-card-shadow-hover);
+}
+
+body .layout .main .report-toolbar,
+body .layout .main .reports-toolbar,
+body .layout .main .toolbar-actions,
+body .layout .main .filters,
+body .layout .main .report-filter-grid,
+body .layout .main .approval-head,
+body .layout .main .settings-form-grid,
+body .layout .main .scanner-layout,
+body .layout .main .summary-layout,
+body .layout .main .payment-summary-grid {
+  gap: 14px;
+}
+
+body .layout .main .report-toolbar,
+body .layout .main .reports-toolbar,
+body .layout .main .filters {
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ec 100%);
+  box-shadow: var(--erp-shadow-xs);
+  padding: 14px;
+}
+
+body .layout .main .field label,
+body .layout .main .input-box label,
+body .layout .main .report-filter-grid label {
+  color: #44546a;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.28px;
+}
+
+body .layout .main .field input,
+body .layout .main .field select,
+body .layout .main .search-box input,
+body .layout .main .role-select,
+body .layout .main .settings-card input,
+body .layout .main .settings-card select,
+body .layout .main .settings-card textarea,
+body .layout .main .report-filter-grid input,
+body .layout .main .report-filter-grid select,
+body .layout .main .filters input,
+body .layout .main .filters select {
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #fffdf9 0%, #fffaf3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+body .layout .main .field input:focus,
+body .layout .main .field select:focus,
+body .layout .main .search-box input:focus,
+body .layout .main .role-select:focus,
+body .layout .main .settings-card input:focus,
+body .layout .main .settings-card select:focus,
+body .layout .main .settings-card textarea:focus,
+body .layout .main .report-filter-grid input:focus,
+body .layout .main .report-filter-grid select:focus,
+body .layout .main .filters input:focus,
+body .layout .main .filters select:focus {
+  border-color: var(--erp-gold);
+  box-shadow: var(--erp-focus-ring);
+  background: #fff;
+}
+
+body .layout .main .btn,
+body .layout .main .report-tab-btn,
+body .layout .main .invoice-action-btn,
+body .layout .main .action-btn,
+body .layout .main .danger-btn,
+body .layout .main .sale-close-btn,
+body .layout .main .scanner-close-inline,
+body .layout .main .mini-ghost-btn,
+body .layout .main .approve-btn,
+body .layout .main .reject-btn,
+body .layout .main .toolbar-actions button,
+body .layout .main .top-right button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border-radius: 13px;
+  font-weight: 900;
+  box-shadow: var(--erp-shadow-xs);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+body .layout .main .btn:hover,
+body .layout .main .report-tab-btn:hover,
+body .layout .main .invoice-action-btn:hover,
+body .layout .main .action-btn:hover,
+body .layout .main .danger-btn:hover,
+body .layout .main .mini-ghost-btn:hover,
+body .layout .main .approve-btn:hover,
+body .layout .main .reject-btn:hover,
+body .layout .main .toolbar-actions button:hover,
+body .layout .main .top-right button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--erp-shadow-sm);
+  filter: saturate(1.04);
+}
+
+body .layout .main .btn.primary,
+body .layout .main .primary,
+body .layout .main .report-tab-btn.active,
+body .layout .main .send-billing-btn,
+body .layout .main .approve-btn {
+  color: #fff;
+  border-color: rgba(166, 112, 32, 0.78);
+  background: linear-gradient(180deg, #d7a85d 0%, #b77b28 100%);
+}
+
+body .layout .main .btn.dark,
+body .layout .main .secondary,
+body .layout .main .report-tab-btn,
+body .layout .main .invoice-action-btn,
+body .layout .main .mini-ghost-btn,
+body .layout .main .scanner-close-inline {
+  color: #243146;
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ec 100%);
+}
+
+body .layout .main .btn.danger,
+body .layout .main .danger-btn,
+body .layout .main .reject-btn,
+body .layout .main .clear-invoice-btn {
+  color: #fff;
+  background: linear-gradient(180deg, #ef5e5e, #c83232);
+}
+
+body .layout .main .data-table,
+body .layout .main .approval-table,
+body .layout .main .pdf-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body .layout .main .data-table th,
+body .layout .main .approval-table th,
+body .layout .main .report-table-wrap th,
+body .layout .main .table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #fffaf1 0%, #f8f3ea 100%);
+  color: #536176;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+body .layout .main .data-table td,
+body .layout .main .approval-table td,
+body .layout .main .table-wrap td {
+  border-bottom: 1px solid #edf1f5;
+}
+
+body .layout .main .data-table tbody tr:hover td,
+body .layout .main .approval-table tbody tr:hover td,
+body .layout .main .table-wrap tbody tr:hover td {
+  background: var(--erp-hover);
+}
+
+body .layout .main .badge,
+body .layout .main .status-pill,
+body .layout .main .status-chip,
+body .layout .main .report-tag,
+body .layout .main .locked-chip,
+body .layout .main .unlocked-chip,
+body .layout .main .size-pill,
+body .layout .main .weight-label,
+body .layout .main .cancel-preview-status,
+body .layout .main .payment-history-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fff7ea 100%);
+  box-shadow: var(--erp-shadow-xs);
+}
+
+body .layout .main .report-summary-grid .summary-card,
+body .layout .main .material-summary-grid .summary-card,
+body .layout .main .summary-row .summary-card,
+body .layout .main .summary-grid .summary-box,
+body .layout .main .stats-grid .stat-card {
+  border-radius: var(--erp-card-radius);
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf2 100%);
+  border: 1px solid var(--erp-border);
+  box-shadow: var(--erp-card-shadow);
+}
+
+body .layout .main .report-summary-grid .summary-card p,
+body .layout .main .material-summary-grid .summary-card p,
+body .layout .main .summary-row .summary-card p,
+body .layout .main .summary-box h2,
+body .layout .main .stat-card h3,
+body .layout .main .metric-value {
+  color: #111827;
+  font-weight: 900;
+}
+
+body .layout .main .sale-modal,
+body .layout .main .modal-backdrop,
+body .layout .main .job-slip-history-modal {
+  backdrop-filter: blur(4px);
+}
+
+body .layout .main .sale-modal-header,
+body .layout .main .modal-head {
+  border-bottom: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #fffaf1 0%, #fff7ea 100%);
+}
+
+body .layout .main .timeline {
+  gap: 12px;
+}
+
+body .layout .main .move {
+  border-left: 4px solid var(--erp-gold);
+}
+
+@media (max-width: 768px) {
+  body .layout .main .report-toolbar,
+  body .layout .main .reports-toolbar,
+  body .layout .main .toolbar-actions,
+  body .layout .main .filters,
+  body .layout .main .report-filter-grid,
+  body .layout .main .approval-head,
+  body .layout .main .settings-form-grid,
+  body .layout .main .scanner-layout,
+  body .layout .main .summary-layout,
+  body .layout .main .payment-summary-grid {
+    align-items: stretch;
+  }
+
+  body .layout .main .toolbar-actions button,
+  body .layout .main .filters button,
+  body .layout .main .report-filter-grid button,
+  body .layout .main .btn,
+  body .layout .main .invoice-action-btn {
+    width: 100%;
+  }
+
+  body .layout .main .settings-page,
+  body .layout .main .sale-modal,
+  body .layout .main .modal-backdrop {
+    padding: 12px;
+  }
+}
+
+@media print {
+  body .layout .main .panel,
+  body .layout .main .sub-card,
+  body .layout .main .section-box,
+  body .layout .main .settings-card,
+  body .layout .main .approval-card {
+    box-shadow: none;
+  }
+}
+
 @media (max-width: 480px) {
   body {
     font-size: 14px;
@@ -1685,5 +2441,176 @@ table tbody tr:hover {
     width: 52px;
     height: 52px;
     font-size: 21px;
+  }
+}
+
+/* ERP Premium UI Phase A: shared operational polish */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.card,
+.sub-card,
+.compact-box,
+.summary,
+.workflow-card,
+.txn-panel,
+.ledger-card,
+.settlement-panel,
+.payment-extra-box,
+.optional-box,
+.company-info-box,
+.manual-lot-panel,
+.sticker-pro-box,
+.job-slip-history-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(255, 250, 242, 0.92) 100%);
+  box-shadow: var(--erp-card-shadow);
+}
+
+.card::before,
+.sub-card::before,
+.compact-box::before,
+.summary::before,
+.workflow-card::before,
+.txn-panel::before,
+.ledger-card::before,
+.settlement-panel::before,
+.payment-extra-box::before,
+.optional-box::before,
+.company-info-box::before,
+.manual-lot-panel::before,
+.sticker-pro-box::before,
+.job-slip-history-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+.card:hover,
+.sub-card:hover,
+.compact-box:hover,
+.workflow-card:hover,
+.txn-panel:hover,
+.ledger-card:hover,
+.settlement-panel:hover,
+.payment-extra-box:hover,
+.optional-box:hover,
+.company-info-box:hover,
+.manual-lot-panel:hover {
+  border-color: rgba(197, 139, 43, 0.3);
+  box-shadow: var(--erp-card-shadow-hover);
+}
+
+.topbar button,
+.primary-btn,
+.secondary-btn,
+.mini-btn,
+.btn-blue,
+.add-btn,
+.save-btn,
+.edit-btn,
+.lot-btn,
+.back-btn,
+.view-btn,
+.inline-save-btn,
+.inline-cancel-btn,
+.delete-icon-btn,
+.ledger-collapse-btn,
+#stockPagination button,
+#returnPagination button,
+#txnPagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.table-wrap,
+.history-table-wrap,
+.process-summary-table-wrap,
+.txn-open-list {
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), var(--erp-shadow-xs);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrap table,
+.history-table-wrap table,
+.process-summary-table-wrap table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-wrap th,
+.history-table-wrap th,
+.process-summary-table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #fffaf1 0%, #f8f3ea 100%);
+  color: #536176;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+.table-wrap tbody tr:hover td,
+.history-table-wrap tbody tr:hover td,
+.process-summary-table-wrap tbody tr:hover td {
+  background: var(--erp-hover);
+}
+
+.summary-chip,
+.status-chip,
+.history-badge,
+.ledger-badge,
+.txn-chip,
+.saved-badge,
+.unsaved-badge,
+.process-destination-badge,
+.additive-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--erp-border);
+  box-shadow: var(--erp-shadow-xs);
+}
+
+@media (max-width: 768px) {
+  .premium-toolbar,
+  .top-filter-bar,
+  .stock-search-row,
+  .lot-report-row,
+  .btn-row,
+  .action-btn-row,
+  .top-filter-actions,
+  .print-action-row {
+    align-items: stretch;
+  }
+
+  .premium-toolbar > *,
+  .top-filter-actions > *,
+  .print-action-row > *,
+  .btn-row > button,
+  .action-btn-row > button {
+    min-width: 0;
   }
 }
