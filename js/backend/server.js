@@ -3411,6 +3411,526 @@ function sendSuperAdminReadOnlyError(res) {
   });
 }
 
+function createStockBranchAccessError(message, status = 403) {
+  const error = createBarcodeSafetyError(message);
+  error.status = status;
+  error.statusCode = status;
+  error.isStockBranchAccessError = true;
+  return error;
+}
+
+function isAllBranchOperationalRole(access = {}) {
+  if (access.isSuperAdmin) return true;
+  return isBranchManagerRole(access.role || access.actingUser?.role || "");
+}
+
+function resolveBranchOperationalPermissions(user = {}, access = {}) {
+  const rawRole = user?.role || access?.actingUser?.role || access?.role || "";
+  const role = normalizeRoleValue(rawRole);
+  const branchId = getUserBranchId(user) ?? access?.userBranchId ?? null;
+  const hasBranch = branchId !== null && branchId !== undefined;
+  const isSuperAdmin = Boolean(access?.isSuperAdmin || role === "SUPERADMIN");
+  const isOwnerAdminAccounts = isBranchManagerRole(role);
+  const isBranchManager = isBranchManagerProfileRole(rawRole);
+  const isStaff = role === "STAFF";
+  const branchLocked = Boolean(!isSuperAdmin && !isOwnerAdminAccounts && hasBranch);
+  const blockedReason = !isSuperAdmin && isStaff && !hasBranch ? "Branch assignment required" : "";
+
+  if (isSuperAdmin) {
+    return {
+      branchLocked: false,
+      branchId: null,
+      canViewOwnBranch: true,
+      canBillOwnBranch: false,
+      canReceiveTransfer: false,
+      canCreateTransfer: false,
+      canMutateStock: false,
+      canViewReports: true,
+      canManageBranches: false,
+      blockedReason: ""
+    };
+  }
+
+  if (isOwnerAdminAccounts) {
+    return {
+      branchLocked: false,
+      branchId: null,
+      canViewOwnBranch: true,
+      canBillOwnBranch: true,
+      canReceiveTransfer: true,
+      canCreateTransfer: true,
+      canMutateStock: true,
+      canViewReports: true,
+      canManageBranches: Boolean(access?.canManageBranches),
+      blockedReason: ""
+    };
+  }
+
+  if (blockedReason) {
+    return {
+      branchLocked: false,
+      branchId: null,
+      canViewOwnBranch: false,
+      canBillOwnBranch: false,
+      canReceiveTransfer: false,
+      canCreateTransfer: false,
+      canMutateStock: false,
+      canViewReports: false,
+      canManageBranches: false,
+      blockedReason
+    };
+  }
+
+  return {
+    branchLocked,
+    branchId,
+    canViewOwnBranch: hasBranch,
+    canBillOwnBranch: hasBranch,
+    canReceiveTransfer: hasBranch,
+    canCreateTransfer: hasBranch,
+    canMutateStock: hasBranch,
+    canViewReports: hasBranch,
+    canManageBranches: false,
+    blockedReason: isBranchManager && !hasBranch ? "Branch assignment required" : ""
+  };
+}
+
+async function auditBranchPermissionDenied(connectionOrPool, req, access, {
+  action = "",
+  reason = "Branch permission denied"
+} = {}) {
+  await writeAuditLogSafe(connectionOrPool || pool, req || {}, {
+    companyId: access?.companyScope ?? null,
+    userId: access?.actingUserId ?? null,
+    actorRole: access?.actingUser?.role || access?.role || "",
+    actionType: "BRANCH_PERMISSION_DENIED",
+    entityType: "BRANCH_PERMISSION",
+    entityId: String(access?.userBranchId ?? ""),
+    moduleName: "branch",
+    status: "blocked",
+    message: reason,
+    metadata: {
+      action,
+      branch_id: access?.userBranchId ?? null,
+      route: req?.originalUrl || req?.path || "",
+      userRole: access?.actingUser?.role || access?.role || "",
+      reason
+    }
+  });
+}
+
+async function requireBranchOperationalPermission(connectionOrPool, req, res, access, permissionKey, action) {
+  const permissions = resolveBranchOperationalPermissions(access?.actingUser || req?.user || {}, access);
+  const reason = permissions.blockedReason || `Permission denied for ${action || permissionKey}`;
+  if (!permissions[permissionKey]) {
+    await auditBranchPermissionDenied(connectionOrPool || pool, req, access, { action, reason });
+    res.status(403).json({
+      success: false,
+      message: reason
+    });
+    return { ok: false, permissions };
+  }
+
+  return { ok: true, permissions };
+}
+
+async function auditBranchAccessDenied(connectionOrPool, req, access, {
+  action = "",
+  barcode = "",
+  stock = null,
+  message = "Branch access denied"
+} = {}) {
+  await writeAuditLogSafe(connectionOrPool || pool, req || {}, {
+    companyId: access?.companyScope ?? stock?.company_id ?? null,
+    userId: access?.actingUserId ?? null,
+    actorRole: access?.actingUser?.role || access?.role || "",
+    actionType: "BRANCH_ACCESS_DENIED",
+    entityType: "STOCK",
+    entityId: String(stock?.id || barcode || "").trim(),
+    moduleName: "stock",
+    status: "blocked",
+    message,
+    metadata: {
+      action,
+      barcode,
+      userBranch: access?.userBranchId ?? null,
+      stockBranch: stock?.current_branch_id ?? null,
+      route: req?.originalUrl || req?.path || "",
+      userRole: access?.actingUser?.role || access?.role || ""
+    }
+  });
+}
+
+async function assertStockBranchAccess(connection, access, options = {}) {
+  const {
+    barcode = "",
+    stockId = null,
+    action = "",
+    requireSellable = false,
+    requireStates = [],
+    allowOwnerAllBranch = true,
+    forUpdate = false,
+    req = null
+  } = options;
+
+  if (!access?.ok) {
+    throw createStockBranchAccessError("Access denied", 403);
+  }
+
+  const role = normalizeRoleValue(access.role || access.actingUser?.role || "");
+  const hasBranch = access.userBranchId !== null && access.userBranchId !== undefined;
+  const canUseAllBranches = allowOwnerAllBranch && isAllBranchOperationalRole({ ...access, role });
+
+  if (!access.isSuperAdmin && !canUseAllBranches && !hasBranch) {
+    await auditBranchAccessDenied(connection, req, access, {
+      action,
+      barcode,
+      message: "Branch assignment required"
+    });
+    throw createStockBranchAccessError("Branch assignment required", 403);
+  }
+
+  const cleanBarcode = String(barcode || "").trim();
+  const cleanStockId = Number(stockId || 0);
+  if (!cleanBarcode && !cleanStockId) {
+    throw createStockBranchAccessError("Barcode or stock id is required", 400);
+  }
+
+  const whereParts = ["company_id = ?"];
+  const params = [access.companyScope];
+
+  if (cleanStockId) {
+    whereParts.push("id = ?");
+    params.push(cleanStockId);
+  } else {
+    whereParts.push("UPPER(TRIM(barcode)) = ?");
+    params.push(normalizeBarcodeForComparison(cleanBarcode));
+  }
+
+  if (requireSellable) {
+    whereParts.push("barcode IS NOT NULL");
+    whereParts.push("TRIM(COALESCE(barcode, '')) <> ''");
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM stock
+    WHERE ${whereParts.join(" AND ")}
+    ORDER BY id DESC
+    LIMIT 2
+    ${forUpdate ? "FOR UPDATE" : ""}
+    `,
+    params
+  );
+
+  if (!rows.length) {
+    throw createStockBranchAccessError("Stock item not found", 404);
+  }
+
+  if (!cleanStockId && rows.length > 1) {
+    await auditBranchAccessDenied(connection, req, access, {
+      action,
+      barcode: cleanBarcode,
+      stock: rows[0],
+      message: "Duplicate barcode ambiguity"
+    });
+    throw createBarcodeSafetyError(DUPLICATE_BARCODE_MESSAGE);
+  }
+
+  const stock = rows[0];
+  const effectiveState = getEffectiveStockState(stock);
+  const status = String(stock.status || "IN_STOCK").trim().toUpperCase();
+
+  if (["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(effectiveState) || ["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(status)) {
+    await auditBranchAccessDenied(connection, req, access, {
+      action,
+      barcode: stock.barcode || cleanBarcode,
+      stock,
+      message: "Transfer-state stock cannot be mutated here"
+    });
+    throw createStockBranchAccessError("Transfer-state stock cannot be mutated here", 409);
+  }
+
+  if (access.isBranchLocked && Number(stock.current_branch_id || 0) !== Number(access.userBranchId || 0)) {
+    await auditBranchAccessDenied(connection, req, access, {
+      action,
+      barcode: stock.barcode || cleanBarcode,
+      stock,
+      message: "You cannot mutate stock outside your assigned branch"
+    });
+    throw createStockBranchAccessError("You cannot mutate stock outside your assigned branch", 403);
+  }
+
+  const required = Array.isArray(requireStates)
+    ? requireStates.map((state) => String(state || "").trim().toUpperCase()).filter(Boolean)
+    : [];
+  if (required.length && !required.includes(status) && !required.includes(effectiveState)) {
+    throw createStockBranchAccessError(`Stock must be in ${required.join(" or ")} state`, 400);
+  }
+
+  return stock;
+}
+
+async function auditBranchReportAccessDenied(connectionOrPool, req, access, {
+  action = "",
+  invoiceNumber = "",
+  requestedBranchId = null,
+  message = "Branch report access denied"
+} = {}) {
+  await writeAuditLogSafe(connectionOrPool || pool, req || {}, {
+    companyId: access?.companyScope ?? null,
+    userId: access?.actingUserId ?? null,
+    actorRole: access?.actingUser?.role || access?.role || "",
+    actionType: "BRANCH_REPORT_ACCESS_DENIED",
+    entityType: "REPORT",
+    entityId: String(invoiceNumber || requestedBranchId || "").trim(),
+    moduleName: "reports",
+    status: "blocked",
+    message,
+    metadata: {
+      action,
+      invoiceNumber,
+      requestedBranchId,
+      userBranch: access?.userBranchId ?? null,
+      route: req?.originalUrl || req?.path || "",
+      userRole: access?.actingUser?.role || access?.role || ""
+    }
+  });
+}
+
+async function auditBranchPersistenceBackfillWarning(connectionOrPool, req, access, branchScope, {
+  action = ""
+} = {}) {
+  if (!branchScope?.isBranchFiltered) return;
+
+  const companyId = access?.companyScope ?? null;
+  const params = [];
+  const companyClause = companyId !== null ? "AND sh.company_id = ?" : "";
+  if (companyId !== null) params.push(companyId);
+
+  const [rows] = await (connectionOrPool || pool).query(
+    `
+    SELECT COUNT(*) AS missing_rows
+    FROM sales_history sh
+    WHERE sh.branch_id IS NULL
+      ${companyClause}
+      AND EXISTS (
+        SELECT 1
+        FROM sales_items si
+        WHERE si.company_id = sh.company_id
+          AND si.invoice_number = sh.invoice_number
+          AND COALESCE(si.is_deleted, 0) = 0
+          AND (
+            si.branch_id = ?
+            OR (
+              si.branch_id IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM stock s
+                WHERE s.company_id = si.company_id
+                  AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+                  AND s.current_branch_id = ?
+              )
+            )
+          )
+      )
+    LIMIT 1
+    `,
+    [...params, branchScope.branchId, branchScope.branchId]
+  );
+
+  if (Number(rows?.[0]?.missing_rows || 0) <= 0) return;
+
+  await writeAuditLogSafe(connectionOrPool || pool, req || {}, {
+    companyId,
+    userId: access?.actingUserId ?? null,
+    actorRole: access?.actingUser?.role || access?.role || "",
+    actionType: "BRANCH_PERSISTENCE_BACKFILL_WARNING",
+    entityType: "BRANCH_PERSISTENCE",
+    entityId: String(branchScope.branchId || ""),
+    moduleName: "reports",
+    status: "warning",
+    message: "Branch read used fallback stock join because historical sales rows are missing branch_id",
+    metadata: {
+      action,
+      branchId: branchScope.branchId,
+      missingRows: Number(rows?.[0]?.missing_rows || 0),
+      route: req?.originalUrl || req?.path || ""
+    }
+  });
+}
+
+async function resolveSalesReadBranchScope(connection, req, access, { action = "" } = {}) {
+  if (!access?.ok) return access;
+
+  const permissions = resolveBranchOperationalPermissions(access.actingUser || {}, access);
+  if (!permissions.canViewReports) {
+    await auditBranchReportAccessDenied(connection, req, access, {
+      action,
+      message: permissions.blockedReason || "Branch report access denied"
+    });
+    return {
+      ok: false,
+      status: 403,
+      message: permissions.blockedReason || "Branch report access denied"
+    };
+  }
+
+  const hasBranch = access.userBranchId !== null && access.userBranchId !== undefined;
+  const canUseAllBranches = isAllBranchOperationalRole(access);
+
+  if (!access.isSuperAdmin && !canUseAllBranches && !hasBranch) {
+    await auditBranchReportAccessDenied(connection, req, access, {
+      action,
+      message: "Branch assignment required"
+    });
+    return {
+      ok: false,
+      status: 403,
+      message: "Branch assignment required"
+    };
+  }
+
+  const requestedBranchId = getRequestedBranchScopeValue(req);
+  const branchScope = await resolveOperationalBranchScope(connection, access, requestedBranchId);
+  if (!branchScope.ok) {
+    await auditBranchReportAccessDenied(connection, req, access, {
+      action,
+      requestedBranchId,
+      message: branchScope.message || "Branch report access denied"
+    });
+  }
+  return branchScope;
+}
+
+function getSalesItemStockJoinSql(itemAlias = "si", stockAlias = "s") {
+  return `
+    INNER JOIN stock ${stockAlias}
+      ON ${stockAlias}.company_id = ${itemAlias}.company_id
+     AND UPPER(TRIM(${stockAlias}.barcode)) = UPPER(TRIM(${itemAlias}.barcode))
+  `;
+}
+
+function appendSalesBranchScope(whereParts, params, branchScope, { saleAlias = "sh" } = {}) {
+  if (!branchScope?.isBranchFiltered) return;
+
+  // Transitional compatibility: prefer persisted branch_id, then fall back to linked stock for old rows.
+  whereParts.push(`
+    (
+      ${saleAlias}.branch_id = ?
+      OR (
+        ${saleAlias}.branch_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM sales_items si_scope
+          WHERE si_scope.company_id = ${saleAlias}.company_id
+            AND si_scope.invoice_number = ${saleAlias}.invoice_number
+            AND COALESCE(si_scope.is_deleted, 0) = 0
+            AND (
+              si_scope.branch_id = ?
+              OR (
+                si_scope.branch_id IS NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM stock s_scope
+                  WHERE s_scope.company_id = si_scope.company_id
+                    AND UPPER(TRIM(s_scope.barcode)) = UPPER(TRIM(si_scope.barcode))
+                    AND s_scope.current_branch_id = ?
+                )
+              )
+            )
+        )
+      )
+    )
+  `);
+  params.push(branchScope.branchId);
+  params.push(branchScope.branchId);
+  params.push(branchScope.branchId);
+}
+
+function appendSalesItemBranchScope(whereParts, params, branchScope, { itemAlias = "si" } = {}) {
+  if (!branchScope?.isBranchFiltered) return;
+
+  whereParts.push(`
+    (
+      ${itemAlias}.branch_id = ?
+      OR (
+        ${itemAlias}.branch_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM stock s_scope
+          WHERE s_scope.company_id = ${itemAlias}.company_id
+            AND UPPER(TRIM(s_scope.barcode)) = UPPER(TRIM(${itemAlias}.barcode))
+            AND s_scope.current_branch_id = ?
+        )
+      )
+    )
+  `);
+  params.push(branchScope.branchId);
+  params.push(branchScope.branchId);
+}
+
+function buildSalesBranchTotalsJoin(branchScope) {
+  if (!branchScope?.isBranchFiltered) {
+    return { sql: "", params: [] };
+  }
+
+  return {
+    sql: `
+      LEFT JOIN (
+        SELECT
+          si.company_id,
+          si.invoice_number,
+          COUNT(*) AS branch_total_items,
+          COALESCE(SUM(si.weight), 0) AS branch_total_weight,
+          COALESCE(SUM(COALESCE(si.customer_line_amount, si.total_price, 0)), 0) AS branch_total_amount,
+          COALESCE(SUM(COALESCE(si.customer_line_amount, si.total_price, 0)), 0) AS branch_customer_total_amount,
+          COALESCE(SUM(COALESCE(si.company_line_amount, 0)), 0) AS branch_company_total_amount,
+          COALESCE(SUM(COALESCE(si.employee_margin_amount, 0)), 0) AS branch_employee_margin_amount
+        FROM sales_items si
+        WHERE COALESCE(si.is_deleted, 0) = 0
+          AND (
+            si.branch_id = ?
+            OR (
+              si.branch_id IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM stock s
+                WHERE s.company_id = si.company_id
+                  AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+                  AND s.current_branch_id = ?
+              )
+            )
+          )
+        GROUP BY si.company_id, si.invoice_number
+      ) branch_totals
+        ON branch_totals.company_id = sh.company_id
+       AND branch_totals.invoice_number = sh.invoice_number
+    `,
+    params: [branchScope.branchId, branchScope.branchId]
+  };
+}
+
+function getSalesHistorySelectColumns(branchScope) {
+  if (!branchScope?.isBranchFiltered) {
+    return `
+      sh.*,
+      (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id AND COALESCE(si.is_deleted, 0) = 0) AS total_items
+    `;
+  }
+
+  return `
+    sh.*,
+    COALESCE(branch_totals.branch_total_items, 0) AS total_items,
+    COALESCE(branch_totals.branch_total_weight, 0) AS total_weight,
+    COALESCE(branch_totals.branch_total_amount, 0) AS total_amount,
+    COALESCE(branch_totals.branch_customer_total_amount, 0) AS customer_total_amount,
+    COALESCE(branch_totals.branch_company_total_amount, 0) AS company_total_amount,
+    COALESCE(branch_totals.branch_employee_margin_amount, 0) AS employee_margin_amount
+  `;
+}
+
 function validateBranchPayload(body = {}, { partial = false } = {}) {
   const hasBranchCode = Object.prototype.hasOwnProperty.call(body, "branch_code") ||
     Object.prototype.hasOwnProperty.call(body, "branchCode");
@@ -5348,6 +5868,162 @@ async function validateInvoiceSaveRequest(connection, invoiceNumber, items, comp
   };
 }
 
+async function resolveBillingPersistenceBranch(connection, companyId, items = [], branchScope = null) {
+  if (branchScope?.isBranchFiltered) {
+    return {
+      ok: true,
+      branchId: Number(branchScope.branchId)
+    };
+  }
+
+  const barcodes = [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => String(item?.barcode || "").trim())
+      .filter(Boolean)
+      .map((barcode) => normalizeBarcodeForComparison(barcode))
+  )];
+
+  if (!barcodes.length) {
+    return {
+      ok: true,
+      branchId: null
+    };
+  }
+
+  const placeholders = barcodes.map(() => "?").join(", ");
+  const [rows] = await connection.query(
+    `
+    SELECT DISTINCT current_branch_id
+    FROM stock
+    WHERE company_id = ?
+      AND UPPER(TRIM(barcode)) IN (${placeholders})
+      ${getSellableStockFilterSql()}
+    `,
+    [companyId, ...barcodes]
+  );
+
+  const branchIds = rows
+    .map((row) => row.current_branch_id)
+    .filter((branchId) => branchId !== null && branchId !== undefined && branchId !== "")
+    .map((branchId) => Number(branchId))
+    .filter((branchId) => Number.isFinite(branchId) && branchId > 0);
+
+  const uniqueBranchIds = [...new Set(branchIds)];
+  if (uniqueBranchIds.length === 1) {
+    return {
+      ok: true,
+      branchId: uniqueBranchIds[0]
+    };
+  }
+
+  if (uniqueBranchIds.length > 1) {
+    return {
+      ok: false,
+      status: 400,
+      message: "Select one billing branch before saving items from multiple branches"
+    };
+  }
+
+  return {
+    ok: true,
+    branchId: null
+  };
+}
+
+function resolveReturnPersistenceBranch(saleItem = null, stockItem = null, access = {}) {
+  const raw =
+    saleItem?.branch_id ??
+    saleItem?.sale_branch_id ??
+    stockItem?.current_branch_id ??
+    access?.userBranchId ??
+    null;
+  const parsed = Number(raw || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function previewSalesBranchBackfill(connection = pool, companyId = null) {
+  const companyClause = companyId !== null ? "AND sh.company_id = ?" : "";
+  const params = companyId !== null ? [companyId] : [];
+
+  const [summaryRows] = await connection.query(
+    `
+    SELECT
+      SUM(CASE WHEN sh.branch_id IS NULL THEN 1 ELSE 0 END) AS sales_missing_branch_id,
+      SUM(CASE WHEN si.branch_id IS NULL THEN 1 ELSE 0 END) AS items_missing_branch_id,
+      SUM(CASE WHEN rh.branch_id IS NULL THEN 1 ELSE 0 END) AS returns_missing_branch_id
+    FROM sales_history sh
+    LEFT JOIN sales_items si
+      ON si.company_id = sh.company_id
+     AND si.invoice_number = sh.invoice_number
+    LEFT JOIN return_history rh
+      ON rh.company_id = sh.company_id
+     AND rh.invoice_number = sh.invoice_number
+    WHERE 1 = 1
+      ${companyClause}
+    `,
+    params
+  );
+
+  const [recoverableRows] = await connection.query(
+    `
+    SELECT
+      sh.company_id,
+      sh.invoice_number,
+      COUNT(DISTINCT s.current_branch_id) AS branch_count,
+      MIN(s.current_branch_id) AS recoverable_branch_id
+    FROM sales_history sh
+    INNER JOIN sales_items si
+      ON si.company_id = sh.company_id
+     AND si.invoice_number = sh.invoice_number
+    INNER JOIN stock s
+      ON s.company_id = si.company_id
+     AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+    WHERE sh.branch_id IS NULL
+      AND s.current_branch_id IS NOT NULL
+      ${companyClause}
+    GROUP BY sh.company_id, sh.invoice_number
+    HAVING branch_count = 1
+    ORDER BY sh.company_id, sh.invoice_number
+    LIMIT 200
+    `,
+    params
+  );
+
+  const [ambiguousRows] = await connection.query(
+    `
+    SELECT
+      sh.company_id,
+      sh.invoice_number,
+      COUNT(DISTINCT s.current_branch_id) AS branch_count
+    FROM sales_history sh
+    INNER JOIN sales_items si
+      ON si.company_id = sh.company_id
+     AND si.invoice_number = sh.invoice_number
+    INNER JOIN stock s
+      ON s.company_id = si.company_id
+     AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+    WHERE sh.branch_id IS NULL
+      AND s.current_branch_id IS NOT NULL
+      ${companyClause}
+    GROUP BY sh.company_id, sh.invoice_number
+    HAVING branch_count > 1
+    ORDER BY sh.company_id, sh.invoice_number
+    LIMIT 200
+    `,
+    params
+  );
+
+  return {
+    summary: {
+      salesMissingBranchId: Number(summaryRows?.[0]?.sales_missing_branch_id || 0),
+      itemsMissingBranchId: Number(summaryRows?.[0]?.items_missing_branch_id || 0),
+      returnsMissingBranchId: Number(summaryRows?.[0]?.returns_missing_branch_id || 0)
+    },
+    recoverable: recoverableRows,
+    ambiguous: ambiguousRows
+  };
+}
+
 async function getCurrentInvoiceDraft(connection, companyId, userId) {
   const [rows] = await connection.query(
     `
@@ -5535,7 +6211,9 @@ async function getLatestSaleItemByBarcode(connection, barcode, companyId) {
       si.returned_at,
       si.return_id,
       si.return_transaction_id,
+      si.branch_id,
       sh.id AS sale_id,
+      sh.branch_id AS sale_branch_id,
       sh.customer_name AS sale_customer_name,
       sh.mobile AS sale_mobile,
       sh.gst_number AS sale_gst_number,
@@ -5851,6 +6529,7 @@ function estimateReturnLineAmount(saleItem, saleRow) {
 async function postReturnToTransactionFoundation(connection, payload) {
   const companyId = Number(payload.companyId);
   const createdBy = payload.createdBy ?? null;
+  const branchId = payload.branchId ?? null;
   const saleItem = payload.saleItem || null;
   const saleRow = payload.saleRow || null;
   const invoiceNumber = String(payload.invoiceNumber || saleItem?.invoice_number || "").trim();
@@ -5933,10 +6612,10 @@ async function postReturnToTransactionFoundation(connection, payload) {
   await connection.query(
     `
     INSERT INTO invoice_transaction_link
-    (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
-    VALUES (?, ?, ?, 'SALE_RETURN', ?, ?)
+    (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+    VALUES (?, ?, ?, ?, 'SALE_RETURN', ?, ?)
     `,
-    [companyId, invoiceNumber, transactionId, "Return transaction posting", createdBy]
+    [companyId, invoiceNumber, transactionId, branchId, "Return transaction posting", createdBy]
   );
 
   if (lotNumber) {
@@ -6476,6 +7155,16 @@ async function addColumnIfMissing(tableName, columnName, definitionSql) {
   }
 }
 
+async function addColumnIfMissingSafe(tableName, columnName, definitionSql) {
+  try {
+    await addColumnIfMissing(tableName, columnName, definitionSql);
+    return true;
+  } catch (error) {
+    console.warn(`Column skipped safely: ${tableName}.${columnName} (${error?.code || error?.message || "unknown error"})`);
+    return false;
+  }
+}
+
 async function addGeneratedColumnIfMissingSafe(tableName, columnName, definitionSql) {
   const exists = await columnExists(tableName, columnName);
   if (exists) return true;
@@ -6514,6 +7203,16 @@ async function addIndexIfMissing(tableName, indexName, definitionSql) {
         throw error;
       }
     }
+  }
+}
+
+async function addIndexIfMissingSafe(tableName, indexName, definitionSql) {
+  try {
+    await addIndexIfMissing(tableName, indexName, definitionSql);
+    return true;
+  } catch (error) {
+    console.warn(`Index skipped safely: ${tableName}.${indexName} (${error?.code || error?.message || "unknown error"})`);
+    return false;
   }
 }
 
@@ -7945,6 +8644,7 @@ async function ensureSchema() {
       deleted_at DATETIME DEFAULT NULL,
       deleted_by INT DEFAULT NULL,
       delete_reason VARCHAR(255) DEFAULT '',
+      branch_id INT DEFAULT NULL,
       company_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -8025,6 +8725,7 @@ async function ensureSchema() {
       deleted_at DATETIME DEFAULT NULL,
       deleted_by INT DEFAULT NULL,
       delete_reason VARCHAR(255) DEFAULT '',
+      branch_id INT DEFAULT NULL,
       company_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -8044,6 +8745,7 @@ async function ensureSchema() {
       return_type VARCHAR(50) DEFAULT '',
       return_reason VARCHAR(255) DEFAULT '',
       return_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      branch_id INT DEFAULT NULL,
       company_id INT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -8518,6 +9220,7 @@ async function ensureSchema() {
       company_id INT DEFAULT NULL,
       invoice_no VARCHAR(120) DEFAULT '',
       transaction_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
       link_type VARCHAR(60) DEFAULT '',
       remarks TEXT DEFAULT NULL,
       created_by INT DEFAULT NULL,
@@ -9281,6 +9984,7 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_history", "deleted_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("sales_history", "deleted_by", "INT DEFAULT NULL");
     await addColumnIfMissing("sales_history", "delete_reason", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissingSafe("sales_history", "branch_id", "INT DEFAULT NULL");
   }
 
   if (await tableExists("invoice_sequences")) {
@@ -9316,6 +10020,7 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_items", "deleted_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("sales_items", "deleted_by", "INT DEFAULT NULL");
     await addColumnIfMissing("sales_items", "delete_reason", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissingSafe("sales_items", "branch_id", "INT DEFAULT NULL");
   }
 
   if (await tableExists("return_history")) {
@@ -9330,12 +10035,17 @@ async function ensureSchema() {
     await addColumnIfMissing("return_history", "return_type", "VARCHAR(50) DEFAULT ''");
     await addColumnIfMissing("return_history", "return_reason", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("return_history", "return_date", "DATETIME DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissingSafe("return_history", "branch_id", "INT DEFAULT NULL");
     await addColumnIfMissing("return_history", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("return_history", "party_id", "INT DEFAULT NULL");
     await addColumnIfMissing("return_history", "estimated_amount", "DECIMAL(14,2) DEFAULT 0.00");
     await addColumnIfMissing("return_history", "transaction_id", "INT DEFAULT NULL");
     await addColumnIfMissing("return_history", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("return_history", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("invoice_transaction_link")) {
+    await addColumnIfMissingSafe("invoice_transaction_link", "branch_id", "INT DEFAULT NULL");
   }
 
   if (await tableExists("material_stock_items")) {
@@ -9963,17 +10673,24 @@ async function ensureSchema() {
     await addIndexIfMissing("sales_history", "idx_sales_company_status", "(company_id, status)");
     await addIndexIfMissing("sales_history", "idx_sales_company_created", "(company_id, created_at)");
     await addIndexIfMissing("sales_history", "idx_sales_company_deleted", "(company_id, is_deleted, id)");
+    await addIndexIfMissingSafe("sales_history", "idx_sales_company_branch", "(company_id, branch_id)");
   }
 
   if (await tableExists("sales_items")) {
     await addIndexIfMissing("sales_items", "idx_sales_items_sale", "(sale_id)");
     await addIndexIfMissing("sales_items", "idx_sales_items_company_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissingSafe("sales_items", "idx_sales_items_company_branch", "(company_id, branch_id)");
   }
 
   if (await tableExists("return_history")) {
     await addIndexIfMissing("return_history", "idx_returns_company_created", "(company_id, created_at)");
     await addIndexIfMissing("return_history", "idx_returns_company_date", "(company_id, return_date)");
     await addIndexIfMissing("return_history", "idx_returns_company_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissingSafe("return_history", "idx_returns_company_branch", "(company_id, branch_id)");
+  }
+
+  if (await tableExists("invoice_transaction_link")) {
+    await addIndexIfMissingSafe("invoice_transaction_link", "idx_invoice_link_company_branch", "(company_id, branch_id)");
   }
 
   if (await tableExists("process_lots")) {
@@ -10829,6 +11546,7 @@ async function postBillingToTransactionFoundation(connection, payload) {
   const mcRate = toNumber(payload.mcRate);
   const roundOff = toNumber(payload.roundOff);
   const subtotal = toNumber(payload.subtotal);
+  const branchId = payload.branchId ?? null;
   const items = Array.isArray(payload.items) ? payload.items : [];
   const metalPercent = toNumber(payload.metalPercent);
   const metalPayable = toNumber(payload.metalPayable);
@@ -10913,10 +11631,10 @@ async function postBillingToTransactionFoundation(connection, payload) {
   await connection.query(
     `
     INSERT INTO invoice_transaction_link
-    (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
-    VALUES (?, ?, ?, 'SALE_INVOICE', ?, ?)
+    (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+    VALUES (?, ?, ?, ?, 'SALE_INVOICE', ?, ?)
     `,
-    [companyId, invoiceNumber, saleTransactionId, "Billing sale posting", createdBy]
+    [companyId, invoiceNumber, saleTransactionId, branchId, "Billing sale posting", createdBy]
   );
 
   await createCashLedgerEntry(connection, {
@@ -10991,10 +11709,10 @@ async function postBillingToTransactionFoundation(connection, payload) {
     await connection.query(
       `
       INSERT INTO invoice_transaction_link
-      (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
-      VALUES (?, ?, ?, 'PAYMENT_RECEIVED', ?, ?)
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'PAYMENT_RECEIVED', ?, ?)
       `,
-      [companyId, invoiceNumber, paymentTransactionId, "Billing payment posting", createdBy]
+      [companyId, invoiceNumber, paymentTransactionId, branchId, "Billing payment posting", createdBy]
     );
 
     await createCashLedgerEntry(connection, {
@@ -11085,10 +11803,10 @@ async function postBillingToTransactionFoundation(connection, payload) {
     await connection.query(
       `
       INSERT INTO invoice_transaction_link
-      (company_id, invoice_no, transaction_id, link_type, remarks, created_by)
-      VALUES (?, ?, ?, 'METAL_SETTLEMENT_RECEIVED', ?, ?)
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'METAL_SETTLEMENT_RECEIVED', ?, ?)
       `,
-      [companyId, invoiceNumber, metalTransactionId, "Billing metal settlement posting", createdBy]
+      [companyId, invoiceNumber, metalTransactionId, branchId, "Billing metal settlement posting", createdBy]
     );
 
     await createMetalLedgerEntry(connection, {
@@ -11349,14 +12067,14 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
-    const requestedBranchId = getRequestedBranchScopeValue(req);
-    const branchScope = await resolveOperationalBranchScope(pool, access, requestedBranchId);
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "DASHBOARD_SALES_READ" });
     if (!branchScope.ok) {
       return res.status(branchScope.status || 403).json({
         success: false,
         message: branchScope.message || "Branch access denied"
       });
     }
+    await auditBranchPersistenceBackfillWarning(pool, req, access, branchScope, { action: "DASHBOARD_SALES_READ" });
 
     const sellableStockFilter = getSellableFinishedStockWhereSql();
     const stockWhereParts = ["1 = 1"];
@@ -11371,8 +12089,16 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
     }
     const stockWhere = `WHERE ${stockWhereParts.join(" AND ")} ${sellableStockFilter}`;
 
-    const salesWhere = companyId !== null ? "WHERE company_id = ?" : "";
-    const salesParams = companyId !== null ? [companyId] : [];
+    const salesWhereParts = ["1 = 1"];
+    const salesWhereParams = [];
+    if (companyId !== null) {
+      salesWhereParts.push("sh.company_id = ?");
+      salesWhereParams.push(companyId);
+    }
+    appendSalesBranchScope(salesWhereParts, salesWhereParams, branchScope, { saleAlias: "sh" });
+    const salesBranchTotals = buildSalesBranchTotalsJoin(branchScope);
+    const salesWhere = `WHERE ${salesWhereParts.join(" AND ")}`;
+    const salesParams = [...salesBranchTotals.params, ...salesWhereParams];
 
     const [stockSummary] = await pool.query(
       `
@@ -11405,8 +12131,13 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
 
     const [salesSummary] = await pool.query(
       `
-      SELECT COUNT(*) AS total_sales, COALESCE(SUM(total_amount), 0) AS total_sales_amount
-      FROM sales_history
+      SELECT
+        COUNT(*) AS total_sales,
+        ${branchScope.isBranchFiltered
+          ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_amount, 0)), 0)"
+          : "COALESCE(SUM(sh.total_amount), 0)"} AS total_sales_amount
+      FROM sales_history sh
+      ${salesBranchTotals.sql}
       ${salesWhere}
       `,
       salesParams
@@ -11414,10 +12145,19 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
 
     const [recentInvoices] = await pool.query(
       `
-      SELECT invoice_number, customer_name, total_amount, invoice_date, created_at, company_id
-      FROM sales_history
+      SELECT
+        sh.invoice_number,
+        sh.customer_name,
+        ${branchScope.isBranchFiltered
+          ? "COALESCE(branch_totals.branch_total_amount, 0)"
+          : "sh.total_amount"} AS total_amount,
+        sh.invoice_date,
+        sh.created_at,
+        sh.company_id
+      FROM sales_history sh
+      ${salesBranchTotals.sql}
       ${salesWhere}
-      ORDER BY id DESC
+      ORDER BY sh.id DESC
       LIMIT 8
       `,
       salesParams
@@ -11511,6 +12251,30 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("Dashboard error:", error);
     return res.status(500).json({ success: false, message: "Dashboard fetch failed" });
+  }
+});
+
+app.get("/branch-permission-debug", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    return res.json({
+      success: true,
+      permissions: resolveBranchOperationalPermissions(access.actingUser || req.user || {}, access)
+    });
+  } catch (error) {
+    console.error("Branch permission debug error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch permission debug failed",
+      error: getErrorDetail(error)
+    });
   }
 });
 
@@ -12969,10 +13733,8 @@ app.delete("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "A
 ========================= */
 app.get("/getDailyReport", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -12980,9 +13742,92 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "DAILY_REPORT_READ" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+    await auditBranchPersistenceBackfillWarning(pool, req, access, branchScope, { action: "DAILY_REPORT_READ" });
+
     const reportDate = normalizeReportDateInput(req.query.date);
     const nextDate = getNextDateString(reportDate);
     const companyParams = companyId !== null ? [companyId] : [];
+    const branchStockClause = branchScope.isBranchFiltered ? "AND s.current_branch_id = ?" : "";
+    const branchStockParams = branchScope.isBranchFiltered ? [branchScope.branchId] : [];
+    const processBranchClause = branchScope.isBranchFiltered
+      ? `AND EXISTS (
+          SELECT 1
+          FROM stock s_process
+          WHERE s_process.company_id = pl.company_id
+            AND s_process.lot_number = pl.lot_no
+            AND s_process.current_branch_id = ?
+        )`
+      : "";
+    const processBranchParams = branchScope.isBranchFiltered ? [branchScope.branchId] : [];
+    const returnWhereParts = [
+      "rh.return_date >= ?",
+      "rh.return_date < ?"
+    ];
+    const returnWhereParams = [reportDate, nextDate];
+    if (companyId !== null) {
+      returnWhereParts.push("rh.company_id = ?");
+      returnWhereParams.push(companyId);
+    }
+    appendSalesItemBranchScope(returnWhereParts, returnWhereParams, branchScope, { itemAlias: "rh" });
+    const invoiceWhereParts = [
+      "sh.created_at >= ?",
+      "sh.created_at < ?"
+    ];
+    const invoiceWhereParams = [reportDate, nextDate];
+    if (companyId !== null) {
+      invoiceWhereParts.push("sh.company_id = ?");
+      invoiceWhereParams.push(companyId);
+    }
+    appendSalesBranchScope(invoiceWhereParts, invoiceWhereParams, branchScope, { saleAlias: "sh" });
+    const invoiceBranchTotals = buildSalesBranchTotalsJoin(branchScope);
+    const transactionBranchClause = branchScope.isBranchFiltered
+      ? `AND (
+          EXISTS (
+            SELECT 1
+            FROM invoice_transaction_link itl
+            WHERE itl.transaction_id = tm.id
+              AND itl.company_id = tm.company_id
+              AND itl.branch_id = ?
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM invoice_transaction_link itl
+            INNER JOIN sales_items si_tx
+              ON si_tx.company_id = itl.company_id
+             AND si_tx.invoice_number = itl.invoice_no
+             AND COALESCE(si_tx.is_deleted, 0) = 0
+            WHERE itl.transaction_id = tm.id
+              AND itl.company_id = tm.company_id
+              AND itl.branch_id IS NULL
+              AND (
+                si_tx.branch_id = ?
+                OR (
+                  si_tx.branch_id IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM stock s_tx
+                    WHERE s_tx.company_id = si_tx.company_id
+                      AND UPPER(TRIM(s_tx.barcode)) = UPPER(TRIM(si_tx.barcode))
+                      AND s_tx.current_branch_id = ?
+                  )
+                )
+              )
+          )
+        )`
+      : "";
+    const transactionBranchParams = branchScope.isBranchFiltered
+      ? [branchScope.branchId, branchScope.branchId, branchScope.branchId]
+      : [];
+    // Branch columns for material/expense rows are planned for a later schema phase.
+    // Until then, branch-locked users should not receive company-wide branchless rows here.
+    const branchlessReportClause = branchScope.isBranchFiltered ? "AND 1 = 0" : "";
 
     const [processRows] = await pool.query(
       `
@@ -13012,9 +13857,10 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       WHERE pl.saved_at >= ?
         AND pl.saved_at < ?
         ${companyId !== null ? "AND pl.company_id = ?" : ""}
+        ${processBranchClause}
       ORDER BY pl.saved_at DESC, pl.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      [reportDate, nextDate, ...companyParams, ...processBranchParams]
     );
 
     const [stockCreatedRows] = await pool.query(
@@ -13036,9 +13882,10 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       WHERE s.created_at >= ?
         AND s.created_at < ?
         ${companyId !== null ? "AND s.company_id = ?" : ""}
+        ${branchStockClause}
       ORDER BY s.created_at DESC, s.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      [reportDate, nextDate, ...companyParams, ...branchStockParams]
     );
 
     const [stockSoldRows] = await pool.query(
@@ -13062,9 +13909,10 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
         AND s.sold_at >= ?
         AND s.sold_at < ?
         ${companyId !== null ? "AND s.company_id = ?" : ""}
+        ${branchStockClause}
       ORDER BY s.sold_at DESC, s.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      [reportDate, nextDate, ...companyParams, ...branchStockParams]
     );
 
     const [invoiceRows] = await pool.query(
@@ -13078,12 +13926,12 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
         sh.payment_mode,
         sh.payment_status,
         sh.employee_name,
-        sh.total_items,
-        sh.total_weight,
-        sh.total_amount,
-        sh.customer_total_amount,
-        sh.company_total_amount,
-        sh.employee_margin_amount,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_total_items, 0)" : "sh.total_items"} AS total_items,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_total_weight, 0)" : "sh.total_weight"} AS total_weight,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_total_amount, 0)" : "sh.total_amount"} AS total_amount,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_customer_total_amount, 0)" : "sh.customer_total_amount"} AS customer_total_amount,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_company_total_amount, 0)" : "sh.company_total_amount"} AS company_total_amount,
+        ${branchScope.isBranchFiltered ? "COALESCE(branch_totals.branch_employee_margin_amount, 0)" : "sh.employee_margin_amount"} AS employee_margin_amount,
         sh.paid_amount,
         sh.due_amount,
         sh.status,
@@ -13092,12 +13940,11 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
         c.company_name
       FROM sales_history sh
       LEFT JOIN companies c ON c.id = sh.company_id
-      WHERE sh.created_at >= ?
-        AND sh.created_at < ?
-        ${companyId !== null ? "AND sh.company_id = ?" : ""}
+      ${invoiceBranchTotals.sql}
+      WHERE ${invoiceWhereParts.join(" AND ")}
       ORDER BY sh.created_at DESC, sh.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      [...invoiceBranchTotals.params, ...invoiceWhereParams]
     );
 
     const [returnRows] = await pool.query(
@@ -13118,12 +13965,10 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       FROM return_history rh
       LEFT JOIN companies c ON c.id = rh.company_id
       LEFT JOIN users u ON u.id = rh.created_by
-      WHERE rh.return_date >= ?
-        AND rh.return_date < ?
-        ${companyId !== null ? "AND rh.company_id = ?" : ""}
+      WHERE ${returnWhereParts.join(" AND ")}
       ORDER BY rh.return_date DESC, rh.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      returnWhereParams
     );
 
     const [materialRows] = await pool.query(
@@ -13152,6 +13997,7 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       WHERE msm.movement_date >= ?
         AND msm.movement_date < ?
         ${companyId !== null ? "AND msm.company_id = ?" : ""}
+        ${branchlessReportClause}
       ORDER BY msm.movement_date DESC, msm.id DESC
       `,
       [reportDate, nextDate, ...companyParams]
@@ -13175,6 +14021,7 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       WHERE e.expense_date >= ?
         AND e.expense_date < ?
         ${companyId !== null ? "AND e.company_id = ?" : ""}
+        ${branchlessReportClause}
       ORDER BY e.expense_date DESC, e.expense_time DESC, e.id DESC
       `,
       [reportDate, nextDate, ...companyParams]
@@ -13227,12 +14074,15 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
         AND tm.created_at < ?
         AND UPPER(COALESCE(tm.status, 'POSTED')) <> 'CANCELLED'
         ${companyId !== null ? "AND tm.company_id = ?" : ""}
+        ${transactionBranchClause}
       ORDER BY tm.created_at DESC, tm.id DESC
       `,
-      [reportDate, nextDate, ...companyParams]
+      [reportDate, nextDate, ...companyParams, ...transactionBranchParams]
     );
 
-    const materialSummary = await getMaterialStockSummaryRows(companyId);
+    const materialSummary = branchScope.isBranchFiltered
+      ? { rows: [], lowStockItems: 0 }
+      : await getMaterialStockSummaryRows(companyId);
     const totalBillingAmount = invoiceRows.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
     const totalCustomerAmount = invoiceRows.reduce((sum, row) => sum + Number(row.customer_total_amount || row.total_amount || 0), 0);
     const totalCompanyAmount = invoiceRows.reduce((sum, row) => sum + Number(row.company_total_amount || 0), 0);
@@ -13369,6 +14219,7 @@ app.get("/getStock", authMiddleware, async (req, res) => {
         message: branchScope.message || "Branch access denied"
       });
     }
+    await auditBranchPersistenceBackfillWarning(pool, req, access, branchScope, { action: "GET_SALES_HISTORY" });
 
     const whereParts = [];
     const params = [];
@@ -13411,6 +14262,38 @@ app.get("/getStock", authMiddleware, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Stock fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.use("/process", authMiddleware, async (req, res, next) => {
+  try {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(String(req.method || "").toUpperCase())) {
+      return next();
+    }
+
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+
+    const processPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "PROCESS_MUTATION");
+    if (!processPermission.ok) return;
+
+    return next();
+  } catch (error) {
+    console.error("Process branch permission error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process branch permission check failed",
       error: getErrorDetail(error)
     });
   }
@@ -17970,15 +18853,18 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const returnPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "SAVE_RETURN");
+    if (!returnPermission.ok) return;
 
     const barcode = String(req.body.barcode || "").trim();
     const returnType = normalizeReturnType(req.body.return_type || req.body.returnType);
@@ -18001,28 +18887,14 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    await ensureSingleStockBarcode(finalCompanyId, barcode, connection);
-
-    const [stockRows] = await connection.query(
-      `
-      SELECT *
-      FROM stock
-      WHERE barcode = ? AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [barcode, finalCompanyId]
-    );
-
-    if (!stockRows.length) {
-      await connection.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "Barcode was not found in this company's stock"
-      });
-    }
-
-    const stockItem = stockRows[0];
+    const stockItem = await assertStockBranchAccess(connection, access, {
+      barcode,
+      action: returnType === "RETURN_TO_STOCK" ? "SAVE_RETURN_TO_STOCK" : "SAVE_DAMAGED_RETURN",
+      requireSellable: true,
+      allowOwnerAllBranch: true,
+      forUpdate: true,
+      req
+    });
     const currentStatus = String(stockItem.status || "").trim().toUpperCase();
 
     if (currentStatus === "DELETED") {
@@ -18078,6 +18950,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     ).trim();
     const saleStatus = String(saleItem?.sale_status || "").trim().toUpperCase();
     const saleItemStatus = String(saleItem?.item_status || "").trim().toUpperCase();
+    const persistedBranchId = resolveReturnPersistenceBranch(saleItem, stockItem, access);
 
     if (!saleItem || !invoiceNumber) {
       await connection.rollback();
@@ -18162,7 +19035,8 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       productName,
       barcode,
       lotNumber,
-      weight
+      weight,
+      branchId: persistedBranchId
     });
 
     const [returnInsert] = await connection.query(
@@ -18180,6 +19054,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         return_type,
         return_reason,
         return_date,
+        branch_id,
         company_id,
         party_id,
         estimated_amount,
@@ -18187,7 +19062,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         created_by,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         barcode,
@@ -18200,6 +19075,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         lotNumber,
         returnType,
         returnReason,
+        persistedBranchId,
         finalCompanyId,
         transactionPosting.partyId,
         transactionPosting.estimatedAmount,
@@ -18244,6 +19120,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         return_type: returnType,
         return_reason: returnReason,
         company_id: finalCompanyId,
+        branch_id: persistedBranchId,
         stock_status: nextStockStatus,
         transaction_id: transactionPosting.transactionId,
         estimated_amount: transactionPosting.estimatedAmount
@@ -18277,6 +19154,9 @@ app.get("/getReturns", authMiddleware, async (req, res) => {
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
     }
 
     const companyId = access.companyScope;
@@ -19073,6 +19953,11 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "ADD_STICKERS_BULK");
+    if (!stockPermission.ok) return;
 
     const items = Array.isArray(req.body?.items)
       ? req.body.items
@@ -19202,6 +20087,11 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "ADD_STICKER");
+    if (!stockPermission.ok) return;
 
     const {
       serial,
@@ -19381,15 +20271,18 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 ========================= */
 app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "UPDATE_STICKER");
+    if (!stockPermission.ok) return;
 
     const oldBarcode = String(req.params.barcode || "").trim();
 
@@ -19420,11 +20313,18 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     await ensureSingleStockBarcode(finalCompanyId, oldBarcode);
 
     if (String(status).toUpperCase() === "SOLD") {
-      const soldParams = ["SOLD", String(invoiceNumber || "").trim(), oldBarcode, finalCompanyId];
+      const stockRow = await assertStockBranchAccess(pool, access, {
+        barcode: oldBarcode,
+        action: "UPDATE_STICKER_SOLD",
+        requireSellable: true,
+        allowOwnerAllBranch: true,
+        req
+      });
+      const soldParams = ["SOLD", String(invoiceNumber || "").trim(), stockRow.id, finalCompanyId];
       const soldSql = `
         UPDATE stock
         SET status = ?, invoice_number = ?, sold_at = NOW(), deleted_at = NULL
-        WHERE barcode = ?
+        WHERE id = ?
           AND company_id = ?
           ${getSellableStockFilterSql()}
       `;
@@ -19472,22 +20372,14 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       });
     }
 
-    const [currentRows] = await pool.query(
-      `
-      SELECT id
-      FROM stock
-      WHERE barcode = ? AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [oldBarcode, finalCompanyId]
-    );
-
-    if (currentRows.length === 0) {
-      return res.json({ success: false, message: "Sticker item not found" });
-    }
-
-    const currentId = currentRows[0].id;
+    const currentStock = await assertStockBranchAccess(pool, access, {
+      barcode: oldBarcode,
+      action: "UPDATE_STICKER",
+      requireSellable: true,
+      allowOwnerAllBranch: true,
+      req
+    });
+    const currentId = currentStock.id;
 
     const [dupLotSerial] = await pool.query(
       `
@@ -19606,10 +20498,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
 app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!barcode) {
@@ -19622,18 +20512,29 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "DELETE_STICKER");
+    if (!stockPermission.ok) return;
 
     const companyId = access.companyScope;
-    await ensureSingleStockBarcode(companyId, barcode);
+    const stockRow = await assertStockBranchAccess(pool, access, {
+      barcode,
+      action: "DELETE_STICKER",
+      requireSellable: true,
+      allowOwnerAllBranch: true,
+      req
+    });
 
     const query = `
       UPDATE stock
       SET status = 'DELETED', deleted_at = NOW()
-      WHERE barcode = ?
+      WHERE id = ?
         AND company_id = ?
         ${getSellableStockFilterSql()}
     `;
-    const params = [barcode, companyId];
+    const params = [stockRow.id, companyId];
 
     const [result] = await pool.query(query, params);
     const affectedRows = assertSingleStockRowAffected(result);
@@ -19665,10 +20566,8 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
 app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!barcode) {
@@ -19681,38 +20580,30 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "RESTORE_STICKER");
+    if (!stockPermission.ok) return;
 
     const companyId = access.companyScope;
-    await ensureSingleStockBarcode(companyId, barcode);
-
-    const [restoreRows] = await pool.query(
-      `
-      SELECT *
-      FROM stock
-      WHERE barcode = ?
-        AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [barcode, companyId]
-    );
-
-    if (!restoreRows.length) {
-      return res.json({
-        success: false,
-        message: "No item was found to restore"
-      });
-    }
+    const restoreStock = await assertStockBranchAccess(pool, access, {
+      barcode,
+      action: "RESTORE_STICKER",
+      requireSellable: true,
+      allowOwnerAllBranch: true,
+      req
+    });
 
     await assertActiveBarcodeAvailable(companyId, {
-      ...restoreRows[0],
+      ...restoreStock,
       status: "IN_STOCK",
       stock_state: "IN_STOCK",
       invoice_number: "",
       deleted_at: null
     }, {
       db: pool,
-      excludeStockId: restoreRows[0].id,
+      excludeStockId: restoreStock.id,
       req,
       access,
       context: "RESTORE_STICKER"
@@ -19727,7 +20618,7 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
       WHERE id = ?
         AND company_id = ?
     `;
-    const params = [restoreRows[0].id, companyId];
+    const params = [restoreStock.id, companyId];
 
     const [result] = await pool.query(query, params);
     const affectedRows = assertSingleStockRowAffected(result);
@@ -20507,6 +21398,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    const billingPermission = await requireBranchOperationalPermission(pool, req, res, access, "canBillOwnBranch", "SAVE_BILLING");
+    if (!billingPermission.ok) return;
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -20591,6 +21484,20 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
     }
 
     const cleanInvoiceNumber = validation.invoiceNumber;
+    const billingPersistenceBranch = await resolveBillingPersistenceBranch(
+      connection,
+      finalCompanyId,
+      items,
+      branchScope
+    );
+    if (!billingPersistenceBranch.ok) {
+      await connection.rollback();
+      return res.status(billingPersistenceBranch.status || 400).json({
+        success: false,
+        message: billingPersistenceBranch.message || "Billing branch could not be determined"
+      });
+    }
+    const persistedBranchId = billingPersistenceBranch.branchId;
 
     const finalTotalItems = Number(totalItems || totalCount || items.length || 0);
     const finalTotalWeight = Number(
@@ -20680,10 +21587,11 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         employee_name,
         total_amount,
         status,
+        branch_id,
         company_id,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, NOW())
       `,
       [
         cleanInvoiceNumber,
@@ -20711,6 +21619,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         Number(billingTotals.employeeMargin || 0),
         String(employeeName || "").trim(),
         Number(billingTotals.totalAmount || 0),
+        persistedBranchId,
         finalCompanyId
       ]
     );
@@ -20742,10 +21651,11 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           company_line_amount,
           employee_margin_amount,
           employee_name,
+          branch_id,
           company_id,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         `,
         [
           saleId,
@@ -20765,6 +21675,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           Number(line.companyLineAmount || 0),
           Number(line.employeeMarginAmount || 0),
           String(item.employeeName || employeeName || "").trim(),
+          persistedBranchId,
           finalCompanyId
         ]
       );
@@ -20821,6 +21732,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       metalPercent: Number(metalPercent || 0),
       metalPayable: Number(metalPayable || 0),
       metalNote: String(metalNote || "").trim(),
+      branchId: persistedBranchId,
       items: ledgerItems
     });
 
@@ -20873,7 +21785,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         dueAmount: Number(dueAmount || 0),
         totalAmount: Number(billingTotals.totalAmount || 0),
         totalItems: Number(billingTotals.totalItems || 0),
-        totalWeight: Number(billingTotals.totalWeight || 0)
+        totalWeight: Number(billingTotals.totalWeight || 0),
+        branchId: persistedBranchId
       }
     });
 
@@ -20907,10 +21820,8 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
 ========================= */
 app.get("/getSalesHistory", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"]), async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -20918,17 +21829,33 @@ app.get("/getSalesHistory", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "S
     }
 
     const companyId = access.companyScope;
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "GET_SALES_HISTORY" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
+    const whereParts = ["COALESCE(sh.is_deleted, 0) = 0"];
+    const whereParams = [];
+    if (companyId !== null) {
+      whereParts.push("sh.company_id = ?");
+      whereParams.push(companyId);
+    }
+    appendSalesBranchScope(whereParts, whereParams, branchScope, { saleAlias: "sh" });
+    const branchTotals = buildSalesBranchTotalsJoin(branchScope);
 
     const [sales] = await pool.query(
       `
       SELECT 
-        sh.*,
-        (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id) AS total_items
+        ${getSalesHistorySelectColumns(branchScope)}
       FROM sales_history sh
-      ${companyId !== null ? "WHERE sh.company_id = ? AND COALESCE(sh.is_deleted, 0) = 0" : "WHERE COALESCE(sh.is_deleted, 0) = 0"}
+      ${branchTotals.sql}
+      WHERE ${whereParts.join(" AND ")}
       ORDER BY sh.id DESC
       `,
-      companyId !== null ? [companyId] : []
+      [...branchTotals.params, ...whereParams]
     );
 
     return res.json({
@@ -20955,6 +21882,12 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
     }
 
     const companyId = access.companyScope;
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "SALES_HISTORY_READ" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json([]);
+    }
+    await auditBranchPersistenceBackfillWarning(pool, req, access, branchScope, { action: "SALES_HISTORY_READ" });
+
     const showDeleted = String(req.query.deleted || "").trim() === "1";
     const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
     const whereParts = [`COALESCE(sh.is_deleted, 0) = ${showDeleted ? 1 : 0}`];
@@ -20965,34 +21898,20 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
       params.push(companyId);
     }
 
-    if (access.isBranchLocked) {
-      whereParts.push(`
-        EXISTS (
-          SELECT 1
-          FROM sales_items si
-          INNER JOIN stock s
-            ON s.company_id = si.company_id
-           AND s.barcode = si.barcode
-          WHERE si.company_id = sh.company_id
-            AND si.invoice_number = sh.invoice_number
-            AND COALESCE(si.is_deleted, 0) = 0
-            AND s.current_branch_id = ?
-        )
-      `);
-      params.push(access.userBranchId);
-    }
+    appendSalesBranchScope(whereParts, params, branchScope, { saleAlias: "sh" });
+    const branchTotals = buildSalesBranchTotalsJoin(branchScope);
 
     const [sales] = await pool.query(
       `
       SELECT 
-        sh.*,
-        (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id) AS total_items
+        ${getSalesHistorySelectColumns(branchScope)}
       FROM sales_history sh
+      ${branchTotals.sql}
       WHERE ${whereParts.join(" AND ")}
       ORDER BY sh.id DESC
       ${pagination.sql}
       `,
-      params
+      [...branchTotals.params, ...params]
     );
 
     setPaginationHeaders(res, pagination);
@@ -21009,10 +21928,8 @@ app.get("/sales-history", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STA
 app.get("/getInvoiceItems/:invoiceNumber", authMiddleware, async (req, res) => {
   try {
     const invoiceNumber = String(req.params.invoiceNumber || "").trim();
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
@@ -21020,18 +21937,57 @@ app.get("/getInvoiceItems/:invoiceNumber", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "GET_INVOICE_ITEMS" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+    await auditBranchPersistenceBackfillWarning(pool, req, access, branchScope, { action: "GET_INVOICE_ITEMS" });
+
+    const [invoiceItemCountRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total_items
+      FROM sales_items
+      WHERE invoice_number = ?
+        AND COALESCE(is_deleted, 0) = 0
+        AND company_id = ?
+      `,
+      [invoiceNumber, companyId]
+    );
+    const invoiceItemCount = Number(invoiceItemCountRows?.[0]?.total_items || 0);
+
+    const itemWhereParts = [
+      "si.invoice_number = ?",
+      "COALESCE(si.is_deleted, 0) = 0",
+      "si.company_id = ?"
+    ];
+    const itemParams = [invoiceNumber, companyId];
+    appendSalesItemBranchScope(itemWhereParts, itemParams, branchScope, { itemAlias: "si" });
 
     const [items] = await pool.query(
       `
-      SELECT *
-      FROM sales_items
-      WHERE invoice_number = ?
-      AND COALESCE(is_deleted, 0) = 0
-      ${companyId !== null ? "AND company_id = ?" : ""}
-      ORDER BY id DESC
+      SELECT si.*
+      FROM sales_items si
+      WHERE ${itemWhereParts.join(" AND ")}
+      ORDER BY si.id DESC
       `,
-      companyId !== null ? [invoiceNumber, companyId] : [invoiceNumber]
+      itemParams
     );
+
+    if (branchScope.isBranchFiltered && invoiceItemCount > 0 && items.length === 0) {
+      await auditBranchReportAccessDenied(pool, req, access, {
+        action: "GET_INVOICE_ITEMS",
+        invoiceNumber,
+        requestedBranchId: branchScope.branchId,
+        message: "Invoice belongs to another branch"
+      });
+      return res.status(403).json({
+        success: false,
+        message: "You cannot access another branch invoice"
+      });
+    }
 
     return res.json({
       success: true,
@@ -23070,46 +24026,44 @@ app.post("/sales-history/:invoiceNumber/restore", authMiddleware, checkRole(["SU
 app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   try {
     const barcode = String(req.params.barcode || "").trim();
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: false
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const returnPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "RETURN_ITEM_RESTORE_TO_STOCK");
+    if (!returnPermission.ok) return;
 
-    const companyId = access.companyScope;
-    await ensureSingleStockBarcode(companyId, barcode);
-
-    const [stockRows] = await pool.query(
-      `
-      SELECT *
-      FROM stock
-      WHERE barcode = ? AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [barcode, companyId]
-    );
-
-    if (!stockRows.length) {
-      return res.json({
+    if (!barcode) {
+      return res.status(400).json({
         success: false,
-        message: "Item not found"
+        message: "Barcode is required"
       });
     }
 
+    const companyId = access.companyScope;
+    const stockRow = await assertStockBranchAccess(pool, access, {
+      barcode,
+      action: "RETURN_ITEM_RESTORE_TO_STOCK",
+      requireSellable: true,
+      allowOwnerAllBranch: true,
+      req
+    });
+
     await assertActiveBarcodeAvailable(companyId, {
-      ...stockRows[0],
+      ...stockRow,
       status: "IN_STOCK",
       stock_state: "IN_STOCK",
       invoice_number: "",
       deleted_at: null
     }, {
       db: pool,
-      excludeStockId: stockRows[0].id,
+      excludeStockId: stockRow.id,
       req,
       access,
       context: "RETURN_ITEM_RESTORE_TO_STOCK"
@@ -23124,7 +24078,7 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
           sold_at = NULL
       WHERE id = ? AND company_id = ?
       `,
-      [stockRows[0].id, companyId]
+      [stockRow.id, companyId]
     );
     const affectedRows = assertSingleStockRowAffected(result);
 
@@ -27144,6 +28098,8 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const transferPermission = await requireBranchOperationalPermission(pool, req, res, access, "canCreateTransfer", "CREATE_BRANCH_TRANSFER");
+    if (!transferPermission.ok) return;
 
     const fromBranchId = parsePositiveInteger(req.body?.from_branch_id ?? req.body?.fromBranchId);
     const toBranchId = parsePositiveInteger(req.body?.to_branch_id ?? req.body?.toBranchId);
@@ -27558,6 +28514,8 @@ app.post("/branch-transfers/:id/dispatch", authMiddleware, async (req, res) => {
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const transferPermission = await requireBranchOperationalPermission(pool, req, res, access, "canCreateTransfer", "DISPATCH_BRANCH_TRANSFER");
+    if (!transferPermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     if (!transferId) {
@@ -27855,6 +28813,8 @@ app.post("/branch-transfers/:id/receive-scan", authMiddleware, async (req, res) 
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const receivePermission = await requireBranchOperationalPermission(pool, req, res, access, "canReceiveTransfer", "RECEIVE_BRANCH_TRANSFER_SCAN");
+    if (!receivePermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     const barcode = String(req.body?.barcode || "").trim();
@@ -28242,6 +29202,8 @@ app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, r
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const receivePermission = await requireBranchOperationalPermission(pool, req, res, access, "canReceiveTransfer", "CONFIRM_BRANCH_TRANSFER_SHORTAGE");
+    if (!receivePermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     const notes = String(req.body?.notes || "").trim();
@@ -28501,6 +29463,8 @@ app.post("/branch-transfers/:id/items/scan", authMiddleware, async (req, res) =>
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const transferPermission = await requireBranchOperationalPermission(pool, req, res, access, "canCreateTransfer", "SCAN_BRANCH_TRANSFER_ITEM");
+    if (!transferPermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     const barcode = String(req.body?.barcode || "").trim();
@@ -28748,6 +29712,8 @@ app.delete("/branch-transfers/:id/items/:itemId", authMiddleware, async (req, re
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const transferPermission = await requireBranchOperationalPermission(pool, req, res, access, "canCreateTransfer", "DELETE_BRANCH_TRANSFER_ITEM");
+    if (!transferPermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     const itemId = parsePositiveInteger(req.params.itemId);
@@ -28878,6 +29844,8 @@ app.delete("/branch-transfers/:id", authMiddleware, async (req, res) => {
     if (access.isSuperAdmin) {
       return sendSuperAdminReadOnlyError(res);
     }
+    const transferPermission = await requireBranchOperationalPermission(pool, req, res, access, "canCreateTransfer", "CANCEL_BRANCH_TRANSFER");
+    if (!transferPermission.ok) return;
 
     const transferId = parsePositiveInteger(req.params.id);
     if (!transferId) {
