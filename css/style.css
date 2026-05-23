@@ -2614,3 +2614,156 @@ body {
     min-width: 0;
   }
 }
+
+/* ERP Premium UI Phase D: cascade lock and print-safe stabilization.
+   This sits after broad operational rules so page-specific premium surfaces
+   keep predictable precedence without changing page workflows. */
+body .layout .main .panel,
+body .layout .main .filters-panel,
+body .layout .main .report-header-card,
+body .layout .main .report-panel,
+body .layout .main .settings-card,
+body .layout .main .approval-card,
+body .layout .main .invoice-summary-box,
+body .layout .main .summary-wide-card,
+body .layout .main .product-summary-card,
+body .layout .main .scanner-left,
+body .layout .main .scanner-right,
+body .layout .main .sale-modal-box,
+body .layout .main .payment-summary-card,
+body .layout .main .branch-card,
+body .layout .main .move,
+body .layout .main .stat-card,
+.auth-card,
+.auth-panel,
+.forgot-shell {
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 250, 242, 0.92) 100%);
+  box-shadow: var(--erp-card-shadow);
+}
+
+body .layout .main .panel::before,
+body .layout .main .filters-panel::before,
+body .layout .main .report-header-card::before,
+body .layout .main .report-panel::before,
+body .layout .main .settings-card::before,
+body .layout .main .approval-card::before,
+body .layout .main .invoice-summary-box::before,
+body .layout .main .summary-wide-card::before,
+body .layout .main .product-summary-card::before,
+body .layout .main .scanner-left::before,
+body .layout .main .scanner-right::before,
+body .layout .main .sale-modal-box::before,
+body .layout .main .payment-summary-card::before,
+body .layout .main .branch-card::before,
+body .layout .main .move::before,
+body .layout .main .stat-card::before,
+.auth-card::before,
+.auth-panel::before,
+.forgot-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  border-radius: var(--erp-card-radius) var(--erp-card-radius) 0 0;
+  background: var(--erp-gold-gradient);
+  pointer-events: none;
+}
+
+body .layout .main .report-toolbar,
+body .layout .main .reports-toolbar,
+body .layout .main .filters,
+body .layout .main .staff-toolbar,
+.auth-tabs {
+  border-radius: var(--erp-card-radius);
+  border: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ec 100%);
+  box-shadow: var(--erp-shadow-xs);
+}
+
+body .layout .main .data-table th,
+body .layout .main .approval-table th,
+body .layout .main .report-table-wrap th,
+body .layout .main .table-wrap th,
+body .layout .main table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #fffaf1 0%, #f8f3ea 100%);
+  color: #536176;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.35px;
+}
+
+@media print {
+  * {
+    text-shadow: none !important;
+    box-shadow: none !important;
+  }
+
+  body {
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .sidebar,
+  .topbar,
+  .hamburger,
+  .premium-toolbar,
+  .report-toolbar,
+  .reports-toolbar,
+  .toolbar-actions,
+  .top-filter-actions,
+  .btn-row,
+  .action-btn-row,
+  .print-action-row,
+  .modal-backdrop,
+  .sale-modal,
+  .job-slip-history-modal {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .section-box,
+  .sub-card,
+  .panel,
+  .card,
+  .summary-card,
+  .report-summary-card,
+  .history-card,
+  .premium-card,
+  .settings-card,
+  .approval-card,
+  .invoice-summary-box,
+  .workflow-card,
+  .txn-panel,
+  .ledger-card {
+    background: #fff !important;
+    border-color: #ddd !important;
+  }
+
+  .table-wrap,
+  .history-table-wrap,
+  .report-table-wrap,
+  .approval-table-wrap,
+  .process-summary-table-wrap {
+    overflow: visible !important;
+    border-color: #ddd !important;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+}

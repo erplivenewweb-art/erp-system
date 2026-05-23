@@ -1886,14 +1886,23 @@
       const items = ACCESS_MENU_ITEMS[entityType]?.[mode] || [];
       pendingAccessMenu = { entityType, id, mode };
 
-      document.getElementById("accessMenuTitle").textContent =
+      const menuTitle = document.getElementById("accessMenuTitle");
+      const menuTarget = document.getElementById("accessMenuTarget");
+      const menuActions = document.getElementById("accessMenuActions");
+      const menuModal = document.getElementById("accessMenuModal");
+      if (!menuTitle || !menuTarget || !menuActions || !menuModal) {
+        showToast("Access menu is not available on this view.", "error");
+        return;
+      }
+
+      menuTitle.textContent =
         entityType === "company" ? "Manage Company Access" : "Manage User Access";
-      document.getElementById("accessMenuTarget").textContent =
+      menuTarget.textContent =
         entityType === "company"
           ? safeText(target?.company_name || id)
           : safeText(target?.name || target?.email || id);
 
-      document.getElementById("accessMenuActions").innerHTML = `
+      menuActions.innerHTML = `
         ${items.map((item) => `
           <button class="action-sheet-btn ${item.tone || ""}" type="button" onclick="selectAccessMenuAction('${item.key}')">
             <span>${item.label}</span>
@@ -1906,12 +1915,12 @@
         </button>
       `;
 
-      document.getElementById("accessMenuModal").classList.add("show");
+      menuModal.classList.add("show");
     }
 
     function closeAccessMenu() {
       pendingAccessMenu = null;
-      document.getElementById("accessMenuModal").classList.remove("show");
+      document.getElementById("accessMenuModal")?.classList.remove("show");
     }
 
     function selectAccessMenuAction(actionKey) {
@@ -1951,34 +1960,52 @@
         action
       };
 
-      document.getElementById("accessActionTitle").textContent = action.label;
-      document.getElementById("accessActionTarget").textContent =
+      const actionTitle = document.getElementById("accessActionTitle");
+      const actionTarget = document.getElementById("accessActionTarget");
+      const actionReason = document.getElementById("accessActionReason");
+      const actionDate = document.getElementById("accessActionDate");
+      const actionModal = document.getElementById("accessActionModal");
+      if (!actionTitle || !actionTarget || !actionReason || !actionDate || !actionModal) {
+        showToast("Access action panel is not available on this view.", "error");
+        return;
+      }
+
+      actionTitle.textContent = action.label;
+      actionTarget.textContent =
         entityType === "company"
           ? `Company: ${safeText(target?.company_name || id)}`
           : `User: ${safeText(target?.name || target?.email || id)}`;
-      document.getElementById("accessActionReason").value = "";
-      document.getElementById("accessActionDate").value = "";
+      actionReason.value = "";
+      actionDate.value = "";
 
       const dateField = document.getElementById("accessDateField");
       if (action.dateField) {
-        dateField.style.display = "";
-        document.getElementById("accessDateLabel").textContent = action.dateLabel || "Until";
+        if (dateField) dateField.style.display = "";
+        const dateLabel = document.getElementById("accessDateLabel");
+        if (dateLabel) dateLabel.textContent = action.dateLabel || "Until";
       } else {
-        dateField.style.display = "none";
+        if (dateField) dateField.style.display = "none";
       }
 
-      document.getElementById("accessActionModal").classList.add("show");
+      actionModal.classList.add("show");
     }
 
     function closeAccessActionModal() {
       pendingAccessAction = null;
-      document.getElementById("accessActionModal").classList.remove("show");
+      document.getElementById("accessActionModal")?.classList.remove("show");
     }
 
     async function confirmAccessAction() {
       if (!pendingAccessAction || !isSuperAdminUser) return;
 
-      const reason = document.getElementById("accessActionReason").value.trim();
+      const reasonInput = document.getElementById("accessActionReason");
+      const dateInput = document.getElementById("accessActionDate");
+      if (!reasonInput || !dateInput) {
+        showToast("Access action panel is not available on this view.", "error");
+        return;
+      }
+
+      const reason = reasonInput.value.trim();
       if (!reason) {
         showToast("Reason is required.", "error");
         return;
@@ -1987,7 +2014,7 @@
       const { id, action } = pendingAccessAction;
       const payload = { reason };
       if (action.dateField) {
-        const dateValue = document.getElementById("accessActionDate").value;
+        const dateValue = dateInput.value;
         if (!dateValue) {
           showToast("Please choose a date and time.", "error");
           return;
@@ -1996,6 +2023,10 @@
       }
 
       const button = document.getElementById("accessActionConfirmBtn");
+      if (!button) {
+        showToast("Confirm button is not available on this view.", "error");
+        return;
+      }
       const originalText = button.textContent;
 
       try {
@@ -2038,6 +2069,10 @@
 
       const modal = document.getElementById("auditModal");
       const body = document.getElementById("auditModalBody");
+      if (!modal || !body) {
+        showToast("Audit panel is not available on this view.", "error");
+        return;
+      }
       body.innerHTML = `<div class="empty-box">Loading audit history...</div>`;
       modal.classList.add("show");
 
@@ -2074,7 +2109,7 @@
     }
 
     function closeAuditModal() {
-      document.getElementById("auditModal").classList.remove("show");
+      document.getElementById("auditModal")?.classList.remove("show");
     }
 
     function bindAccessModalDismiss() {
