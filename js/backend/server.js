@@ -951,6 +951,9 @@ const TRANSACTION_TYPES = [
   "SALE_RETURN",
   "PURCHASE_INVOICE",
   "PURCHASE_RETURN",
+  "RETURN_REFUND_PAYABLE",
+  "CASH_REFUND_PAID",
+  "METAL_REFUND_GIVEN",
   "PAYMENT_RECEIVED",
   "PAYMENT_GIVEN",
   "ADVANCE_RECEIVED",
@@ -5941,6 +5944,456 @@ function resolveReturnPersistenceBranch(saleItem = null, stockItem = null, acces
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function buildReturnLedgerPreview(saleItem = null, returnType = "") {
+  const estimatedAmount = estimateReturnLineAmount(saleItem, saleItem);
+  return {
+    mode: "PREVIEW_ONLY",
+    returnType,
+    transactionType: "SALE_RETURN",
+    estimatedCashCredit: estimatedAmount,
+    estimatedPartyBalanceImpact: -estimatedAmount,
+    metalLedgerImpact: "NOT_HANDLED_IN_PHASE_1",
+    warnings: [
+      "Paid and metal settlement reversal is not redesigned in this phase",
+      "Return amount is estimated from the sale line and existing sale totals"
+    ]
+  };
+}
+
+async function buildReturnSettlementSummary(connection, companyId, invoiceNumber, saleItem = null) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanInvoiceNumber = String(invoiceNumber || "").trim();
+  const emptySummary = {
+    invoiceTotal: toNumber(saleItem?.total_amount),
+    paidAmount: toNumber(saleItem?.paid_amount),
+    dueAmount: toNumber(saleItem?.due_amount),
+    paymentStatus: String(saleItem?.payment_status || "").trim(),
+    linkedSaleInvoice: [],
+    linkedPaymentReceived: [],
+    linkedMetalSettlementReceived: [],
+    cashLedgerImpact: {
+      rows: [],
+      totalDebit: 0,
+      totalCredit: 0,
+      netReceivableImpact: 0
+    },
+    metalLedgerImpact: {
+      rows: [],
+      summary: {},
+      hasRows: false
+    },
+    hasMixedCashMetalSettlement: false,
+    isSettlementBlocked: false,
+    blockingReasons: []
+  };
+
+  if (!cleanCompanyId || !cleanInvoiceNumber) {
+    return emptySummary;
+  }
+
+  const [linkedRows] = await connection.query(
+    `
+    SELECT
+      itl.id AS link_id,
+      itl.link_type,
+      itl.remarks AS link_remarks,
+      tm.*
+    FROM invoice_transaction_link itl
+    INNER JOIN transaction_master tm
+      ON tm.id = itl.transaction_id
+     AND tm.company_id = itl.company_id
+    WHERE itl.company_id = ?
+      AND itl.invoice_no = ?
+    ORDER BY tm.id ASC
+    `,
+    [cleanCompanyId, cleanInvoiceNumber]
+  );
+
+  const transactionIds = linkedRows.map((row) => Number(row.id || 0)).filter(Boolean);
+  let cashLedgerRows = [];
+  let metalLedgerRows = [];
+
+  if (transactionIds.length) {
+    const placeholders = transactionIds.map(() => "?").join(", ");
+    const [cashRows] = await connection.query(
+      `
+      SELECT *
+      FROM cash_ledger
+      WHERE company_id = ?
+        AND transaction_id IN (${placeholders})
+      ORDER BY id ASC
+      `,
+      [cleanCompanyId, ...transactionIds]
+    );
+    cashLedgerRows = cashRows;
+
+    const [metalRows] = await connection.query(
+      `
+      SELECT *
+      FROM metal_ledger
+      WHERE company_id = ?
+        AND transaction_id IN (${placeholders})
+      ORDER BY id ASC
+      `,
+      [cleanCompanyId, ...transactionIds]
+    );
+    metalLedgerRows = metalRows;
+  }
+
+  const linkedByType = linkedRows.reduce((acc, row) => {
+    const type = String(row.transaction_type || "").trim().toUpperCase();
+    if (!acc[type]) acc[type] = [];
+    acc[type].push({
+      id: row.id,
+      voucherNo: row.voucher_no || "",
+      voucherDate: row.voucher_date || "",
+      transactionType: row.transaction_type || "",
+      linkType: row.link_type || "",
+      paymentMode: row.payment_mode || "",
+      paymentStatus: row.payment_status || ""
+    });
+    return acc;
+  }, {});
+
+  const cashDebit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.debit_amount), 0);
+  const cashCredit = cashLedgerRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+  const metalSummary = metalLedgerRows.reduce((acc, row) => {
+    const metalType = normalizeMetalType(row.metal_type) || "UNKNOWN";
+    if (!acc[metalType]) {
+      acc[metalType] = {
+        grossIn: 0,
+        grossOut: 0,
+        fineIn: 0,
+        fineOut: 0
+      };
+    }
+    acc[metalType].grossIn += toNumber(row.gross_in);
+    acc[metalType].grossOut += toNumber(row.gross_out);
+    acc[metalType].fineIn += toNumber(row.fine_in);
+    acc[metalType].fineOut += toNumber(row.fine_out);
+    return acc;
+  }, {});
+
+  const paidAmount = toNumber(saleItem?.paid_amount);
+  const dueAmount = toNumber(saleItem?.due_amount);
+  const paymentStatus = String(saleItem?.payment_status || "").trim();
+  const normalizedPaymentStatus = paymentStatus.toUpperCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const linkedPaymentReceived = linkedByType.PAYMENT_RECEIVED || [];
+  const linkedMetalSettlementReceived = linkedByType.METAL_SETTLEMENT_RECEIVED || [];
+  const hasCashSettlement = paidAmount > 0 || linkedPaymentReceived.length > 0;
+  const hasMetalSettlement = linkedMetalSettlementReceived.length > 0 || metalLedgerRows.length > 0;
+  const hasMixedCashMetalSettlement = hasCashSettlement && hasMetalSettlement;
+  const detailedBlockingReasons = [];
+
+  if (paidAmount > 0) detailedBlockingReasons.push("Invoice has paid amount");
+  if (["PAID", "PARTIAL", "PARTIALLY PAID", "PARTIAL PAID", "METAL SETTLED"].includes(normalizedPaymentStatus)) {
+    detailedBlockingReasons.push(`Invoice payment status is ${paymentStatus}`);
+  }
+  if (linkedPaymentReceived.length) detailedBlockingReasons.push("Linked PAYMENT_RECEIVED transaction exists");
+  if (linkedMetalSettlementReceived.length) detailedBlockingReasons.push("Linked METAL_SETTLEMENT_RECEIVED transaction exists");
+  if (metalLedgerRows.length) detailedBlockingReasons.push("Linked metal ledger rows exist");
+  if (hasMixedCashMetalSettlement) detailedBlockingReasons.push("Mixed cash and metal settlement exists");
+
+  return {
+    invoiceTotal: toNumber(saleItem?.total_amount),
+    paidAmount,
+    dueAmount,
+    paymentStatus,
+    linkedSaleInvoice: linkedByType.SALE_INVOICE || [],
+    linkedPaymentReceived,
+    linkedMetalSettlementReceived,
+    cashLedgerImpact: {
+      rows: cashLedgerRows,
+      totalDebit: cashDebit,
+      totalCredit: cashCredit,
+      netReceivableImpact: cashDebit - cashCredit
+    },
+    metalLedgerImpact: {
+      rows: metalLedgerRows,
+      summary: metalSummary,
+      hasRows: metalLedgerRows.length > 0
+    },
+    hasMixedCashMetalSettlement,
+    isSettlementBlocked: detailedBlockingReasons.length > 0,
+    blockingReasons: detailedBlockingReasons
+  };
+}
+
+function buildReturnRefundEstimate(saleItem = null, settlementSummary = null) {
+  const lineAmount = estimateReturnLineAmount(saleItem, saleItem);
+  const invoiceTotal = Math.max(toNumber(settlementSummary?.invoiceTotal || saleItem?.total_amount), 0);
+  const paymentCreditIds = new Set((settlementSummary?.linkedPaymentReceived || []).map((row) => Number(row.id || 0)));
+  const metalCreditIds = new Set((settlementSummary?.linkedMetalSettlementReceived || []).map((row) => Number(row.id || 0)));
+  const cashRows = Array.isArray(settlementSummary?.cashLedgerImpact?.rows) ? settlementSummary.cashLedgerImpact.rows : [];
+  const cashSettledAmount = cashRows
+    .filter((row) => paymentCreditIds.has(Number(row.transaction_id || 0)))
+    .reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+  const metalSettledValue = cashRows
+    .filter((row) => metalCreditIds.has(Number(row.transaction_id || 0)))
+    .reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+  const metalGrossIn = (Array.isArray(settlementSummary?.metalLedgerImpact?.rows) ? settlementSummary.metalLedgerImpact.rows : [])
+    .reduce((sum, row) => sum + toNumber(row.gross_in), 0);
+  const hasCashSettlement = cashSettledAmount > 0 || toNumber(settlementSummary?.paidAmount) > 0;
+  const hasMetalSettlement = metalGrossIn > 0 || metalCreditIds.size > 0;
+  const dueAmount = Math.max(toNumber(settlementSummary?.dueAmount), 0);
+  const refundModeHint = hasCashSettlement && hasMetalSettlement
+    ? "MIXED"
+    : hasMetalSettlement
+      ? "METAL"
+      : hasCashSettlement
+        ? "CASH"
+        : "UNKNOWN";
+  const ratio = invoiceTotal > 0 ? Math.min(Math.max(lineAmount / invoiceTotal, 0), 1) : 0;
+  const estimatedRefundMetalWeight = hasMetalSettlement ? metalGrossIn * ratio : 0;
+  const estimatedRefundCashAmount = refundModeHint === "METAL" ? 0 : Math.max(lineAmount - dueAmount, 0);
+
+  return {
+    estimatedRefundCashAmount,
+    estimatedRefundMetalWeight,
+    refundModeHint,
+    estimatedReturnAmount: lineAmount,
+    settlementAllocation: {
+      cashSettledAmount,
+      metalSettledValue,
+      metalGrossIn,
+      dueAmount,
+      invoiceTotal,
+      returnRatio: ratio
+    }
+  };
+}
+
+async function getOpenReturnRefundPayables(connection, companyId, invoiceNumber, barcode, forUpdate = false) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanInvoiceNumber = String(invoiceNumber || "").trim();
+  const cleanBarcode = normalizeBarcodeForComparison(barcode);
+  if (!cleanCompanyId || !cleanInvoiceNumber || !cleanBarcode) return [];
+
+  const lockSql = forUpdate ? "FOR UPDATE" : "";
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM return_refund_payables
+    WHERE company_id = ?
+      AND invoice_number = ?
+      AND UPPER(TRIM(barcode)) = ?
+      AND UPPER(COALESCE(payable_status, 'OPEN')) IN ('OPEN', 'PARTIALLY_SETTLED')
+    ORDER BY id DESC
+    ${lockSql}
+    `,
+    [cleanCompanyId, cleanInvoiceNumber, cleanBarcode]
+  );
+  return rows;
+}
+
+async function buildReturnPreview(connection, {
+  companyId,
+  barcode,
+  access = {},
+  forUpdate = false
+} = {}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanBarcode = String(barcode || "").trim();
+  const normalizedBarcode = normalizeBarcodeForComparison(cleanBarcode);
+  const blockingReasons = [];
+  const warnings = [];
+
+  if (!cleanBarcode) {
+    blockingReasons.push("Barcode is required");
+  }
+
+  const stockLockSql = forUpdate ? "FOR UPDATE" : "";
+  const [stockRows] = cleanBarcode
+    ? await connection.query(
+        `
+        SELECT *
+        FROM stock
+        WHERE company_id = ?
+          AND UPPER(TRIM(barcode)) = ?
+        ORDER BY id DESC
+        LIMIT 2
+        ${stockLockSql}
+        `,
+        [cleanCompanyId, normalizedBarcode]
+      )
+    : [[]];
+
+  if (cleanBarcode && stockRows.length === 0) {
+    blockingReasons.push("Barcode was not found in this company's stock");
+  }
+
+  if (stockRows.length > 1) {
+    blockingReasons.push("Duplicate stock rows found for barcode");
+  }
+
+  const stock = stockRows[0] || null;
+  const currentStatus = String(stock?.status || "").trim().toUpperCase();
+  const currentState = stock ? getEffectiveStockState(stock) : "";
+  const rawStockState = String(stock?.stock_state || "").trim().toUpperCase();
+
+  if (stock && Number(stock.company_id || 0) !== cleanCompanyId) {
+    blockingReasons.push("Stock belongs to another company");
+  }
+
+  if (stock && access?.isBranchLocked && Number(stock.current_branch_id || 0) !== Number(access.userBranchId || 0)) {
+    blockingReasons.push("Stock belongs to another branch");
+  }
+
+  if (stock && currentStatus !== "SOLD") {
+    blockingReasons.push("Stock must be SOLD before return");
+  }
+
+  if (stock && !["SOLD", ""].includes(rawStockState) && currentState !== "SOLD") {
+    blockingReasons.push("Stock state is not a valid sold state");
+  }
+
+  if (stock && ["IN_TRANSIT", "TRANSFER_SHORTAGE"].includes(currentState)) {
+    blockingReasons.push("Stock is in transfer state");
+  }
+
+  if (stock && ["DELETED", "DAMAGED_RETURN", "DAMAGED", "IN_STOCK"].includes(currentStatus)) {
+    blockingReasons.push("Stock is deleted, damaged, already returned, or available");
+  }
+
+  if (stock && ["DELETED", "DAMAGED_RETURN", "DAMAGED", "IN_STOCK"].includes(currentState)) {
+    blockingReasons.push("Stock state is deleted, damaged, already returned, or available");
+  }
+
+  const saleLockSql = forUpdate ? "FOR UPDATE" : "";
+  const [saleRows] = cleanBarcode
+    ? await connection.query(
+        `
+        SELECT
+          si.*,
+          sh.id AS sale_id,
+          sh.branch_id AS sale_branch_id,
+          sh.customer_name AS sale_customer_name,
+          sh.mobile AS sale_mobile,
+          sh.gst_number AS sale_gst_number,
+          sh.payment_mode,
+          sh.payment_status,
+          sh.paid_amount,
+          sh.due_amount,
+          sh.total_amount,
+          sh.total_weight,
+          sh.rate_per_gram,
+          sh.mc_rate,
+          sh.subtotal,
+          sh.status AS sale_status,
+          sh.is_deleted AS sale_is_deleted,
+          sh.cancelled_at AS sale_cancelled_at,
+          sh.invoice_date,
+          sh.created_at AS sale_created_at
+        FROM sales_items si
+        LEFT JOIN sales_history sh
+          ON sh.invoice_number = si.invoice_number
+         AND sh.company_id = si.company_id
+        WHERE si.company_id = ?
+          AND UPPER(TRIM(si.barcode)) = ?
+        ORDER BY si.id DESC
+        LIMIT 1
+        ${saleLockSql}
+        `,
+        [cleanCompanyId, normalizedBarcode]
+      )
+    : [[]];
+
+  const saleItem = saleRows[0] || null;
+  const invoiceNumber = String(stock?.invoice_number || saleItem?.invoice_number || "").trim();
+  const saleStatus = String(saleItem?.sale_status || "").trim().toUpperCase();
+  const saleItemStatus = String(saleItem?.item_status || "").trim().toUpperCase();
+
+  if (!saleItem) {
+    blockingReasons.push("Sale item was not found for this barcode");
+  }
+
+  if (saleItem && Number(saleItem.sale_is_deleted || 0) === 1) {
+    blockingReasons.push("Invoice is deleted");
+  }
+
+  if (saleItem && (saleStatus === "CANCELLED" || saleItem.sale_cancelled_at)) {
+    blockingReasons.push("Invoice is cancelled");
+  }
+
+  if (saleItem && ["RETURN_TO_STOCK", "DAMAGED_RETURN"].includes(saleItemStatus)) {
+    blockingReasons.push("Sale item is already returned");
+  }
+
+  if (stock && saleItem && invoiceNumber && String(saleItem.invoice_number || "").trim() !== invoiceNumber) {
+    blockingReasons.push("Stock invoice does not match latest sale item invoice");
+  }
+
+  let duplicateReturnRows = [];
+  if (cleanBarcode) {
+    const duplicateLockSql = forUpdate ? "FOR UPDATE" : "";
+    const [rows] = await connection.query(
+      `
+      SELECT *
+      FROM return_history
+      WHERE company_id = ?
+        AND UPPER(TRIM(barcode)) = ?
+      ORDER BY id DESC
+      LIMIT 5
+      ${duplicateLockSql}
+      `,
+      [cleanCompanyId, normalizedBarcode]
+    );
+    duplicateReturnRows = rows;
+  }
+
+  if (duplicateReturnRows.length) {
+    blockingReasons.push("Return already exists for this barcode or invoice");
+  }
+
+  const settlementSummary = await buildReturnSettlementSummary(connection, cleanCompanyId, invoiceNumber, saleItem);
+  const refundEstimate = buildReturnRefundEstimate(saleItem, settlementSummary);
+  if (settlementSummary.isSettlementBlocked) {
+    blockingReasons.push("Paid/settled invoice return requires refund workflow");
+  }
+
+  const duplicateRefundPayables = await getOpenReturnRefundPayables(
+    connection,
+    cleanCompanyId,
+    invoiceNumber,
+    cleanBarcode,
+    forUpdate
+  );
+  if (duplicateRefundPayables.length) {
+    blockingReasons.push("Open refund payable already exists for this barcode and invoice");
+  }
+
+  const branchId = resolveReturnPersistenceBranch(saleItem, stock, access);
+  const returnOptions = ["RETURN_TO_STOCK", "DAMAGED_RETURN"];
+  const uniqueBlockingReasons = [...new Set(blockingReasons)];
+  const nonSettlementBlockingReasons = uniqueBlockingReasons.filter((reason) => reason !== "Paid/settled invoice return requires refund workflow");
+  const requiresRefundWorkflow = Boolean(settlementSummary.isSettlementBlocked);
+  const canCreateRefundPayable = requiresRefundWorkflow && nonSettlementBlockingReasons.length === 0;
+
+  return {
+    success: true,
+    canReturn: uniqueBlockingReasons.length === 0,
+    returnAllowedSimple: uniqueBlockingReasons.length === 0,
+    requiresRefundWorkflow,
+    canCreateRefundPayable,
+    barcode: cleanBarcode,
+    invoiceNumber,
+    saleItem,
+    stock,
+    branchId,
+    returnOptions,
+    blockingReasons: uniqueBlockingReasons,
+    warnings: [...new Set(warnings)],
+    settlementSummary,
+    estimatedRefundCashAmount: refundEstimate.estimatedRefundCashAmount,
+    estimatedRefundMetalWeight: refundEstimate.estimatedRefundMetalWeight,
+    refundModeHint: refundEstimate.refundModeHint,
+    refundEstimate,
+    duplicateRefundPayables,
+    duplicateReturns: duplicateReturnRows,
+    ledgerPreview: buildReturnLedgerPreview(saleItem, "")
+  };
+}
+
 async function previewSalesBranchBackfill(connection = pool, companyId = null) {
   const companyClause = companyId !== null ? "AND sh.company_id = ?" : "";
   const params = companyId !== null ? [companyId] : [];
@@ -6649,6 +7102,102 @@ async function postReturnToTransactionFoundation(connection, payload) {
     transactionId,
     partyId: party.id,
     estimatedAmount: lineAmount
+  };
+}
+
+async function postReturnRefundPayableToTransactionFoundation(connection, payload) {
+  const companyId = Number(payload.companyId);
+  const createdBy = payload.createdBy ?? null;
+  const branchId = payload.branchId ?? null;
+  const saleItem = payload.saleItem || null;
+  const invoiceNumber = String(payload.invoiceNumber || saleItem?.invoice_number || "").trim();
+  const customerName = String(payload.customerName || saleItem?.customer_name || saleItem?.sale_customer_name || "").trim();
+  const mobile = String(payload.mobile || saleItem?.sale_mobile || "").trim();
+  const gstNo = String(payload.gstNo || saleItem?.sale_gst_number || "").trim();
+  const returnType = normalizeReturnType(payload.returnType);
+  const returnReason = String(payload.returnReason || "").trim();
+  const returnDate = String(payload.returnDate || getTodayDateOnly()).trim();
+  const productName = String(payload.productName || saleItem?.product_name || "").trim();
+  const barcode = String(payload.barcode || saleItem?.barcode || "").trim();
+  const lotNumber = String(payload.lotNumber || saleItem?.lot_number || "").trim();
+  const grossWeight = toNumber(payload.weight || saleItem?.weight);
+  const purity = toNumber(saleItem?.purity);
+  const refundCashAmount = toNumber(payload.refundCashAmount);
+  const refundMetalWeight = toNumber(payload.refundMetalWeight);
+  const refundModeHint = String(payload.refundModeHint || "UNKNOWN").trim().toUpperCase();
+
+  const party = await findOrCreateBillingParty(connection, {
+    companyId,
+    createdBy,
+    partyName: customerName || "RETURN CUSTOMER",
+    mobile,
+    gstNo
+  });
+
+  const voucherNo = `RFP-${invoiceNumber || Date.now()}-${barcode || Date.now()}`;
+  const [txnInsert] = await connection.query(
+    `
+    INSERT INTO transaction_master
+    (
+      company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+      status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+      remarks, note, created_by
+    )
+    VALUES (?, ?, ?, 'RETURN_REFUND_PAYABLE', ?, ?, 'POSTED', ?, ?, 'return', ?, 'OPEN', ?, ?, ?)
+    `,
+    [
+      companyId,
+      voucherNo,
+      returnDate || null,
+      party.id,
+      party.party_type || "CUSTOMER",
+      barcode || invoiceNumber,
+      invoiceNumber,
+      refundModeHint,
+      "Refund payable created from return module",
+      `${returnType} | ${returnReason || "No reason"} | Cash ${refundCashAmount.toFixed(2)} | Metal ${refundMetalWeight.toFixed(3)}g`,
+      createdBy
+    ]
+  );
+
+  const transactionId = txnInsert.insertId;
+
+  await connection.query(
+    `
+    INSERT INTO transaction_lines
+    (
+      transaction_id, line_no, item_name, barcode, lot_no, purity,
+      gross_weight, fine_weight, qty, line_amount, remarks
+    )
+    VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      transactionId,
+      productName,
+      barcode,
+      lotNumber,
+      purity,
+      grossWeight,
+      calculateFineWeight(grossWeight, purity),
+      1,
+      refundCashAmount,
+      `Refund payable only (${refundModeHint}); no cash or metal payout posted`
+    ]
+  );
+
+  await connection.query(
+    `
+    INSERT INTO invoice_transaction_link
+    (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+    VALUES (?, ?, ?, ?, 'RETURN_REFUND_PAYABLE', ?, ?)
+    `,
+    [companyId, invoiceNumber, transactionId, branchId, "Return refund payable posting", createdBy]
+  );
+
+  return {
+    transactionId,
+    partyId: party.id,
+    voucherNo
   };
 }
 
@@ -8751,6 +9300,35 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS return_refund_payables (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      return_id INT DEFAULT NULL,
+      invoice_number VARCHAR(100) DEFAULT '',
+      sale_id INT DEFAULT NULL,
+      barcode VARCHAR(255) DEFAULT '',
+      party_id INT DEFAULT NULL,
+      product_name VARCHAR(255) DEFAULT '',
+      return_weight DECIMAL(14,3) DEFAULT 0.000,
+      refund_cash_amount DECIMAL(14,2) DEFAULT 0.00,
+      settled_cash_amount DECIMAL(14,2) DEFAULT 0.00,
+      remaining_cash_amount DECIMAL(14,2) DEFAULT 0.00,
+      refund_metal_weight DECIMAL(14,3) DEFAULT 0.000,
+      settled_metal_weight DECIMAL(14,3) DEFAULT 0.000,
+      remaining_metal_weight DECIMAL(14,3) DEFAULT 0.000,
+      refund_mode_hint VARCHAR(30) DEFAULT 'UNKNOWN',
+      payable_status VARCHAR(30) DEFAULT 'OPEN',
+      source_payment_status VARCHAR(80) DEFAULT '',
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_return_refund_payables_invoice (company_id, invoice_number),
+      INDEX idx_return_refund_payables_barcode_status (company_id, barcode, payable_status),
+      INDEX idx_return_refund_payables_status (company_id, payable_status, created_at)
+    )
+  `);
   await addColumnIfMissing("sales_items", "item_status", "VARCHAR(50) DEFAULT 'SOLD'");
   await addColumnIfMissing("sales_items", "cancelled_at", "DATETIME DEFAULT NULL");
   await addColumnIfMissing("sales_items", "cancelled_by", "INT DEFAULT NULL");
@@ -10044,6 +10622,29 @@ async function ensureSchema() {
     await addColumnIfMissing("return_history", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
+  if (await tableExists("return_refund_payables")) {
+    await addColumnIfMissing("return_refund_payables", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("return_refund_payables", "return_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("return_refund_payables", "invoice_number", "VARCHAR(100) DEFAULT ''");
+    await addColumnIfMissing("return_refund_payables", "sale_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("return_refund_payables", "barcode", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("return_refund_payables", "party_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("return_refund_payables", "product_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("return_refund_payables", "return_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("return_refund_payables", "refund_cash_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("return_refund_payables", "settled_cash_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("return_refund_payables", "remaining_cash_amount", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("return_refund_payables", "refund_metal_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("return_refund_payables", "settled_metal_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("return_refund_payables", "remaining_metal_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("return_refund_payables", "refund_mode_hint", "VARCHAR(30) DEFAULT 'UNKNOWN'");
+    await addColumnIfMissing("return_refund_payables", "payable_status", "VARCHAR(30) DEFAULT 'OPEN'");
+    await addColumnIfMissing("return_refund_payables", "source_payment_status", "VARCHAR(80) DEFAULT ''");
+    await addColumnIfMissing("return_refund_payables", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("return_refund_payables", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("return_refund_payables", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
   if (await tableExists("invoice_transaction_link")) {
     await addColumnIfMissingSafe("invoice_transaction_link", "branch_id", "INT DEFAULT NULL");
   }
@@ -10687,6 +11288,12 @@ async function ensureSchema() {
     await addIndexIfMissing("return_history", "idx_returns_company_date", "(company_id, return_date)");
     await addIndexIfMissing("return_history", "idx_returns_company_invoice", "(company_id, invoice_number)");
     await addIndexIfMissingSafe("return_history", "idx_returns_company_branch", "(company_id, branch_id)");
+  }
+
+  if (await tableExists("return_refund_payables")) {
+    await addIndexIfMissing("return_refund_payables", "idx_return_refund_payables_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissing("return_refund_payables", "idx_return_refund_payables_barcode_status", "(company_id, barcode, payable_status)");
+    await addIndexIfMissing("return_refund_payables", "idx_return_refund_payables_status", "(company_id, payable_status, created_at)");
   }
 
   if (await tableExists("invoice_transaction_link")) {
@@ -18849,6 +19456,1229 @@ app.get("/getReturnItem/:barcode", authMiddleware, async (req, res) => {
 /* =========================
    RETURN MANAGEMENT
 ========================= */
+app.get("/returns/preview/:barcode", authMiddleware, async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const permissions = resolveBranchOperationalPermissions(access.actingUser || req.user || {}, access);
+    if (!access.isSuperAdmin && !permissions.canViewOwnBranch && !isAllBranchOperationalRole(access)) {
+      await auditBranchPermissionDenied(pool, req, access, {
+        action: "RETURN_PREVIEW",
+        reason: permissions.blockedReason || "Branch assignment required"
+      });
+      return res.status(403).json({
+        success: false,
+        message: permissions.blockedReason || "Branch assignment required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    const preview = await buildReturnPreview(connection, {
+      companyId: access.companyScope,
+      barcode: req.params.barcode,
+      access,
+      forUpdate: false
+    });
+
+    return res.json(preview);
+  } catch (error) {
+    console.error("Return preview error:", error);
+    return res.status(500).json({
+      success: false,
+      canReturn: false,
+      barcode: String(req.params.barcode || "").trim(),
+      blockingReasons: ["Return preview failed"],
+      warnings: [getErrorDetail(error)]
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const returnPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "CREATE_RETURN_REFUND_PAYABLE");
+    if (!returnPermission.ok) return;
+
+    const barcode = String(req.body.barcode || "").trim();
+    const returnType = normalizeReturnType(req.body.return_type || req.body.returnType);
+    const returnReason = String(req.body.return_reason || req.body.returnReason || req.body.reason || "").trim();
+    const finalCompanyId = access.companyScope;
+
+    if (!barcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    if (!returnType) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid return_type is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const preview = await buildReturnPreview(connection, {
+      companyId: finalCompanyId,
+      barcode,
+      access,
+      forUpdate: true
+    });
+
+    if (!preview.requiresRefundWorkflow) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Unpaid/simple return should use Save Return",
+        preview
+      });
+    }
+
+    if (!preview.canCreateRefundPayable) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Refund payable cannot be created safely",
+        blockingReasons: preview.blockingReasons,
+        warnings: preview.warnings,
+        preview
+      });
+    }
+
+    const stockItem = preview.stock;
+    const saleItem = preview.saleItem;
+    const invoiceNumber = String(req.body.invoice_number || req.body.invoiceNumber || preview.invoiceNumber || "").trim();
+    const persistedBranchId = preview.branchId;
+
+    if (!stockItem || !saleItem || !invoiceNumber) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "No matching sold invoice item was found for this return"
+      });
+    }
+
+    if (invoiceNumber && preview.invoiceNumber && invoiceNumber !== preview.invoiceNumber) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Return invoice does not match the sold barcode"
+      });
+    }
+
+    const customerName = String(req.body.customer_name || req.body.customerName || saleItem?.customer_name || "").trim();
+    const productName = String(req.body.product_name || req.body.productName || stockItem.product_name || saleItem?.product_name || "").trim();
+    const sku = String(req.body.sku || stockItem.sku || saleItem?.sku || "").trim();
+    const size = String(req.body.size || stockItem.size || saleItem?.size || "").trim();
+    const weight = Number(req.body.weight || stockItem.weight || saleItem?.weight || 0);
+    const lotNumber = String(req.body.lot_number || req.body.lotNumber || stockItem.lot_number || saleItem?.lot_number || "").trim();
+    const refundCashAmount = toNumber(preview.estimatedRefundCashAmount);
+    const refundMetalWeight = toNumber(preview.estimatedRefundMetalWeight);
+    const refundModeHint = String(preview.refundModeHint || "UNKNOWN").trim().toUpperCase();
+    const nextStockStatus = returnType === "RETURN_TO_STOCK" ? "IN_STOCK" : "DAMAGED_RETURN";
+
+    if (returnType === "RETURN_TO_STOCK") {
+      await assertActiveBarcodeAvailable(finalCompanyId, {
+        ...stockItem,
+        status: "IN_STOCK",
+        stock_state: "IN_STOCK",
+        invoice_number: "",
+        deleted_at: null
+      }, {
+        db: connection,
+        excludeStockId: stockItem.id,
+        req,
+        access,
+        context: "CREATE_RETURN_REFUND_PAYABLE_RESTORE_TO_STOCK"
+      });
+
+      const [stockResult] = await connection.query(
+        `
+        UPDATE stock
+        SET status = 'IN_STOCK',
+            stock_state = 'IN_STOCK',
+            invoice_number = '',
+            sold_at = NULL
+        WHERE id = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
+        `,
+        [stockItem.id, finalCompanyId]
+      );
+      assertSingleStockRowAffected(stockResult);
+    } else {
+      const [stockResult] = await connection.query(
+        `
+        UPDATE stock
+        SET status = 'DAMAGED_RETURN',
+            stock_state = 'DAMAGED_RETURN'
+        WHERE id = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
+        `,
+        [stockItem.id, finalCompanyId]
+      );
+      assertSingleStockRowAffected(stockResult);
+    }
+
+    const transactionPosting = await postReturnRefundPayableToTransactionFoundation(connection, {
+      companyId: finalCompanyId,
+      createdBy: access.actingUserId,
+      saleItem,
+      invoiceNumber,
+      customerName,
+      mobile: saleItem?.sale_mobile || "",
+      gstNo: saleItem?.sale_gst_number || "",
+      returnType,
+      returnReason,
+      returnDate: getTodayDateOnly(),
+      productName,
+      barcode,
+      lotNumber,
+      weight,
+      branchId: persistedBranchId,
+      refundCashAmount,
+      refundMetalWeight,
+      refundModeHint
+    });
+
+    const [returnInsert] = await connection.query(
+      `
+      INSERT INTO return_history
+      (
+        barcode,
+        invoice_number,
+        customer_name,
+        product_name,
+        sku,
+        size,
+        weight,
+        lot_number,
+        return_type,
+        return_reason,
+        return_date,
+        branch_id,
+        company_id,
+        party_id,
+        estimated_amount,
+        transaction_id,
+        created_by,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [
+        barcode,
+        invoiceNumber,
+        customerName,
+        productName,
+        sku,
+        size,
+        Number.isNaN(weight) ? 0 : weight,
+        lotNumber,
+        returnType,
+        returnReason,
+        persistedBranchId,
+        finalCompanyId,
+        transactionPosting.partyId,
+        preview.refundEstimate?.estimatedReturnAmount || refundCashAmount,
+        transactionPosting.transactionId,
+        access.actingUserId
+      ]
+    );
+
+    const [payableInsert] = await connection.query(
+      `
+      INSERT INTO return_refund_payables
+      (
+        company_id,
+        return_id,
+        invoice_number,
+        sale_id,
+        barcode,
+        party_id,
+        product_name,
+        return_weight,
+        refund_cash_amount,
+        settled_cash_amount,
+        remaining_cash_amount,
+        refund_metal_weight,
+        settled_metal_weight,
+        remaining_metal_weight,
+        refund_mode_hint,
+        payable_status,
+        source_payment_status,
+        created_by,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, 'OPEN', ?, ?, NOW(), NOW())
+      `,
+      [
+        finalCompanyId,
+        returnInsert.insertId,
+        invoiceNumber,
+        saleItem.sale_id || null,
+        barcode,
+        transactionPosting.partyId,
+        productName,
+        Number.isNaN(weight) ? 0 : weight,
+        refundCashAmount,
+        refundCashAmount,
+        refundMetalWeight,
+        refundMetalWeight,
+        refundModeHint,
+        preview.settlementSummary?.paymentStatus || "",
+        access.actingUserId
+      ]
+    );
+
+    await connection.query(
+      `
+      UPDATE sales_items
+      SET item_status = ?,
+          return_type = ?,
+          returned_at = NOW(),
+          return_id = ?,
+          return_transaction_id = ?
+      WHERE id = ?
+      `,
+      [
+        returnType,
+        returnType,
+        returnInsert.insertId,
+        transactionPosting.transactionId,
+        saleItem.id
+      ]
+    );
+
+    await writeAuditLogSafe(connection, req, {
+      companyId: finalCompanyId,
+      userId: access.actingUserId ?? null,
+      actionType: "RETURN_REFUND_PAYABLE_CREATED",
+      entityType: "RETURN_REFUND_PAYABLE",
+      entityId: String(payableInsert.insertId || ""),
+      moduleName: "returns",
+      status: "success",
+      message: "Return refund payable created",
+      beforeData: {
+        stock: {
+          id: stockItem.id,
+          barcode: stockItem.barcode,
+          status: stockItem.status,
+          stock_state: stockItem.stock_state,
+          invoice_number: stockItem.invoice_number,
+          current_branch_id: stockItem.current_branch_id
+        },
+        settlementSummary: preview.settlementSummary
+      },
+      afterData: {
+        returnId: returnInsert.insertId,
+        payableId: payableInsert.insertId,
+        returnType,
+        invoiceNumber,
+        barcode,
+        branchId: persistedBranchId,
+        transactionId: transactionPosting.transactionId,
+        refundCashAmount,
+        refundMetalWeight,
+        refundModeHint,
+        payableStatus: "OPEN",
+        stockStatus: nextStockStatus,
+        stockState: nextStockStatus
+      }
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Refund payable created successfully. No refund payout has been posted.",
+      returnId: returnInsert.insertId,
+      payableId: payableInsert.insertId,
+      transactionId: transactionPosting.transactionId,
+      payable: {
+        id: payableInsert.insertId,
+        invoice_number: invoiceNumber,
+        barcode,
+        refund_cash_amount: refundCashAmount,
+        settled_cash_amount: 0,
+        remaining_cash_amount: refundCashAmount,
+        refund_metal_weight: refundMetalWeight,
+        settled_metal_weight: 0,
+        remaining_metal_weight: refundMetalWeight,
+        refund_mode_hint: refundModeHint,
+        payable_status: "OPEN"
+      }
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Create return refund payable error:", error);
+    return res.status(getBarcodeSafetyStatus(error)).json({
+      success: false,
+      message: getBarcodeSafetyMessage(error, "Refund payable creation failed"),
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/returns/refund-payables/:id/cash-refund", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const refundPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "RETURN_REFUND_SETTLED_CASH");
+    if (!refundPermission.ok) return;
+
+    const payableId = Number(req.params.id || 0);
+    const amount = toNumber(req.body?.amount);
+    const paymentMode = String(req.body?.paymentMode || req.body?.payment_mode || "CASH").trim().toUpperCase();
+    const externalReferenceNo = String(req.body?.referenceNo || req.body?.reference_no || "").trim();
+    const remarks = String(req.body?.remarks || "").trim();
+
+    if (!payableId) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund payable id is required"
+      });
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund amount must be greater than zero"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [payableRows] = await connection.query(
+      `
+      SELECT
+        rfp.*,
+        rh.branch_id AS return_branch_id,
+        rh.return_type,
+        rh.return_reason,
+        rh.estimated_amount AS return_estimated_amount
+      FROM return_refund_payables rfp
+      LEFT JOIN return_history rh
+        ON rh.id = rfp.return_id
+       AND rh.company_id = rfp.company_id
+      WHERE rfp.id = ?
+        AND rfp.company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [payableId, access.companyScope]
+    );
+
+    if (!payableRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Refund payable not found"
+      });
+    }
+
+    const payable = payableRows[0];
+    const payableStatus = String(payable.payable_status || "OPEN").trim().toUpperCase();
+    const refundModeHint = String(payable.refund_mode_hint || "UNKNOWN").trim().toUpperCase();
+    const returnBranchId = Number(payable.return_branch_id || 0) || null;
+
+    if (access.isBranchLocked && (!returnBranchId || Number(returnBranchId) !== Number(access.userBranchId || 0))) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "Refund payable belongs to another branch"
+      });
+    }
+
+    if (!["OPEN", "PARTIALLY_SETTLED"].includes(payableStatus)) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Refund payable is not open for cash settlement"
+      });
+    }
+
+    if (!["CASH", "MIXED"].includes(refundModeHint)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "This refund payable does not support cash refund settlement"
+      });
+    }
+
+    const refundCashAmount = toNumber(payable.refund_cash_amount);
+    const settledCashAmount = toNumber(payable.settled_cash_amount);
+    const storedRemainingCash = toNumber(payable.remaining_cash_amount);
+    const remainingCashAmount = storedRemainingCash > 0
+      ? storedRemainingCash
+      : Math.max(refundCashAmount - settledCashAmount, 0);
+
+    if (remainingCashAmount <= 0) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "No cash refund amount remains open"
+      });
+    }
+
+    if (amount > remainingCashAmount + 0.009) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Refund amount cannot exceed remaining cash payable"
+      });
+    }
+
+    const newSettledCashAmount = roundMoney(settledCashAmount + amount);
+    const newRemainingCashAmount = Math.max(roundMoney(refundCashAmount - newSettledCashAmount), 0);
+    const storedRemainingMetal = toNumber(payable.remaining_metal_weight);
+    const remainingMetalAmount = storedRemainingMetal > 0
+      ? storedRemainingMetal
+      : Math.max(toNumber(payable.refund_metal_weight) - toNumber(payable.settled_metal_weight), 0);
+    const hasMetalOutstanding = remainingMetalAmount > 0.0005;
+    const nextStatus =
+      newRemainingCashAmount <= 0.009
+        ? hasMetalOutstanding
+          ? "PARTIALLY_SETTLED"
+          : "SETTLED"
+        : "PARTIALLY_SETTLED";
+    const voucherNo = `CRF-${payable.invoice_number || payableId}-${Date.now()}`;
+    const payableReferenceNo = `RFPAYABLE-${payableId}`;
+    const partyId = Number(payable.party_id || 0);
+
+    if (!partyId) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Refund payable party is missing"
+      });
+    }
+
+    const [txnInsert] = await connection.query(
+      `
+      INSERT INTO transaction_master
+      (
+        company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+        status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+        remarks, note, created_by
+      )
+      VALUES (?, ?, CURDATE(), 'CASH_REFUND_PAID', ?, 'CUSTOMER', 'POSTED', ?, ?, 'return', ?, ?, ?, ?, ?)
+      `,
+      [
+        access.companyScope,
+        voucherNo,
+        partyId,
+        payableReferenceNo,
+        payable.invoice_number || "",
+        paymentMode || "CASH",
+        nextStatus,
+        remarks || "Cash refund paid against return payable",
+        externalReferenceNo ? `Reference ${externalReferenceNo}` : `Cash refund payable #${payableId}`,
+        access.actingUserId
+      ]
+    );
+    const transactionId = Number(txnInsert.insertId || 0);
+
+    await connection.query(
+      `
+      INSERT INTO transaction_lines
+      (
+        transaction_id, line_no, item_name, barcode, qty, line_amount, remarks
+      )
+      VALUES (?, 1, ?, ?, 1, ?, ?)
+      `,
+      [
+        transactionId,
+        payable.product_name || "Cash refund paid",
+        payable.barcode || "",
+        amount,
+        `Cash refund settlement for payable #${payableId}`
+      ]
+    );
+
+    await connection.query(
+      `
+      INSERT INTO invoice_transaction_link
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'CASH_REFUND_PAID', ?, ?)
+      `,
+      [
+        access.companyScope,
+        payable.invoice_number || "",
+        transactionId,
+        returnBranchId,
+        `Cash refund paid for payable #${payableId}`,
+        access.actingUserId
+      ]
+    );
+
+    await createCashLedgerEntry(connection, {
+      companyId: access.companyScope,
+      partyId,
+      transactionId,
+      entryDate: getTodayDateOnly(),
+      entryType: "DEBIT",
+      debitAmount: amount,
+      creditAmount: 0,
+      referenceType: "CASH_REFUND_PAID",
+      referenceNo: voucherNo,
+      remarks: remarks || `Cash refund paid for ${payable.invoice_number || payable.barcode || payableId}`,
+      createdBy: access.actingUserId
+    });
+
+    await connection.query(
+      `
+      UPDATE return_refund_payables
+      SET settled_cash_amount = ?,
+          remaining_cash_amount = ?,
+          payable_status = ?,
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [newSettledCashAmount, newRemainingCashAmount, nextStatus, payableId, access.companyScope]
+    );
+
+    await recalcPartyBalanceSummary(connection, access.companyScope, partyId, transactionId);
+
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: access.actingUserId ?? null,
+      actionType: "RETURN_REFUND_SETTLED_CASH",
+      entityType: "RETURN_REFUND_PAYABLE",
+      entityId: String(payableId),
+      moduleName: "returns",
+      status: "success",
+      message: "Cash refund paid against return payable",
+      beforeData: {
+        payableStatus,
+        settledCashAmount,
+        remainingCashAmount
+      },
+      afterData: {
+        transactionId,
+        amount,
+        paymentMode,
+        referenceNo: externalReferenceNo,
+        settledCashAmount: newSettledCashAmount,
+        remainingCashAmount: newRemainingCashAmount,
+        payableStatus: nextStatus
+      }
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Cash refund recorded successfully",
+      transactionId,
+      payable: {
+        id: payableId,
+        payable_status: nextStatus,
+        settled_cash_amount: newSettledCashAmount,
+        remaining_cash_amount: newRemainingCashAmount
+      }
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Cash refund settlement error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Cash refund settlement failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/returns/refund-payables/:id/metal-refund", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
+    const refundPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "RETURN_REFUND_SETTLED_METAL");
+    if (!refundPermission.ok) return;
+
+    const payableId = Number(req.params.id || 0);
+    const metalType = normalizeMetalType(req.body?.metalType || req.body?.metal_type);
+    const grossWeight = toNumber(req.body?.grossWeight ?? req.body?.gross_weight);
+    const purity = toNumber(req.body?.purity);
+    const fineWeight = toNumber(req.body?.fineWeight ?? req.body?.fine_weight) || calculateFineWeight(grossWeight, purity);
+    const rate = toNumber(req.body?.rate);
+    const remarks = String(req.body?.remarks || "").trim();
+
+    if (!payableId) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund payable id is required"
+      });
+    }
+
+    if (!metalType) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid metal type is required"
+      });
+    }
+
+    if (grossWeight <= 0 || fineWeight <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Metal refund weight must be greater than zero"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [payableRows] = await connection.query(
+      `
+      SELECT
+        rfp.*,
+        rh.branch_id AS return_branch_id,
+        rh.return_type,
+        rh.return_reason,
+        rh.estimated_amount AS return_estimated_amount
+      FROM return_refund_payables rfp
+      LEFT JOIN return_history rh
+        ON rh.id = rfp.return_id
+       AND rh.company_id = rfp.company_id
+      WHERE rfp.id = ?
+        AND rfp.company_id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [payableId, access.companyScope]
+    );
+
+    if (!payableRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Refund payable not found"
+      });
+    }
+
+    const payable = payableRows[0];
+    const payableStatus = String(payable.payable_status || "OPEN").trim().toUpperCase();
+    const refundModeHint = String(payable.refund_mode_hint || "UNKNOWN").trim().toUpperCase();
+    const returnBranchId = Number(payable.return_branch_id || 0) || null;
+
+    if (access.isBranchLocked && (!returnBranchId || Number(returnBranchId) !== Number(access.userBranchId || 0))) {
+      await connection.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "Refund payable belongs to another branch"
+      });
+    }
+
+    if (!["OPEN", "PARTIALLY_SETTLED"].includes(payableStatus)) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Refund payable is not open for metal settlement"
+      });
+    }
+
+    if (!["METAL", "MIXED"].includes(refundModeHint)) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "This refund payable does not support metal refund settlement"
+      });
+    }
+
+    const refundMetalWeight = toNumber(payable.refund_metal_weight);
+    const settledMetalWeight = toNumber(payable.settled_metal_weight);
+    const storedRemainingMetal = toNumber(payable.remaining_metal_weight);
+    const remainingMetalWeight = storedRemainingMetal > 0
+      ? storedRemainingMetal
+      : Math.max(refundMetalWeight - settledMetalWeight, 0);
+
+    if (remainingMetalWeight <= 0.0005) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "No metal refund amount remains open"
+      });
+    }
+
+    if (grossWeight > remainingMetalWeight + 0.0005) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Metal refund weight cannot exceed remaining metal obligation"
+      });
+    }
+
+    const newSettledMetalWeight = Math.round((settledMetalWeight + grossWeight + Number.EPSILON) * 1000) / 1000;
+    const newRemainingMetalWeight = Math.max(Math.round((refundMetalWeight - newSettledMetalWeight + Number.EPSILON) * 1000) / 1000, 0);
+    const remainingCashAmount = toNumber(payable.remaining_cash_amount) > 0
+      ? toNumber(payable.remaining_cash_amount)
+      : Math.max(toNumber(payable.refund_cash_amount) - toNumber(payable.settled_cash_amount), 0);
+    const nextStatus =
+      newRemainingMetalWeight <= 0.0005
+        ? remainingCashAmount <= 0.009
+          ? "SETTLED"
+          : "PARTIALLY_SETTLED"
+        : "PARTIALLY_SETTLED";
+    const voucherNo = `MRF-${payable.invoice_number || payableId}-${Date.now()}`;
+    const payableReferenceNo = `RFPAYABLE-${payableId}`;
+    const partyId = Number(payable.party_id || 0);
+
+    if (!partyId) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Refund payable party is missing"
+      });
+    }
+
+    const [txnInsert] = await connection.query(
+      `
+      INSERT INTO transaction_master
+      (
+        company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+        status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+        remarks, note, created_by
+      )
+      VALUES (?, ?, CURDATE(), 'METAL_REFUND_GIVEN', ?, 'CUSTOMER', 'POSTED', ?, ?, 'return', 'METAL', ?, ?, ?, ?)
+      `,
+      [
+        access.companyScope,
+        voucherNo,
+        partyId,
+        payableReferenceNo,
+        payable.invoice_number || "",
+        nextStatus,
+        remarks || "Metal refund given against return payable",
+        `Metal refund ${grossWeight.toFixed(3)}g ${metalType} for payable #${payableId}`,
+        access.actingUserId
+      ]
+    );
+    const transactionId = Number(txnInsert.insertId || 0);
+
+    await connection.query(
+      `
+      INSERT INTO transaction_lines
+      (
+        transaction_id, line_no, item_name, barcode, metal_type, purity,
+        gross_weight, fine_weight, qty, rate_per_gram, metal_value, line_amount, remarks
+      )
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        transactionId,
+        payable.product_name || "Metal refund given",
+        payable.barcode || "",
+        metalType,
+        purity,
+        grossWeight,
+        fineWeight,
+        grossWeight,
+        rate,
+        fineWeight * rate,
+        fineWeight * rate,
+        `Metal refund settlement for payable #${payableId}`
+      ]
+    );
+
+    await connection.query(
+      `
+      INSERT INTO invoice_transaction_link
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'METAL_REFUND_GIVEN', ?, ?)
+      `,
+      [
+        access.companyScope,
+        payable.invoice_number || "",
+        transactionId,
+        returnBranchId,
+        `Metal refund given for payable #${payableId}`,
+        access.actingUserId
+      ]
+    );
+
+    await createMetalLedgerEntry(connection, {
+      companyId: access.companyScope,
+      partyId,
+      transactionId,
+      entryDate: getTodayDateOnly(),
+      metalType,
+      entryType: "OUT",
+      purity,
+      grossIn: 0,
+      grossOut: grossWeight,
+      fineIn: 0,
+      fineOut: fineWeight,
+      referenceType: "METAL_REFUND_GIVEN",
+      referenceNo: voucherNo,
+      lotNo: "",
+      remarks: remarks || `Metal refund given for ${payable.invoice_number || payable.barcode || payableId}`,
+      createdBy: access.actingUserId
+    });
+
+    const cashValuationAmount = rate > 0 ? roundMoney(fineWeight * rate) : 0;
+    if (cashValuationAmount > 0) {
+      await createCashLedgerEntry(connection, {
+        companyId: access.companyScope,
+        partyId,
+        transactionId,
+        entryDate: getTodayDateOnly(),
+        entryType: "DEBIT",
+        debitAmount: cashValuationAmount,
+        creditAmount: 0,
+        referenceType: "METAL_REFUND_GIVEN",
+        referenceNo: voucherNo,
+        remarks: `Cash valuation debit for metal refund ${grossWeight.toFixed(3)}g ${metalType}`,
+        createdBy: access.actingUserId
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE return_refund_payables
+      SET settled_metal_weight = ?,
+          remaining_metal_weight = ?,
+          payable_status = ?,
+          updated_at = NOW()
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [newSettledMetalWeight, newRemainingMetalWeight, nextStatus, payableId, access.companyScope]
+    );
+
+    await recalcPartyBalanceSummary(connection, access.companyScope, partyId, transactionId);
+
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: access.actingUserId ?? null,
+      actionType: "RETURN_REFUND_SETTLED_METAL",
+      entityType: "RETURN_REFUND_PAYABLE",
+      entityId: String(payableId),
+      moduleName: "returns",
+      status: "success",
+      message: "Metal refund given against return payable",
+      beforeData: {
+        payableStatus,
+        settledMetalWeight,
+        remainingMetalWeight
+      },
+      afterData: {
+        transactionId,
+        metalType,
+        grossWeight,
+        fineWeight,
+        purity,
+        rate,
+        cashValuationAmount,
+        settledMetalWeight: newSettledMetalWeight,
+        remainingMetalWeight: newRemainingMetalWeight,
+        payableStatus: nextStatus
+      }
+    });
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Metal refund recorded successfully",
+      transactionId,
+      payable: {
+        id: payableId,
+        payable_status: nextStatus,
+        settled_metal_weight: newSettledMetalWeight,
+        remaining_metal_weight: newRemainingMetalWeight
+      }
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
+    console.error("Metal refund settlement error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Metal refund settlement failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/returns/refund-payables/:id/reconciliation", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const payableId = Number(req.params.id || 0);
+    if (!payableId) {
+      return res.status(400).json({
+        success: false,
+        message: "Refund payable id is required"
+      });
+    }
+
+    const [payableRows] = await pool.query(
+      `
+      SELECT
+        rfp.*,
+        rh.return_type,
+        rh.return_reason,
+        rh.estimated_amount AS return_estimated_amount,
+        rh.transaction_id AS return_transaction_id,
+        rh.branch_id AS return_branch_id,
+        rh.return_date,
+        rh.created_at AS return_created_at
+      FROM return_refund_payables rfp
+      LEFT JOIN return_history rh
+        ON rh.id = rfp.return_id
+       AND rh.company_id = rfp.company_id
+      WHERE rfp.id = ?
+        AND rfp.company_id = ?
+      LIMIT 1
+      `,
+      [payableId, access.companyScope]
+    );
+
+    if (!payableRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Refund payable not found"
+      });
+    }
+
+    const payable = payableRows[0];
+    const returnBranchId = Number(payable.return_branch_id || 0) || null;
+    if (access.isBranchLocked && (!returnBranchId || Number(returnBranchId) !== Number(access.userBranchId || 0))) {
+      return res.status(403).json({
+        success: false,
+        message: "Refund payable belongs to another branch"
+      });
+    }
+
+    const [invoiceRows] = await pool.query(
+      `
+      SELECT *
+      FROM sales_history
+      WHERE company_id = ?
+        AND invoice_number = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [access.companyScope, payable.invoice_number || ""]
+    );
+
+    const [settlementRows] = await pool.query(
+      `
+      SELECT
+        tm.id AS transaction_id,
+        tm.voucher_no,
+        tm.voucher_date,
+        tm.payment_mode,
+        tm.payment_status,
+        tm.reference_no,
+        tm.remarks,
+        tm.note,
+        COALESCE(cl.debit_amount, 0) AS cash_debit,
+        COALESCE(cl.credit_amount, 0) AS cash_credit,
+        cl.id AS cash_ledger_id,
+        cl.running_balance
+      FROM transaction_master tm
+      INNER JOIN invoice_transaction_link itl
+        ON itl.transaction_id = tm.id
+       AND itl.company_id = tm.company_id
+      LEFT JOIN cash_ledger cl
+        ON cl.transaction_id = tm.id
+       AND cl.company_id = tm.company_id
+      WHERE tm.company_id = ?
+        AND itl.invoice_no = ?
+        AND tm.transaction_type = 'CASH_REFUND_PAID'
+        AND tm.reference_no = ?
+      ORDER BY tm.id ASC
+      `,
+      [access.companyScope, payable.invoice_number || "", `RFPAYABLE-${payableId}`]
+    );
+
+    const [metalSettlementRows] = await pool.query(
+      `
+      SELECT
+        tm.id AS transaction_id,
+        tm.voucher_no,
+        tm.voucher_date,
+        tm.payment_status,
+        tm.reference_no,
+        tm.remarks,
+        tm.note,
+        COALESCE(ml.metal_type, '') AS metal_type,
+        COALESCE(ml.purity, 0) AS purity,
+        COALESCE(ml.gross_out, 0) AS gross_out,
+        COALESCE(ml.fine_out, 0) AS fine_out,
+        COALESCE(ml.gross_in, 0) AS gross_in,
+        COALESCE(ml.fine_in, 0) AS fine_in,
+        ml.id AS metal_ledger_id,
+        ml.running_gross_balance,
+        ml.running_fine_balance,
+        COALESCE(cl.debit_amount, 0) AS cash_valuation_debit
+      FROM transaction_master tm
+      INNER JOIN invoice_transaction_link itl
+        ON itl.transaction_id = tm.id
+       AND itl.company_id = tm.company_id
+      LEFT JOIN metal_ledger ml
+        ON ml.transaction_id = tm.id
+       AND ml.company_id = tm.company_id
+      LEFT JOIN cash_ledger cl
+        ON cl.transaction_id = tm.id
+       AND cl.company_id = tm.company_id
+      WHERE tm.company_id = ?
+        AND itl.invoice_no = ?
+        AND tm.transaction_type = 'METAL_REFUND_GIVEN'
+        AND tm.reference_no = ?
+      ORDER BY tm.id ASC
+      `,
+      [access.companyScope, payable.invoice_number || "", `RFPAYABLE-${payableId}`]
+    );
+
+    const refundCashAmount = toNumber(payable.refund_cash_amount);
+    const settledCashAmount = toNumber(payable.settled_cash_amount);
+    const remainingCashAmount = toNumber(payable.remaining_cash_amount) > 0
+      ? toNumber(payable.remaining_cash_amount)
+      : Math.max(refundCashAmount - settledCashAmount, 0);
+    const refundMetalWeight = toNumber(payable.refund_metal_weight);
+    const settledMetalWeight = toNumber(payable.settled_metal_weight);
+    const remainingMetalWeight = toNumber(payable.remaining_metal_weight) > 0
+      ? toNumber(payable.remaining_metal_weight)
+      : Math.max(refundMetalWeight - settledMetalWeight, 0);
+    const saleReturnAmount = toNumber(payable.return_estimated_amount);
+    const dueAdjusted = Math.max(saleReturnAmount - refundCashAmount, 0);
+    const mixedSettlementState = {
+      refundModeHint: String(payable.refund_mode_hint || "UNKNOWN").trim().toUpperCase(),
+      cashSettled: remainingCashAmount <= 0.009,
+      metalSettled: remainingMetalWeight <= 0.0005,
+      fullySettled: remainingCashAmount <= 0.009 && remainingMetalWeight <= 0.0005
+    };
+
+    return res.json({
+      success: true,
+      invoice: invoiceRows[0] || null,
+      return: {
+        id: payable.return_id,
+        barcode: payable.barcode,
+        invoice_number: payable.invoice_number,
+        return_type: payable.return_type || "",
+        return_reason: payable.return_reason || "",
+        return_date: payable.return_date || payable.return_created_at || null,
+        estimated_amount: saleReturnAmount
+      },
+      payable: {
+        ...payable,
+        refund_cash_amount: refundCashAmount,
+        settled_cash_amount: settledCashAmount,
+        remaining_cash_amount: remainingCashAmount,
+        refund_metal_weight: refundMetalWeight,
+        settled_metal_weight: settledMetalWeight,
+        remaining_metal_weight: remainingMetalWeight
+      },
+      saleReturnAmount,
+      dueAdjusted,
+      refundPayable: refundCashAmount,
+      settledCash: settledCashAmount,
+      remainingCash: remainingCashAmount,
+      refundMetalWeight,
+      settledMetal: settledMetalWeight,
+      remainingMetal: remainingMetalWeight,
+      settlementSummary: {
+        cash: {
+          payable: refundCashAmount,
+          settled: settledCashAmount,
+          remaining: remainingCashAmount
+        },
+        metal: {
+          payable: refundMetalWeight,
+          settled: settledMetalWeight,
+          remaining: remainingMetalWeight
+        },
+        mixedSettlementState
+      },
+      settlementHistory: settlementRows,
+      cashSettlementHistory: settlementRows,
+      metalRefundHistory: metalSettlementRows
+    });
+  } catch (error) {
+    console.error("Refund payable reconciliation error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Refund payable reconciliation failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
@@ -18887,48 +20717,42 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const stockItem = await assertStockBranchAccess(connection, access, {
+    const preview = await buildReturnPreview(connection, {
+      companyId: finalCompanyId,
       barcode,
-      action: returnType === "RETURN_TO_STOCK" ? "SAVE_RETURN_TO_STOCK" : "SAVE_DAMAGED_RETURN",
-      requireSellable: true,
-      allowOwnerAllBranch: true,
-      forUpdate: true,
-      req
+      access,
+      forUpdate: true
     });
-    const currentStatus = String(stockItem.status || "").trim().toUpperCase();
 
-    if (currentStatus === "DELETED") {
+    if (!preview.canReturn) {
       await connection.rollback();
-      return res.status(400).json({
+      const isSettlementBlocked = Boolean(preview.settlementSummary?.isSettlementBlocked);
+      return res.status(409).json({
         success: false,
-        message: "You cannot save a return for a deleted stock item"
+        message: isSettlementBlocked
+          ? "Paid/settled invoice return requires refund workflow"
+          : "Return cannot be saved safely",
+        blockingReasons: preview.blockingReasons,
+        warnings: preview.warnings,
+        preview
       });
     }
 
-    if (returnType === "RETURN_TO_STOCK" && currentStatus === "IN_STOCK") {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "This item is already marked as IN_STOCK"
-      });
-    }
-
-    if (returnType === "DAMAGED_RETURN" && currentStatus === "DAMAGED_RETURN") {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "This item is already marked as DAMAGED_RETURN"
-      });
-    }
-
-    const saleItem = await getLatestSaleItemByBarcode(connection, barcode, finalCompanyId);
+    const stockItem = preview.stock;
+    const saleItem = preview.saleItem;
     const invoiceNumber = String(
       req.body.invoice_number ||
         req.body.invoiceNumber ||
-        stockItem.invoice_number ||
-        saleItem?.invoice_number ||
+        preview.invoiceNumber ||
         ""
     ).trim();
+    if (invoiceNumber && preview.invoiceNumber && invoiceNumber !== preview.invoiceNumber) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Return invoice does not match the sold barcode"
+      });
+    }
     const customerName = String(
       req.body.customer_name ||
         req.body.customerName ||
@@ -18950,7 +20774,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     ).trim();
     const saleStatus = String(saleItem?.sale_status || "").trim().toUpperCase();
     const saleItemStatus = String(saleItem?.item_status || "").trim().toUpperCase();
-    const persistedBranchId = resolveReturnPersistenceBranch(saleItem, stockItem, access);
+    const persistedBranchId = preview.branchId;
 
     if (!saleItem || !invoiceNumber) {
       await connection.rollback();
@@ -19001,21 +20825,22 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
             stock_state = 'IN_STOCK',
             invoice_number = '',
             sold_at = NULL
-        WHERE barcode = ? AND company_id = ?
+        WHERE id = ? AND company_id = ?
           ${getSellableStockFilterSql()}
         `,
-        [barcode, finalCompanyId]
+        [stockItem.id, finalCompanyId]
       );
       assertSingleStockRowAffected(stockResult);
     } else {
       const [stockResult] = await connection.query(
         `
         UPDATE stock
-        SET status = 'DAMAGED_RETURN'
-        WHERE barcode = ? AND company_id = ?
+        SET status = 'DAMAGED_RETURN',
+            stock_state = 'DAMAGED_RETURN'
+        WHERE id = ? AND company_id = ?
           ${getSellableStockFilterSql()}
         `,
-        [barcode, finalCompanyId]
+        [stockItem.id, finalCompanyId]
       );
       assertSingleStockRowAffected(stockResult);
     }
@@ -19103,6 +20928,43 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       ]
     );
 
+    await writeAuditLogSafe(connection, req, {
+      companyId: finalCompanyId,
+      userId: access.actingUserId ?? null,
+      actionType: "RETURN_CREATED",
+      entityType: "RETURN",
+      entityId: String(returnInsert.insertId || ""),
+      moduleName: "returns",
+      status: "success",
+      message: "Return created",
+      beforeData: {
+        stock: {
+          id: stockItem.id,
+          barcode: stockItem.barcode,
+          status: stockItem.status,
+          stock_state: stockItem.stock_state,
+          invoice_number: stockItem.invoice_number,
+          current_branch_id: stockItem.current_branch_id
+        },
+        saleItem: {
+          id: saleItem.id,
+          invoice_number: saleItem.invoice_number,
+          item_status: saleItem.item_status,
+          branch_id: saleItem.branch_id
+        }
+      },
+      afterData: {
+        returnId: returnInsert.insertId,
+        returnType,
+        invoiceNumber,
+        barcode,
+        branchId: persistedBranchId,
+        transactionId: transactionPosting.transactionId,
+        stockStatus: nextStockStatus,
+        stockState: nextStockStatus
+      }
+    });
+
     await connection.commit();
 
     return res.json({
@@ -19146,22 +21008,31 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
 
 app.get("/getReturns", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
     }
-    if (access.isSuperAdmin) {
-      return sendSuperAdminReadOnlyError(res);
-    }
 
     const companyId = access.companyScope;
-    const whereClause = companyId !== null ? "WHERE rh.company_id = ?" : "";
-    const params = companyId !== null ? [companyId] : [];
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "GET_RETURNS" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
+    const whereParts = [];
+    const params = [];
+    if (companyId !== null) {
+      whereParts.push("rh.company_id = ?");
+      params.push(companyId);
+    }
+    appendSalesItemBranchScope(whereParts, params, branchScope, { itemAlias: "rh" });
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
     const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 1000 });
 
     const [rows] = await pool.query(
@@ -24033,65 +25904,9 @@ app.put("/returnItem/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWNER"
     if (!access.ok) {
       return sendAccessError(res, access);
     }
-    if (access.isSuperAdmin) {
-      return sendSuperAdminReadOnlyError(res);
-    }
-    const returnPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "RETURN_ITEM_RESTORE_TO_STOCK");
-    if (!returnPermission.ok) return;
-
-    if (!barcode) {
-      return res.status(400).json({
-        success: false,
-        message: "Barcode is required"
-      });
-    }
-
-    const companyId = access.companyScope;
-    const stockRow = await assertStockBranchAccess(pool, access, {
-      barcode,
-      action: "RETURN_ITEM_RESTORE_TO_STOCK",
-      requireSellable: true,
-      allowOwnerAllBranch: true,
-      req
-    });
-
-    await assertActiveBarcodeAvailable(companyId, {
-      ...stockRow,
-      status: "IN_STOCK",
-      stock_state: "IN_STOCK",
-      invoice_number: "",
-      deleted_at: null
-    }, {
-      db: pool,
-      excludeStockId: stockRow.id,
-      req,
-      access,
-      context: "RETURN_ITEM_RESTORE_TO_STOCK"
-    });
-
-    const [result] = await pool.query(
-      `
-      UPDATE stock
-      SET status = 'IN_STOCK',
-          stock_state = 'IN_STOCK',
-          invoice_number = '',
-          sold_at = NULL
-      WHERE id = ? AND company_id = ?
-      `,
-      [stockRow.id, companyId]
-    );
-    const affectedRows = assertSingleStockRowAffected(result);
-
-    if (affectedRows === 0) {
-      return res.json({
-        success: false,
-        message: "Item not found"
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: "Item returned successfully"
+    return res.status(410).json({
+      success: false,
+      message: "Use /saveReturn return workflow"
     });
   } catch (error) {
     console.error("Return item error:", error);

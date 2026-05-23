@@ -183,6 +183,76 @@
       font-size: 14px;
     }
 
+    .settlement-panel {
+      margin-top: 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      background: #ffffff;
+      padding: 14px;
+    }
+
+    .settlement-panel.blocked {
+      border-color: #fecaca;
+      background: #fff7f7;
+    }
+
+    .settlement-panel h4 {
+      margin: 0 0 10px;
+      color: #334155;
+      font-size: 14px;
+    }
+
+    .settlement-status {
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #ecfdf5;
+      color: #166534;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .settlement-panel.blocked .settlement-status {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .settlement-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .settlement-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fcfcfd;
+    }
+
+    .settlement-item span {
+      display: block;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 800;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .settlement-item strong {
+      display: block;
+      color: #111827;
+      font-size: 14px;
+      word-break: break-word;
+    }
+
+    .settlement-reasons {
+      margin: 12px 0 0;
+      color: #991b1b;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
     @media (max-width: 1100px) {
       .return-layout,
       .summary-row.return-summary-row {
@@ -191,7 +261,8 @@
     }
 
     @media (max-width: 720px) {
-      .detail-grid {
+      .detail-grid,
+      .settlement-list {
         grid-template-columns: 1fr;
       }
     }
@@ -402,9 +473,148 @@
                 </div>
               </div>
 
+              <div id="settlementSummaryPanel" class="settlement-panel" hidden>
+                <h4>Settlement Summary</h4>
+                <p id="settlementStatusMessage" class="settlement-status">Unpaid/simple return is eligible.</p>
+                <div class="settlement-list">
+                  <div class="settlement-item">
+                    <span>Invoice Total</span>
+                    <strong id="settlementInvoiceTotal">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Paid Amount</span>
+                    <strong id="settlementPaidAmount">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Due Amount</span>
+                    <strong id="settlementDueAmount">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Payment Status</span>
+                    <strong id="settlementPaymentStatus">-</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Cash Ledger</span>
+                    <strong id="settlementCashImpact">Debit 0.00 / Credit 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Metal Ledger</span>
+                    <strong id="settlementMetalImpact">No rows</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Refund Mode</span>
+                    <strong id="settlementRefundMode">-</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Cash Payable</span>
+                    <strong id="settlementRefundCash">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Metal Payable</span>
+                    <strong id="settlementRefundMetal">0.000 g</strong>
+                  </div>
+                </div>
+                <p id="settlementBlockingReasons" class="settlement-reasons" hidden></p>
+              </div>
+
               <div class="btn-row" style="margin-top:16px;">
-                <button type="button" class="primary-btn" onclick="saveReturnEntry()">Save Return</button>
+                <button type="button" id="saveReturnBtn" class="primary-btn" onclick="saveReturnEntry()">Save Return</button>
+                <button type="button" id="createRefundPayableBtn" class="primary-btn" onclick="createRefundPayableEntry()" style="display:none;">Create Refund Payable</button>
                 <button type="button" class="secondary-btn" onclick="clearReturnForm()">Clear</button>
+              </div>
+
+              <div id="cashRefundPanel" class="settlement-panel" hidden>
+                <h4>Cash Refund</h4>
+                <div class="settlement-list">
+                  <div class="settlement-item">
+                    <span>Payable Amount</span>
+                    <strong id="cashRefundPayableAmount">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Settled Amount</span>
+                    <strong id="cashRefundSettledAmount">Rs. 0.00</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Remaining Amount</span>
+                    <strong id="cashRefundRemainingAmount">Rs. 0.00</strong>
+                  </div>
+                </div>
+                <div class="form-grid" style="margin-top:12px;">
+                  <div class="input-box">
+                    <label for="cashRefundAmount">Amount</label>
+                    <input type="number" id="cashRefundAmount" min="0" step="0.01" />
+                  </div>
+                  <div class="input-box">
+                    <label for="cashRefundMode">Payment Mode</label>
+                    <select id="cashRefundMode">
+                      <option value="CASH">CASH</option>
+                      <option value="BANK">BANK</option>
+                      <option value="UPI">UPI</option>
+                    </select>
+                  </div>
+                  <div class="input-box">
+                    <label for="cashRefundReference">Reference No</label>
+                    <input type="text" id="cashRefundReference" placeholder="Optional" />
+                  </div>
+                  <div class="input-box">
+                    <label for="cashRefundRemarks">Remarks</label>
+                    <input type="text" id="cashRefundRemarks" placeholder="Optional" />
+                  </div>
+                </div>
+                <div class="btn-row" style="margin-top:12px;">
+                  <button type="button" id="cashRefundBtn" class="primary-btn" onclick="submitCashRefund()">Cash Refund</button>
+                </div>
+              </div>
+
+              <div id="metalRefundPanel" class="settlement-panel" hidden>
+                <h4>Metal Refund</h4>
+                <div class="settlement-list">
+                  <div class="settlement-item">
+                    <span>Metal Due</span>
+                    <strong id="metalRefundDue">0.000 g</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Settled Metal</span>
+                    <strong id="metalRefundSettled">0.000 g</strong>
+                  </div>
+                  <div class="settlement-item">
+                    <span>Remaining Metal</span>
+                    <strong id="metalRefundRemaining">0.000 g</strong>
+                  </div>
+                </div>
+                <div class="form-grid" style="margin-top:12px;">
+                  <div class="input-box">
+                    <label for="metalRefundType">Metal Type</label>
+                    <select id="metalRefundType">
+                      <option value="GOLD">GOLD</option>
+                      <option value="SILVER">SILVER</option>
+                    </select>
+                  </div>
+                  <div class="input-box">
+                    <label for="metalRefundGross">Gross Weight</label>
+                    <input type="number" id="metalRefundGross" min="0" step="0.001" />
+                  </div>
+                  <div class="input-box">
+                    <label for="metalRefundPurity">Purity</label>
+                    <input type="number" id="metalRefundPurity" min="0" step="0.001" />
+                  </div>
+                  <div class="input-box">
+                    <label for="metalRefundFine">Fine Weight</label>
+                    <input type="number" id="metalRefundFine" min="0" step="0.001" />
+                  </div>
+                  <div class="input-box">
+                    <label for="metalRefundRate">Rate</label>
+                    <input type="number" id="metalRefundRate" min="0" step="0.01" value="0" />
+                  </div>
+                  <div class="input-box">
+                    <label for="metalRefundRemarks">Remarks</label>
+                    <input type="text" id="metalRefundRemarks" placeholder="Optional" />
+                  </div>
+                </div>
+                <p id="metalRefundHistory" class="muted-help">No metal refund history yet.</p>
+                <div class="btn-row" style="margin-top:12px;">
+                  <button type="button" id="metalRefundBtn" class="primary-btn" onclick="submitMetalRefund()">Metal Refund</button>
+                </div>
               </div>
             </div>
 
@@ -511,6 +721,8 @@
     const API_BASE = window.ERP_API_BASE;
     const RETURN_PAGE_LIMIT = 100;
     let selectedReturnItem = null;
+    let selectedReturnPreview = null;
+    let activeRefundPayable = null;
     let returnCurrentPage = 1;
     let returnHasNextPage = false;
 
@@ -547,6 +759,21 @@
 
     function safeText(value) {
       return String(value ?? "").trim();
+    }
+
+    function escapeHtml(value) {
+      return safeText(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function formatMoney(value) {
+      const amount = Number(value || 0);
+      return `Rs. ${(Number.isFinite(amount) ? amount : 0).toFixed(2)}`;
     }
 
     const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
@@ -650,6 +877,183 @@
       return params;
     }
 
+    function setSaveReturnEnabled(enabled) {
+      const button = document.getElementById("saveReturnBtn");
+      if (!button) return;
+      button.disabled = !enabled;
+      button.style.display = enabled ? "" : "none";
+    }
+
+    function setRefundPayableEnabled(enabled) {
+      const button = document.getElementById("createRefundPayableBtn");
+      if (!button) return;
+      button.disabled = !enabled;
+      button.style.display = enabled ? "" : "none";
+    }
+
+    function clearSettlementSummary() {
+      selectedReturnPreview = null;
+      activeRefundPayable = null;
+      const panel = document.getElementById("settlementSummaryPanel");
+      const cashPanel = document.getElementById("cashRefundPanel");
+      const metalPanel = document.getElementById("metalRefundPanel");
+      const reasons = document.getElementById("settlementBlockingReasons");
+      if (panel) {
+        panel.hidden = true;
+        panel.classList.remove("blocked");
+      }
+      if (cashPanel) {
+        cashPanel.hidden = true;
+      }
+      if (metalPanel) {
+        metalPanel.hidden = true;
+      }
+      if (reasons) {
+        reasons.hidden = true;
+        reasons.textContent = "";
+      }
+      setSaveReturnEnabled(false);
+      setRefundPayableEnabled(false);
+    }
+
+    function getPayableRemainingCash(payable) {
+      const total = Number(payable?.refund_cash_amount || 0);
+      const settled = Number(payable?.settled_cash_amount || 0);
+      const storedRemaining = Number(payable?.remaining_cash_amount || 0);
+      return storedRemaining > 0 ? storedRemaining : Math.max(total - settled, 0);
+    }
+
+    function renderCashRefundPanel(payable) {
+      const panel = document.getElementById("cashRefundPanel");
+      if (!panel) return;
+
+      const mode = safeText(payable?.refund_mode_hint).toUpperCase();
+      const status = safeText(payable?.payable_status || "OPEN").toUpperCase();
+      const remaining = getPayableRemainingCash(payable);
+      const canCashRefund = payable && ["CASH", "MIXED"].includes(mode) && ["OPEN", "PARTIALLY_SETTLED"].includes(status) && remaining > 0.009;
+
+      activeRefundPayable = canCashRefund ? payable : null;
+      panel.hidden = !canCashRefund;
+      if (!canCashRefund) return;
+
+      document.getElementById("cashRefundPayableAmount").textContent = formatMoney(payable.refund_cash_amount);
+      document.getElementById("cashRefundSettledAmount").textContent = formatMoney(payable.settled_cash_amount);
+      document.getElementById("cashRefundRemainingAmount").textContent = formatMoney(remaining);
+      document.getElementById("cashRefundAmount").value = remaining.toFixed(2);
+      document.getElementById("cashRefundMode").value = "CASH";
+      document.getElementById("cashRefundReference").value = "";
+      document.getElementById("cashRefundRemarks").value = "";
+    }
+
+    function getPayableRemainingMetal(payable) {
+      const total = Number(payable?.refund_metal_weight || 0);
+      const settled = Number(payable?.settled_metal_weight || 0);
+      const storedRemaining = Number(payable?.remaining_metal_weight || 0);
+      return storedRemaining > 0 ? storedRemaining : Math.max(total - settled, 0);
+    }
+
+    function renderMetalRefundPanel(payable) {
+      const panel = document.getElementById("metalRefundPanel");
+      if (!panel) return;
+
+      const mode = safeText(payable?.refund_mode_hint).toUpperCase();
+      const status = safeText(payable?.payable_status || "OPEN").toUpperCase();
+      const remaining = getPayableRemainingMetal(payable);
+      const canMetalRefund = payable && ["METAL", "MIXED"].includes(mode) && ["OPEN", "PARTIALLY_SETTLED"].includes(status) && remaining > 0.0005;
+
+      if (canMetalRefund) activeRefundPayable = payable;
+      panel.hidden = !canMetalRefund;
+      if (!canMetalRefund) return;
+
+      const purity = Number(document.getElementById("metalRefundPurity")?.value || 0);
+      document.getElementById("metalRefundDue").textContent = `${Number(payable.refund_metal_weight || 0).toFixed(3)} g`;
+      document.getElementById("metalRefundSettled").textContent = `${Number(payable.settled_metal_weight || 0).toFixed(3)} g`;
+      document.getElementById("metalRefundRemaining").textContent = `${remaining.toFixed(3)} g`;
+      document.getElementById("metalRefundGross").value = remaining.toFixed(3);
+      document.getElementById("metalRefundFine").value = purity > 0 ? ((remaining * purity) / 100).toFixed(3) : remaining.toFixed(3);
+      document.getElementById("metalRefundRate").value = "0";
+      document.getElementById("metalRefundRemarks").value = "";
+      loadMetalRefundHistory(payable.id);
+    }
+
+    async function loadMetalRefundHistory(payableId) {
+      const box = document.getElementById("metalRefundHistory");
+      if (!box || !payableId) return;
+      try {
+        const res = await fetch(`${API_BASE}/returns/refund-payables/${payableId}/reconciliation`, { cache: "no-store" });
+        const data = await res.json();
+        const rows = Array.isArray(data?.metalRefundHistory) ? data.metalRefundHistory : [];
+        box.textContent = rows.length
+          ? rows.map((row) => `${safeText(row.voucher_no || "-")} ${Number(row.gross_out || 0).toFixed(3)}g`).join(" | ")
+          : "No metal refund history yet.";
+      } catch (_) {
+        box.textContent = "Metal refund history could not be loaded.";
+      }
+    }
+
+    function renderSettlementSummary(preview) {
+      selectedReturnPreview = preview || null;
+      const summary = preview?.settlementSummary || null;
+      const panel = document.getElementById("settlementSummaryPanel");
+      if (!panel || !summary) {
+        clearSettlementSummary();
+        return;
+      }
+
+      const isBlocked = !preview?.canReturn || Boolean(summary.isSettlementBlocked);
+      const canCreateRefundPayable = Boolean(preview?.canCreateRefundPayable);
+      panel.hidden = false;
+      panel.classList.toggle("blocked", isBlocked);
+
+      document.getElementById("settlementInvoiceTotal").textContent = formatMoney(summary.invoiceTotal);
+      document.getElementById("settlementPaidAmount").textContent = formatMoney(summary.paidAmount);
+      document.getElementById("settlementDueAmount").textContent = formatMoney(summary.dueAmount);
+      document.getElementById("settlementPaymentStatus").textContent = safeText(summary.paymentStatus) || "-";
+
+      const cash = summary.cashLedgerImpact || {};
+      document.getElementById("settlementCashImpact").textContent =
+        `Debit ${Number(cash.totalDebit || 0).toFixed(2)} / Credit ${Number(cash.totalCredit || 0).toFixed(2)}`;
+
+      const metal = summary.metalLedgerImpact || {};
+      const metalRows = Array.isArray(metal.rows) ? metal.rows.length : 0;
+      const metalSummary = metal.summary || {};
+      const metalText = Object.keys(metalSummary).length
+        ? Object.entries(metalSummary).map(([type, row]) => `${type}: in ${Number(row.grossIn || 0).toFixed(3)}g / out ${Number(row.grossOut || 0).toFixed(3)}g`).join(" | ")
+        : metalRows ? `${metalRows} row(s)` : "No rows";
+      document.getElementById("settlementMetalImpact").textContent = metalText;
+      document.getElementById("settlementRefundMode").textContent = safeText(preview?.refundModeHint) || "-";
+      document.getElementById("settlementRefundCash").textContent = formatMoney(preview?.estimatedRefundCashAmount);
+      document.getElementById("settlementRefundMetal").textContent = `${Number(preview?.estimatedRefundMetalWeight || 0).toFixed(3)} g`;
+
+      const status = document.getElementById("settlementStatusMessage");
+      if (status) {
+        status.textContent = isBlocked
+          ? canCreateRefundPayable
+            ? "Paid/settled invoice return requires refund payable creation."
+            : "Paid/settled invoice return requires refund workflow."
+          : "Unpaid/simple return is eligible.";
+      }
+
+      const reasons = document.getElementById("settlementBlockingReasons");
+      const allReasons = [
+        ...(Array.isArray(summary.blockingReasons) ? summary.blockingReasons : []),
+        ...(Array.isArray(preview?.blockingReasons) ? preview.blockingReasons.filter((reason) => reason !== "Paid/settled invoice return requires refund workflow") : [])
+      ];
+      if (reasons && allReasons.length) {
+        reasons.hidden = false;
+        reasons.innerHTML = allReasons.map((reason) => escapeHtml(reason)).join("<br>");
+      } else if (reasons) {
+        reasons.hidden = true;
+        reasons.textContent = "";
+      }
+
+      setSaveReturnEnabled(Boolean(preview?.canReturn));
+      setRefundPayableEnabled(canCreateRefundPayable);
+      const openPayable = Array.isArray(preview?.duplicateRefundPayables) ? preview.duplicateRefundPayables[0] : null;
+      renderCashRefundPanel(openPayable);
+      renderMetalRefundPanel(openPayable);
+    }
+
     function renderProfileBox() {
       const user = getLoggedInUser();
       if (!user) return;
@@ -739,9 +1143,16 @@
         };
 
         fillReturnDetails(selectedReturnItem);
+
+        const previewParams = buildProtectedParams(true, itemCompanyId);
+        const previewUrl = `${API_BASE}/returns/preview/${encodeURIComponent(barcode)}${previewParams.toString() ? `?${previewParams.toString()}` : ""}`;
+        const previewRes = await fetch(previewUrl, { cache: "no-store" });
+        const previewData = await previewRes.json();
+        renderSettlementSummary(previewData);
       } catch (error) {
         console.log("Return barcode fetch error:", error);
       alert("Barcode details could not be loaded.");
+        clearSettlementSummary();
       }
     }
 
@@ -766,6 +1177,7 @@
 
     function clearReturnForm(resetBarcode = true) {
       selectedReturnItem = null;
+      clearSettlementSummary();
 
       if (resetBarcode) {
         document.getElementById("returnBarcode").value = "";
@@ -795,6 +1207,11 @@
     async function saveReturnEntry() {
       if (!selectedReturnItem) {
       alert("Please fetch the barcode details first.");
+        return;
+      }
+
+      if (!selectedReturnPreview?.canReturn) {
+        alert("Paid/settled invoice return requires refund workflow.");
         return;
       }
 
@@ -837,7 +1254,8 @@
 
         const data = await res.json();
         if (!data.success) {
-          alert(data.message || "Return save failed");
+          alert(data.message || (res.status === 409 ? "Paid/settled invoice return requires refund workflow." : "Return save failed"));
+          if (data.preview) renderSettlementSummary(data.preview);
           return;
         }
 
@@ -847,6 +1265,173 @@
       } catch (error) {
         console.log("Return save error:", error);
         alert("Return save error");
+      }
+    }
+
+    async function createRefundPayableEntry() {
+      if (!selectedReturnItem) {
+      alert("Please fetch the barcode details first.");
+        return;
+      }
+
+      if (!selectedReturnPreview?.canCreateRefundPayable) {
+        alert("Refund payable cannot be created for this return.");
+        return;
+      }
+
+      const actingUserId = getCurrentUserId();
+      const returnType = safeText(document.getElementById("returnType")?.value).toUpperCase();
+      const returnReason = safeText(document.getElementById("returnReason")?.value);
+      const companyId = selectedReturnItem.company_id ?? getCurrentCompanyId();
+
+      if (actingUserId === null || Number.isNaN(actingUserId)) {
+        alert("Login user missing");
+        return;
+      }
+
+      if (companyId === null || Number.isNaN(Number(companyId))) {
+        alert("Company scope missing for this return");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/returns/create-refund-payable`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            barcode: selectedReturnItem.barcode,
+            invoice_number: selectedReturnItem.invoice_number,
+            customer_name: selectedReturnItem.customer_name,
+            product_name: selectedReturnItem.product_name,
+            sku: selectedReturnItem.sku,
+            size: selectedReturnItem.size,
+            weight: selectedReturnItem.weight,
+            lot_number: selectedReturnItem.lot_number,
+            return_type: returnType,
+            return_reason: returnReason,
+            actingUserId,
+            companyId
+          })
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "Refund payable creation failed");
+          if (data.preview) renderSettlementSummary(data.preview);
+          return;
+        }
+
+        alert(data.message || "Refund payable created successfully");
+        renderCashRefundPanel(data.payable);
+        renderMetalRefundPanel(data.payable);
+        await loadReturnDashboard();
+      } catch (error) {
+        console.log("Refund payable creation error:", error);
+        alert("Refund payable creation error");
+      }
+    }
+
+    async function submitCashRefund() {
+      if (!activeRefundPayable?.id) {
+        alert("Open refund payable missing");
+        return;
+      }
+
+      const amount = Number(document.getElementById("cashRefundAmount")?.value || 0);
+      const paymentMode = safeText(document.getElementById("cashRefundMode")?.value || "CASH").toUpperCase();
+      const referenceNo = safeText(document.getElementById("cashRefundReference")?.value);
+      const remarks = safeText(document.getElementById("cashRefundRemarks")?.value);
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        alert("Refund amount must be greater than zero");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/returns/refund-payables/${activeRefundPayable.id}/cash-refund`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            amount,
+            paymentMode,
+            referenceNo,
+            remarks
+          })
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "Cash refund failed");
+          return;
+        }
+
+        alert(data.message || "Cash refund recorded successfully");
+        const updatedPayable = {
+          ...activeRefundPayable,
+          ...(data.payable || {})
+        };
+        renderCashRefundPanel(updatedPayable);
+        renderMetalRefundPanel(updatedPayable);
+      } catch (error) {
+        console.log("Cash refund error:", error);
+        alert("Cash refund error");
+      }
+    }
+
+    async function submitMetalRefund() {
+      if (!activeRefundPayable?.id) {
+        alert("Open refund payable missing");
+        return;
+      }
+
+      const metalType = safeText(document.getElementById("metalRefundType")?.value || "GOLD").toUpperCase();
+      const grossWeight = Number(document.getElementById("metalRefundGross")?.value || 0);
+      const purity = Number(document.getElementById("metalRefundPurity")?.value || 0);
+      const fineWeight = Number(document.getElementById("metalRefundFine")?.value || 0);
+      const rate = Number(document.getElementById("metalRefundRate")?.value || 0);
+      const remarks = safeText(document.getElementById("metalRefundRemarks")?.value);
+
+      if (!Number.isFinite(grossWeight) || grossWeight <= 0) {
+        alert("Metal refund weight must be greater than zero");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/returns/refund-payables/${activeRefundPayable.id}/metal-refund`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            metalType,
+            grossWeight,
+            purity,
+            fineWeight,
+            rate,
+            remarks
+          })
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          alert(data.message || "Metal refund failed");
+          return;
+        }
+
+        alert(data.message || "Metal refund recorded successfully");
+        const updatedPayable = {
+          ...activeRefundPayable,
+          ...(data.payable || {})
+        };
+        renderCashRefundPanel(updatedPayable);
+        renderMetalRefundPanel(updatedPayable);
+      } catch (error) {
+        console.log("Metal refund error:", error);
+        alert("Metal refund error");
       }
     }
 
