@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Barcode Lifecycle</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .main-content {
+      flex: 1;
+      min-width: 0;
+      padding: 22px;
+    }
+
+    .premium-card {
+      border: 1px solid #eadfca;
+      border-radius: 18px;
+      background: linear-gradient(180deg, #ffffff 0%, #fffaf1 100%);
+      box-shadow: 0 14px 34px rgba(46, 42, 36, 0.07);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .premium-hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .premium-hero h2 {
+      margin: 0 0 6px;
+      color: #2e2a24;
+      font-size: 28px;
+      line-height: 1.15;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+
+    .premium-hero p,
+    .premium-muted {
+      margin: 0;
+      color: #7a6f5c;
+      line-height: 1.55;
+      font-size: 13px;
+    }
+
+    .premium-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #dec98d;
+      color: #8a6b12;
+      background: #fff4d6;
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .premium-badge.success,
+    .status-chip.success {
+      color: #166534;
+      background: #dcfce7;
+      border-color: #86efac;
+    }
+
+    .premium-badge.warning,
+    .status-chip.warning {
+      color: #92400e;
+      background: #fef3c7;
+      border-color: #fbbf24;
+    }
+
+    .premium-badge.danger,
+    .status-chip.danger {
+      color: #991b1b;
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
+
+    .premium-badge.info,
+    .status-chip.info {
+      color: #1e40af;
+      background: #dbeafe;
+      border-color: #93c5fd;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 11px;
+      border-radius: 999px;
+      border: 1px solid #dec98d;
+      color: #8a6b12;
+      background: #fff4d6;
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      max-width: 100%;
+      white-space: normal;
+    }
+
+    .premium-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .premium-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .premium-btn {
+      border: none;
+      border-radius: 12px;
+      padding: 11px 14px;
+      font-weight: 850;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .premium-btn.primary {
+      color: #fff;
+      background: linear-gradient(135deg, #9a6b09, #d4af37);
+    }
+
+    .premium-btn.secondary {
+      color: #4b5563;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+    }
+
+    .premium-btn:disabled {
+      opacity: 0.58;
+      cursor: not-allowed;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #eadfca;
+      border-radius: 16px;
+      background: #fffdf8;
+      padding: 16px;
+      min-height: 118px;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      right: -24px;
+      bottom: -28px;
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+      background: rgba(212, 175, 55, 0.08);
+    }
+
+    .metric-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #9a6b09;
+      background: #fff4d6;
+      border: 1px solid #e8d19a;
+      margin-bottom: 10px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-label {
+      color: #7a6f5c;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      position: relative;
+      z-index: 1;
+    }
+
+    .metric-value {
+      margin-top: 7px;
+      color: #2e2a24;
+      font-size: 22px;
+      line-height: 1.15;
+      font-weight: 850;
+      position: relative;
+      z-index: 1;
+      word-break: break-word;
+    }
+
+    .premium-section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .premium-section-title h3 {
+      margin: 0;
+      color: #2e2a24;
+      font-size: 17px;
+      font-weight: 850;
+    }
+
+    .timeline-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      gap: 14px;
+      align-items: start;
+      border: 1px solid #eadfca;
+      border-radius: 16px;
+      background: #fffdf8;
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 4px;
+      background: #dec98d;
+    }
+
+    .timeline-item.success::before {
+      background: #22c55e;
+    }
+
+    .timeline-item.warning::before {
+      background: #f59e0b;
+    }
+
+    .timeline-item.danger::before {
+      background: #ef4444;
+    }
+
+    .timeline-item.info::before {
+      background: #3b82f6;
+    }
+
+    .timeline-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 15px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #9a6b09;
+      background: #fff4d6;
+      border: 1px solid #e8d19a;
+    }
+
+    .timeline-main h4 {
+      margin: 0 0 5px;
+      color: #2e2a24;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .timeline-main p {
+      margin: 0 0 10px;
+      color: #6b6354;
+      line-height: 1.45;
+      font-size: 13px;
+    }
+
+    .timeline-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .timeline-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #e2e8f0;
+      border-radius: 999px;
+      background: #fff;
+      color: #334155;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .premium-table-wrap {
+      overflow-x: auto;
+      border: 1px solid #eadfca;
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .premium-table {
+      width: 100%;
+      min-width: 860px;
+      border-collapse: collapse;
+    }
+
+    .premium-table th,
+    .premium-table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #f0e6d7;
+      text-align: left;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .premium-table th {
+      background: #fff7e8;
+      color: #6d5718;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .mini-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+
+    .mini-action-btn {
+      width: 34px;
+      height: 34px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #fff;
+      color: #4b5563;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+    }
+
+    .mini-action-btn:hover {
+      color: #9a6b09;
+      border-color: #dec98d;
+      background: #fff7e8;
+    }
+
+    .empty-state {
+      display: grid;
+      place-items: center;
+      text-align: center;
+      gap: 12px;
+      min-height: 180px;
+      color: #7a6f5c;
+      padding: 20px;
+    }
+
+    .empty-state i {
+      width: 50px;
+      height: 50px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 16px;
+      color: #9a6b09;
+      background: #fff4d6;
+      border: 1px solid #e8d19a;
+      font-size: 20px;
+    }
+
+    .empty-illustration {
+      width: 86px;
+      height: 86px;
+      border-radius: 28px;
+      display: inline-grid;
+      place-items: center;
+      background:
+        linear-gradient(180deg, #fff8ec, #fffdf8);
+      border: 1px solid #eadfca;
+      box-shadow: 0 14px 34px rgba(46, 42, 36, 0.07);
+    }
+
+    .empty-illustration i {
+      width: 52px;
+      height: 52px;
+      margin: 0;
+    }
+
+    .company-info-chip {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .profile-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      padding: 8px 12px;
+      border-radius: 999px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .detail-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(15, 23, 42, 0.58);
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .detail-modal.show {
+      display: flex;
+    }
+
+    .detail-modal-box {
+      width: min(920px, 100%);
+      max-height: 86vh;
+      overflow: auto;
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+      padding: 18px;
+    }
+
+    .detail-modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .detail-modal-head h3 {
+      margin: 0;
+      color: #2e2a24;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .close-btn {
+      border: none;
+      border-radius: 12px;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      color: #fff;
+      background: #991b1b;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .json-block {
+      max-height: 360px;
+      overflow: auto;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 14px;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    @media (max-width: 1100px) {
+      .metrics-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .premium-toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .main-content {
+        padding: 14px;
+      }
+
+      .premium-card {
+        padding: 14px;
+      }
+
+      .premium-toolbar,
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .premium-actions,
+      .premium-btn {
+        width: 100%;
+      }
+
+      .timeline-item {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-item > .premium-actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand">
+          <div class="brand-logo"><i class="fas fa-gem"></i></div>
+          <div class="brand-text">
+            <h2>ERP</h2>
+            <p>Jewellery Suite</p>
+          </div>
+        </div>
+        <ul class="menu">
+          <li><a href="sales-dashboard.html"><i class="fas fa-store"></i> Store Dashboard</a></li>
+          <li><a href="stock.html"><i class="fas fa-boxes-stacked"></i> Stock</a></li>
+          <li><a href="barcode-lifecycle.html" class="active"><i class="fas fa-timeline"></i> Barcode Lifecycle</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div class="topbar">
+        <div class="top-left">
+          <button type="button" class="hamburger sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div class="title">
+            <h1 id="pageCompanyTitle">RPJ MANUFACTURER</h1>
+            <p>Barcode lifecycle timeline</p>
+          </div>
+        </div>
+        <div class="top-right">
+          <div class="profile-box" id="profileBox"></div>
+        </div>
+      </div>
+
+      <section class="page active">
+        <div id="companyInfoChip" class="company-info-chip">Company: Loading...</div>
+
+        <div class="premium-card">
+          <div class="premium-hero">
+            <div>
+              <h2>Barcode Lifecycle</h2>
+              <p>Trace a barcode from sticker creation through stock, billing, return, refund, branch transfer, and restoration events.</p>
+            </div>
+            <span class="premium-badge"><i class="fas fa-shield-halved"></i> Read Only</span>
+          </div>
+        </div>
+
+        <div class="premium-card">
+          <div class="premium-section-title">
+            <h3>Search</h3>
+            <span id="pageStatus" class="premium-muted">Enter a barcode and search.</span>
+          </div>
+          <div class="premium-toolbar">
+            <div class="input-box">
+              <label for="barcodeInput">Barcode</label>
+              <input id="barcodeInput" type="text" placeholder="Scan or type barcode" autocomplete="off" />
+            </div>
+            <button class="premium-btn primary" type="button" onclick="searchBarcodeLifecycle()">
+              <i class="fas fa-magnifying-glass"></i> Search
+            </button>
+            <button class="premium-btn secondary" type="button" onclick="refreshBarcodeLifecycle()">
+              <i class="fas fa-rotate"></i> Refresh
+            </button>
+            <button class="premium-btn secondary" type="button" onclick="clearSearch()">
+              <i class="fas fa-eraser"></i> Clear
+            </button>
+          </div>
+        </div>
+
+        <div class="premium-card">
+          <div class="premium-section-title">
+            <h3>Summary</h3>
+            <span id="summaryBarcodeLabel" class="premium-badge">No Barcode Loaded</span>
+          </div>
+          <div class="premium-actions" id="directActionBar"></div>
+          <div id="summaryCards" class="metrics-grid"></div>
+        </div>
+
+        <div class="premium-card">
+          <div class="premium-section-title">
+            <h3>Timeline</h3>
+            <span id="eventCountLabel" class="premium-badge info"><i class="fas fa-list-check"></i> 0 events</span>
+          </div>
+          <div id="timelineList" class="timeline-list"></div>
+          <div id="emptyState" class="empty-state">
+            <span class="empty-illustration"><i class="fas fa-barcode"></i></span>
+            <div>
+              <strong>No lifecycle loaded</strong>
+              <p class="premium-muted">Search a barcode to see its timeline. You can also check the stock page if no events exist yet.</p>
+            </div>
+            <a class="premium-btn secondary" href="stock.html"><i class="fas fa-boxes-stacked"></i> Open Stock</a>
+          </div>
+        </div>
+
+        <div class="premium-card">
+          <div class="premium-section-title">
+            <h3>Event Counts</h3>
+            <span class="premium-muted">Read-only lifecycle totals</span>
+          </div>
+          <div class="premium-table-wrap">
+            <table class="premium-table">
+              <thead>
+                <tr>
+                  <th>Event Type</th>
+                  <th>Count</th>
+                </tr>
+              </thead>
+              <tbody id="eventCountRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="eventDetailModal" class="detail-modal" role="dialog" aria-modal="true" aria-labelledby="eventDetailTitle">
+    <div class="detail-modal-box">
+      <div class="detail-modal-head">
+        <h3 id="eventDetailTitle">Event Details</h3>
+        <button type="button" class="close-btn" onclick="closeEventModal()" aria-label="Close details">
+          <i class="fas fa-xmark"></i>
+        </button>
+      </div>
+      <div class="premium-table-wrap" style="margin-bottom:12px;">
+        <table class="premium-table">
+          <tbody id="eventDetailMeta"></tbody>
+        </table>
+      </div>
+      <pre id="eventPayloadBlock" class="json-block">{}</pre>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    const API_BASE = window.ERP_API_BASE;
+    const ERP_SIDEBAR_STORAGE_KEY = "erpSidebarCollapsed";
+    let currentBarcode = "";
+    let lifecycleEvents = [];
+    let lifecycleSummary = null;
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function buildApiUrl(path) {
+      if (typeof window.buildErpApiUrl === "function") return window.buildErpApiUrl(path);
+      return `${API_BASE || ""}${path}`;
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(buildApiUrl(path));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || "Request failed");
+      }
+      return data;
+    }
+
+    function getQueryParam(name) {
+      return new URLSearchParams(window.location.search).get(name) || "";
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString("en-IN", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function formatCount(value) {
+      return String(Number(value || 0));
+    }
+
+    function normalizeStatus(value) {
+      return String(value || "-").replace(/_/g, " ");
+    }
+
+    function getTone(value) {
+      const clean = String(value || "").toUpperCase();
+      if (clean.includes("DAMAGED") || clean.includes("DELETED") || clean.includes("SHORTAGE") || clean.includes("CANCELLED")) return "danger";
+      if (clean.includes("RETURN") || clean.includes("REFUND") || clean.includes("PARTIAL") || clean.includes("DRAFT")) return "warning";
+      if (clean.includes("BILLED") || clean.includes("SOLD") || clean.includes("RECEIVED") || clean.includes("RESTORED") || clean.includes("APPROVED") || clean.includes("CREATED") || clean.includes("IN_STOCK")) return "success";
+      if (clean.includes("TRANSFER") || clean.includes("TRANSIT") || clean.includes("PROCESS") || clean.includes("LAMINATION")) return "info";
+      return "";
+    }
+
+    function getEventPayload(event) {
+      const payload = event?.event_payload ?? event?.eventPayload ?? null;
+      if (!payload) return {};
+      if (typeof payload === "string") {
+        try {
+          return JSON.parse(payload);
+        } catch (_) {
+          return { value: payload };
+        }
+      }
+      return payload;
+    }
+
+    function setStatus(message) {
+      const status = document.getElementById("pageStatus");
+      if (status) status.textContent = message;
+    }
+
+    function getFirstInvoice() {
+      const links = Array.isArray(lifecycleSummary?.invoiceLinks) ? lifecycleSummary.invoiceLinks : [];
+      if (links.length) return links[0];
+      const event = lifecycleEvents.find((row) => row.invoice_number || row.invoiceNumber);
+      return event ? String(event.invoice_number || event.invoiceNumber || "") : "";
+    }
+
+    function hasReturnLink() {
+      return Array.isArray(lifecycleSummary?.returnLinks) && lifecycleSummary.returnLinks.length > 0;
+    }
+
+    function renderSummary() {
+      const stock = lifecycleSummary?.currentStockState || {};
+      const invoiceCount = Array.isArray(lifecycleSummary?.invoiceLinks) ? lifecycleSummary.invoiceLinks.length : 0;
+      const returnCount = Array.isArray(lifecycleSummary?.returnLinks) ? lifecycleSummary.returnLinks.length : 0;
+      const transferCount = Array.isArray(lifecycleSummary?.transferLinks) ? lifecycleSummary.transferLinks.length : 0;
+      const lastEvent = lifecycleSummary?.lastEvent || lifecycleEvents[lifecycleEvents.length - 1] || null;
+      const branch = stock.current_branch_id || lastEvent?.branch_id || lastEvent?.to_branch_id || lastEvent?.from_branch_id || "-";
+      const statusValue = normalizeStatus(stock.stock_state || stock.status);
+      const statusTone = getTone(stock.stock_state || stock.status);
+      const cards = [
+        ["Current Stock Status", statusValue, "fas fa-box", statusTone],
+        ["Current Branch", branch, "fas fa-code-branch"],
+        ["Invoice Count", formatCount(invoiceCount), "fas fa-file-invoice"],
+        ["Return Count", formatCount(returnCount), "fas fa-rotate-left"],
+        ["Transfer Count", formatCount(transferCount), "fas fa-truck-ramp-box"],
+        ["Last Event", lastEvent ? normalizeStatus(lastEvent.event_type) : "-", "fas fa-clock", getTone(lastEvent?.event_type)]
+      ];
+
+      document.getElementById("summaryCards").innerHTML = cards.map(([label, value, icon, tone]) => `
+        <div class="metric-card">
+          <div class="metric-icon"><i class="${icon}"></i></div>
+          <div class="metric-label">${escapeHtml(label)}</div>
+          <div class="metric-value">${tone ? `<span class="status-chip ${tone}">${escapeHtml(value)}</span>` : escapeHtml(value)}</div>
+        </div>
+      `).join("");
+
+      document.getElementById("summaryBarcodeLabel").textContent = currentBarcode ? currentBarcode : "No Barcode Loaded";
+      renderDirectActions();
+      renderEventCounts();
+    }
+
+    function renderDirectActions() {
+      const invoice = getFirstInvoice();
+      const actions = [];
+      if (currentBarcode) {
+        actions.push(`<a class="premium-btn secondary" href="stock.html?barcode=${encodeURIComponent(currentBarcode)}"><i class="fas fa-boxes-stacked"></i> Open Stock</a>`);
+        actions.push(`<button class="premium-btn secondary" type="button" onclick="copyCurrentBarcode()"><i class="fas fa-copy"></i> Copy Barcode</button>`);
+        if (hasReturnLink() || invoice) {
+          actions.push(`<a class="premium-btn secondary" href="return.html?barcode=${encodeURIComponent(currentBarcode)}"><i class="fas fa-rotate-left"></i> Open Return Preview</a>`);
+        }
+      }
+      if (invoice) {
+        actions.push(`<a class="premium-btn secondary" href="sales-history.html?invoice=${encodeURIComponent(invoice)}"><i class="fas fa-clock-rotate-left"></i> Sales History</a>`);
+      }
+      document.getElementById("directActionBar").innerHTML = actions.join("");
+    }
+
+    function getEventIcon(type) {
+      const clean = String(type || "").toUpperCase();
+      if (clean.includes("STICKER")) return "fas fa-barcode";
+      if (clean.includes("BILLED") || clean.includes("SALE")) return "fas fa-receipt";
+      if (clean.includes("RETURN")) return "fas fa-rotate-left";
+      if (clean.includes("REFUND")) return "fas fa-wallet";
+      if (clean.includes("TRANSFER")) return "fas fa-truck-ramp-box";
+      if (clean.includes("LAMINATION")) return "fas fa-layer-group";
+      return "fas fa-circle-nodes";
+    }
+
+    function getEventChips(event) {
+      const payload = getEventPayload(event);
+      const chips = [];
+      chips.push(["fas fa-calendar", formatDateTime(event.created_at || event.createdAt)]);
+      if (event.branch_id) chips.push(["fas fa-code-branch", `Branch ${event.branch_id}`]);
+      if (event.from_branch_id || event.to_branch_id) chips.push(["fas fa-right-left", `${event.from_branch_id || "-"} to ${event.to_branch_id || "-"}`]);
+      if (event.invoice_number) chips.push(["fas fa-file-invoice", event.invoice_number]);
+      if (payload.transferNo || event.transfer_id) chips.push(["fas fa-truck", payload.transferNo || `Transfer ${event.transfer_id}`]);
+      if (event.return_id) chips.push(["fas fa-rotate-left", `Return ${event.return_id}`]);
+      if (event.refund_payable_id) chips.push(["fas fa-wallet", `Refund ${event.refund_payable_id}`]);
+      return chips;
+    }
+
+    function renderTimeline() {
+      const timeline = document.getElementById("timelineList");
+      const emptyState = document.getElementById("emptyState");
+      document.getElementById("eventCountLabel").textContent = `${lifecycleEvents.length} event${lifecycleEvents.length === 1 ? "" : "s"}`;
+
+      if (!lifecycleEvents.length) {
+        timeline.innerHTML = "";
+        emptyState.style.display = "grid";
+        return;
+      }
+
+      emptyState.style.display = "none";
+      timeline.innerHTML = lifecycleEvents.map((event, index) => {
+        const eventType = event.event_type || event.eventType || "";
+        const tone = getTone(eventType);
+        const title = event.event_title || event.eventTitle || normalizeStatus(eventType);
+        const description = event.event_description || event.eventDescription || "";
+        const chips = getEventChips(event).map(([icon, text]) => `
+          <span class="timeline-chip"><i class="${icon}"></i> ${escapeHtml(text)}</span>
+        `).join("");
+        const invoice = event.invoice_number || "";
+        const links = [];
+        if (invoice) {
+          links.push(`<a class="mini-action-btn" href="sales-history.html?invoice=${encodeURIComponent(invoice)}" title="Open sales history"><i class="fas fa-file-invoice"></i></a>`);
+        }
+        if (event.barcode || currentBarcode) {
+          links.push(`<a class="mini-action-btn" href="stock.html?barcode=${encodeURIComponent(event.barcode || currentBarcode)}" title="Open stock"><i class="fas fa-boxes-stacked"></i></a>`);
+        }
+        if (event.return_id || String(eventType).includes("RETURN")) {
+          links.push(`<a class="mini-action-btn" href="return.html?barcode=${encodeURIComponent(event.barcode || currentBarcode)}" title="Open return preview"><i class="fas fa-rotate-left"></i></a>`);
+        }
+        links.push(`<button class="mini-action-btn" type="button" onclick="openEventModal(${index})" title="View details"><i class="fas fa-circle-info"></i></button>`);
+
+        return `
+          <div class="timeline-item ${tone}">
+            <div class="timeline-icon"><i class="${getEventIcon(eventType)}"></i></div>
+            <div class="timeline-main">
+              <span class="premium-badge ${tone}">${escapeHtml(normalizeStatus(eventType))}</span>
+              <h4>${escapeHtml(title)}</h4>
+              <p>${escapeHtml(description || "Lifecycle event recorded.")}</p>
+              <div class="timeline-meta">${chips}</div>
+            </div>
+            <div class="mini-actions">${links.join("")}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderEventCounts() {
+      const counts = lifecycleSummary?.eventCounts || {};
+      const rows = Object.entries(counts);
+      const target = document.getElementById("eventCountRows");
+      if (!rows.length) {
+        target.innerHTML = `<tr><td colspan="2" class="empty-state">No event counts available</td></tr>`;
+        return;
+      }
+      target.innerHTML = rows.map(([type, count]) => `
+        <tr>
+          <td><span class="premium-badge">${escapeHtml(normalizeStatus(type))}</span></td>
+          <td>${escapeHtml(formatCount(count))}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadBarcodeLifecycle(barcode) {
+      currentBarcode = String(barcode || "").trim();
+      if (!currentBarcode) {
+        setStatus("Enter a barcode and search.");
+        lifecycleEvents = [];
+        lifecycleSummary = null;
+        renderSummary();
+        renderTimeline();
+        return;
+      }
+
+      setStatus("Loading lifecycle...");
+      const encoded = encodeURIComponent(currentBarcode);
+      const [eventsResponse, summaryResponse] = await Promise.all([
+        fetchJson(`/barcode-lifecycle/${encoded}`),
+        fetchJson(`/barcode-lifecycle/${encoded}/summary`)
+      ]);
+      lifecycleEvents = Array.isArray(eventsResponse.events) ? eventsResponse.events : [];
+      lifecycleSummary = summaryResponse || null;
+      currentBarcode = eventsResponse.barcode || currentBarcode;
+      document.getElementById("barcodeInput").value = currentBarcode;
+      renderSummary();
+      renderTimeline();
+      setStatus(lifecycleEvents.length ? "Lifecycle loaded." : "No events found for this barcode.");
+
+      const url = new URL(window.location.href);
+      url.searchParams.set("barcode", currentBarcode);
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    function searchBarcodeLifecycle() {
+      const barcode = document.getElementById("barcodeInput").value.trim();
+      loadBarcodeLifecycle(barcode).catch((error) => {
+        setStatus(error.message || "Lifecycle lookup failed");
+        lifecycleEvents = [];
+        lifecycleSummary = null;
+        renderSummary();
+        renderTimeline();
+      });
+    }
+
+    function refreshBarcodeLifecycle() {
+      const barcode = currentBarcode || document.getElementById("barcodeInput").value.trim();
+      if (!barcode) {
+        setStatus("Enter a barcode and search.");
+        return;
+      }
+      loadBarcodeLifecycle(barcode).catch((error) => setStatus(error.message || "Refresh failed"));
+    }
+
+    function clearSearch() {
+      currentBarcode = "";
+      lifecycleEvents = [];
+      lifecycleSummary = null;
+      document.getElementById("barcodeInput").value = "";
+      setStatus("Enter a barcode and search.");
+      renderSummary();
+      renderTimeline();
+      const url = new URL(window.location.href);
+      url.searchParams.delete("barcode");
+      window.history.replaceState({}, "", url.toString());
+    }
+
+    function openEventModal(index) {
+      const event = lifecycleEvents[index];
+      if (!event) return;
+      const payload = getEventPayload(event);
+      document.getElementById("eventDetailTitle").textContent = event.event_title || event.event_type || "Event Details";
+      document.getElementById("eventDetailMeta").innerHTML = [
+        ["Event Type", event.event_type],
+        ["Source", `${event.source_table || "-"} / ${event.source_id || "-"}`],
+        ["Created By", event.created_by || "-"],
+        ["Created At", formatDateTime(event.created_at)],
+        ["Stock ID", event.stock_id || "-"],
+        ["Invoice", event.invoice_number || "-"],
+        ["Transfer ID", event.transfer_id || "-"],
+        ["Return ID", event.return_id || "-"],
+        ["Refund Payable ID", event.refund_payable_id || "-"]
+      ].map(([label, value]) => `
+        <tr>
+          <th>${escapeHtml(label)}</th>
+          <td>${escapeHtml(value)}</td>
+        </tr>
+      `).join("");
+      document.getElementById("eventPayloadBlock").textContent = JSON.stringify(payload, null, 2);
+      document.getElementById("eventDetailModal").classList.add("show");
+    }
+
+    function closeEventModal() {
+      document.getElementById("eventDetailModal").classList.remove("show");
+    }
+
+    async function copyText(text, message) {
+      try {
+        await navigator.clipboard.writeText(String(text || ""));
+        if (typeof showToast === "function") showToast(message || "Copied", "success");
+      } catch (_) {
+        if (typeof showToast === "function") showToast("Copy failed", "error");
+      }
+    }
+
+    function copyCurrentBarcode() {
+      copyText(currentBarcode, "Barcode copied");
+    }
+
+    function getDisplayUser() {
+      try {
+        if (typeof getLoggedInUser === "function") return getLoggedInUser();
+        return JSON.parse(localStorage.getItem("erpLoggedInUser") || "null") || {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function updateCompanyHeader() {
+      const user = getDisplayUser();
+      const companyName = user.company_name || user.companyName || user.company || "RPJ MANUFACTURER";
+      const role = String(user.role || "").toUpperCase() || "USER";
+      const pageTitle = document.getElementById("pageCompanyTitle");
+      const chip = document.getElementById("companyInfoChip");
+      const profile = document.getElementById("profileBox");
+      if (pageTitle) pageTitle.textContent = companyName;
+      if (chip) chip.textContent = `Company: ${companyName}`;
+      if (profile) profile.innerHTML = `<i class="fas fa-user"></i> ${escapeHtml(user.name || role)}`;
+    }
+
+    function saveSidebarState(isCollapsed) {
+      try {
+        localStorage.setItem(ERP_SIDEBAR_STORAGE_KEY, isCollapsed ? "1" : "0");
+      } catch (_) {}
+    }
+
+    function getSidebarState() {
+      try {
+        return localStorage.getItem(ERP_SIDEBAR_STORAGE_KEY) === "1";
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function ensureSidebarOverlay() {
+      let overlay = document.getElementById("sidebarOverlay");
+      if (!overlay) {
+        overlay = document.createElement("button");
+        overlay.id = "sidebarOverlay";
+        overlay.className = "sidebar-overlay";
+        overlay.setAttribute("aria-label", "Close sidebar");
+        overlay.type = "button";
+        overlay.addEventListener("click", closeMobileSidebar);
+        document.body.appendChild(overlay);
+      }
+      return overlay;
+    }
+
+    function syncSidebarOverlay() {
+      const sidebar = document.getElementById("sidebar");
+      const toggle = document.getElementById("sidebarToggle");
+      const overlay = ensureSidebarOverlay();
+      const isMobile = window.matchMedia("(max-width: 900px)").matches;
+      const isOpen = Boolean(sidebar && isMobile && !sidebar.classList.contains("collapsed"));
+      overlay.classList.toggle("show", isOpen);
+      document.body.classList.toggle("sidebar-open", isOpen);
+      if (toggle) toggle.setAttribute("aria-expanded", String(isOpen));
+    }
+
+    function closeMobileSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      if (sidebar && window.matchMedia("(max-width: 900px)").matches) {
+        sidebar.classList.add("collapsed");
+      }
+      syncSidebarOverlay();
+    }
+
+    function initSidebar() {
+      const sidebar = document.getElementById("sidebar");
+      const toggle = document.getElementById("sidebarToggle");
+      if (!sidebar || !toggle) return;
+      sidebar.classList.toggle("collapsed", getSidebarState());
+      toggle.addEventListener("click", () => {
+        const nextCollapsed = !sidebar.classList.contains("collapsed");
+        sidebar.classList.toggle("collapsed", nextCollapsed);
+        saveSidebarState(nextCollapsed);
+        syncSidebarOverlay();
+      });
+      window.addEventListener("resize", syncSidebarOverlay);
+      document.querySelectorAll(".menu a").forEach((link) => link.addEventListener("click", closeMobileSidebar));
+      syncSidebarOverlay();
+    }
+
+    document.getElementById("barcodeInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") searchBarcodeLifecycle();
+    });
+
+    document.getElementById("eventDetailModal").addEventListener("click", (event) => {
+      if (event.target.id === "eventDetailModal") closeEventModal();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeEventModal();
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateCompanyHeader();
+      initSidebar();
+      renderSummary();
+      renderTimeline();
+      const barcode = getQueryParam("barcode");
+      if (barcode) {
+        document.getElementById("barcodeInput").value = barcode;
+        loadBarcodeLifecycle(barcode).catch((error) => setStatus(error.message || "Lifecycle lookup failed"));
+      }
+    });
+  </script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

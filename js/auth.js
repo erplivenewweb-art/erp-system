@@ -23,6 +23,9 @@ const ERP_PAGE_PERMISSION_MAP = {
   transaction: ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "profit-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "lot-commercial-analytics": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "barcode-lifecycle": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "reconciliation-dashboard": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "branch-transfer": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "branch-management": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "branch-receive": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
@@ -61,6 +64,9 @@ const ERP_MENU_PAGE_BY_HREF = {
   "transaction.html": "transaction",
   "transaction-reports.html": "transaction-reports",
   "profit-report.html": "profit-report",
+  "lot-commercial-analytics.html": "lot-commercial-analytics",
+  "barcode-lifecycle.html": "barcode-lifecycle",
+  "reconciliation-dashboard.html": "reconciliation-dashboard",
   "branch-transfer.html": "branch-transfer",
   "branch-management.html": "branch-management",
   "branch-receive.html": "branch-receive",
@@ -86,7 +92,7 @@ const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
 const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "enforcement-qa-dashboard"]);
-const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
 const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "sales-dashboard",
   "stock",
@@ -138,6 +144,9 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left", moduleKey: "TRANSACTION" },
   { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION" },
   { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
+  { mode: "sales", pageKey: "lot-commercial-analytics", href: "lot-commercial-analytics.html", label: "Lot Commercial Analytics", icon: "fas fa-chart-line", moduleKey: "PROFIT_REPORT" },
+  { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline" },
+  { mode: "sales", pageKey: "reconciliation-dashboard", href: "reconciliation-dashboard.html", label: "ERP Health Check", icon: "fas fa-heart-pulse" },
   { mode: "sales", group: "branch", pageKey: "branch-management", href: "branch-management.html", label: "Branch Management", icon: "fas fa-code-branch", moduleKey: "BRANCH" },
   { mode: "sales", group: "branch", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box", moduleKey: "BRANCH_TRANSFER" },
   { mode: "sales", group: "branch", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode", moduleKey: "BRANCH_RECEIVE" },

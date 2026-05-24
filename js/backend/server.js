@@ -45,6 +45,9 @@ const PROTECTED_PAGES = new Set([
   "expense-manager.html",
   "transaction.html",
   "transaction-reports.html",
+  "reconciliation-dashboard.html",
+  "lot-commercial-analytics.html",
+  "barcode-lifecycle.html",
   "return.html",
   "admin-approval.html",
   "company-plans.html",
@@ -972,6 +975,27 @@ const TRANSACTION_TYPES = [
   "INTERNAL_TRANSFER"
 ];
 
+const BARCODE_LIFECYCLE_EVENT_TYPES = Object.freeze({
+  STICKER_CREATED: "STICKER_CREATED",
+  STICKER_UPDATED: "STICKER_UPDATED",
+  STICKER_DELETED: "STICKER_DELETED",
+  STICKER_RESTORED: "STICKER_RESTORED",
+  BILLED: "BILLED",
+  SALE_CANCELLED_STOCK_RESTORED: "SALE_CANCELLED_STOCK_RESTORED",
+  RETURNED_TO_STOCK: "RETURNED_TO_STOCK",
+  DAMAGED_RETURNED: "DAMAGED_RETURNED",
+  REFUND_PAYABLE_CREATED: "REFUND_PAYABLE_CREATED",
+  CASH_REFUND_PAID: "CASH_REFUND_PAID",
+  METAL_REFUND_GIVEN: "METAL_REFUND_GIVEN",
+  TRANSFER_DRAFT_ADDED: "TRANSFER_DRAFT_ADDED",
+  TRANSFER_DISPATCHED: "TRANSFER_DISPATCHED",
+  TRANSFER_RECEIVED: "TRANSFER_RECEIVED",
+  TRANSFER_SHORTAGE: "TRANSFER_SHORTAGE",
+  PROCESS_LINKED: "PROCESS_LINKED",
+  LAMINATION_APPROVED: "LAMINATION_APPROVED",
+  STOCK_LIFECYCLE_NORMALIZED: "STOCK_LIFECYCLE_NORMALIZED"
+});
+
 function normalizePartyType(value) {
   const clean = String(value || "").trim().toUpperCase();
   return PARTY_TYPES.includes(clean) ? clean : "";
@@ -1688,10 +1712,14 @@ async function getProcessStepAdditiveIssueTotals(connection, companyId, processS
   const totalGiven = issueRows.reduce((sum, row) => sum + toNumber(row.given_weight), 0);
   const totalReturned = issueRows.reduce((sum, row) => sum + toNumber(row.returned_weight), 0);
   const totalUsed = issueRows.reduce((sum, row) => {
-    const usedWeight = hasProvidedValue(row.used_weight)
-      ? toNumber(row.used_weight)
-      : toNumber(row.given_weight) - toNumber(row.returned_weight);
-    return sum + Math.max(usedWeight, 0);
+    const givenWeight = toNumber(row.given_weight);
+    const returnedWeight = toNumber(row.returned_weight);
+    const explicitUsedWeight = toNumber(row.used_weight);
+    const ledgerUsedWeight = givenWeight - returnedWeight;
+    const effectiveUsedWeight = givenWeight > 0 || returnedWeight > 0
+      ? ledgerUsedWeight
+      : explicitUsedWeight;
+    return sum + Math.max(effectiveUsedWeight, 0);
   }, 0);
   const pendingWeight = Math.max(totalGiven - totalReturned, 0);
   const materialLabel = String(issueRows.find((row) => String(row.material_label || "").trim())?.material_label || "").trim();
@@ -1708,6 +1736,18 @@ async function getProcessStepAdditiveIssueTotals(connection, companyId, processS
 
 async function recalcProcessStepAdditiveTotals(connection, companyId, processStepId, options = {}) {
   const totals = await getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, options);
+
+  const [insertResult] = await connection.query(
+    `
+    UPDATE process_step_additive_issues
+    SET used_weight = GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)
+    WHERE company_id = ?
+      AND process_step_id = ?
+      AND (COALESCE(given_weight, 0) > 0 OR COALESCE(returned_weight, 0) > 0)
+      AND ABS(COALESCE(used_weight, 0) - GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)) > 0.0005
+    `,
+    [companyId, processStepId]
+  );
 
   await connection.query(
     `
@@ -1983,7 +2023,7 @@ async function getProcessStepCorrectionLock(connection, companyId, step, process
   );
 
   if (additiveIssueRows.length) {
-    return lock("ADDITIVE_STOCK_MOVEMENT_EXISTS", "KDM/Solder stock has been issued in this step, so correction needs reversal tracking first", {
+    return lock("ADDITIVE_STOCK_MOVEMENT_EXISTS", "Additive material stock has been issued in this step, so correction needs reversal tracking first", {
       additiveIssueId: additiveIssueRows[0].id
     });
   }
@@ -2130,9 +2170,11 @@ async function buildProcessStepCorrectionScan(connection, companyId, step, proce
     returnedAt: row.returned_at || null
   }));
   if (additiveIssues.length) {
+    const additiveIssueLabels = [...new Set(additiveIssues.map((issue) => normalizeAdditiveMaterialType(issue.materialLabel)).filter(Boolean))];
+    const additiveIssueReason = `${additiveIssueLabels.join("/") || "Additive material"} issued in this step`;
     lockReasons.push({
       code: "ADDITIVE_STOCK_MOVEMENT_EXISTS",
-      reason: "KDM/Solder issued in this step",
+      reason: additiveIssueReason,
       classification: "AUTO_REVERSIBLE_FUTURE"
     });
   }
@@ -2303,7 +2345,7 @@ async function buildProcessStepCorrectionScan(connection, companyId, step, proce
 
   const dependencies = {
     downstreamSteps: buildCorrectionDependencyResult("HARD_BLOCKED", downstreamSteps, "Later process step exists"),
-    additiveIssues: buildCorrectionDependencyResult("AUTO_REVERSIBLE_FUTURE", additiveIssues, "KDM/Solder issued in this step"),
+    additiveIssues: buildCorrectionDependencyResult("AUTO_REVERSIBLE_FUTURE", additiveIssues, additiveIssues.length ? `${[...new Set(additiveIssues.map((issue) => normalizeAdditiveMaterialType(issue.materialLabel)).filter(Boolean))].join("/") || "Additive material"} issued in this step` : "Additive material issued in this step"),
     recoveryStock: buildCorrectionDependencyResult(
       lockedRecoveryStock ? "HARD_BLOCKED" : "AUTO_REVERSIBLE_FUTURE",
       recoveryStock,
@@ -2413,11 +2455,12 @@ function getNonReversibleCorrectionScanReasons(scan = {}) {
 
   const additiveIssues = dependencies.additiveIssues?.details || [];
   additiveIssues.forEach((issue) => {
+    const materialType = normalizeAdditiveMaterialType(issue.materialLabel) || "Additive material";
     if (toNumber(issue.returnedWeight) > 0 || issue.returnStockMovementId) {
-      addReason("KDM/Solder return or adjustment already exists");
+      addReason(`${materialType} return or adjustment already exists`);
     }
     if (!issue.stockItemId) {
-      addReason("KDM/Solder stock item is missing");
+      addReason(`${materialType} stock item is missing`);
     }
   });
 
@@ -2750,7 +2793,8 @@ function calculateBillingServerTotals(payload) {
   const roundOff = toNumber(payload.roundOff);
 
   const lines = items.map((item, index) => {
-    const weight = toNumber(item.weight);
+    const commercialWeights = getBillingCommercialWeights(item);
+    const weight = commercialWeights.billableWeight;
     const purity = toNumber(item.purity) > 0 ? toNumber(item.purity) : 100;
     const pureWeight = (weight * purity) / 100;
     const makingCharge = hasMeaningfulNumber(item.makingChargeAmount ?? item.making_charge_amount)
@@ -2766,6 +2810,9 @@ function calculateBillingServerTotals(payload) {
       itemName: String(item.itemName || item.productName || item.product_name || "").trim(),
       lotNumber: String(item.lot || item.lot_number || "").trim(),
       weight,
+      actualWeight: commercialWeights.actualWeight,
+      billableWeight: commercialWeights.billableWeight,
+      laminationGainWeight: commercialWeights.laminationGainWeight,
       purity,
       pureWeight,
       makingCharge,
@@ -2955,6 +3002,23 @@ async function generateInvoiceNumberForCompany(connection, companyId, billDate, 
   );
 
   return `${cleanPrefix}-${sequenceYear}-${String(nextNumber).padStart(6, "0")}`;
+}
+
+function getBillingCommercialWeights(item = {}) {
+  const baseWeight = toNumber(item.weight);
+  const explicitBillableWeight = toNumber(item.billableWeight ?? item.billable_weight);
+  const explicitActualWeight = toNumber(item.actualWeight ?? item.actual_weight);
+  const explicitGainWeight = toNumber(item.laminationGainWeight ?? item.lamination_gain_weight);
+  const billableWeight = explicitBillableWeight > 0 ? explicitBillableWeight : baseWeight;
+  const actualWeight = explicitActualWeight > 0 ? explicitActualWeight : baseWeight;
+  const inferredGain = Math.max(billableWeight - actualWeight, 0);
+  const laminationGainWeight = explicitGainWeight > 0 ? explicitGainWeight : inferredGain;
+
+  return {
+    actualWeight,
+    billableWeight,
+    laminationGainWeight
+  };
 }
 
 function getKarigarJobSlipDateKey(value = new Date()) {
@@ -3887,6 +3951,10 @@ function buildSalesBranchTotalsJoin(branchScope) {
           si.invoice_number,
           COUNT(*) AS branch_total_items,
           COALESCE(SUM(si.weight), 0) AS branch_total_weight,
+          COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) AS branch_total_actual_weight,
+          COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) AS branch_total_billable_weight,
+          COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) AS branch_total_lamination_gain_weight,
+          COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) AS branch_estimated_commercial_gain_value,
           COALESCE(SUM(COALESCE(si.customer_line_amount, si.total_price, 0)), 0) AS branch_total_amount,
           COALESCE(SUM(COALESCE(si.customer_line_amount, si.total_price, 0)), 0) AS branch_customer_total_amount,
           COALESCE(SUM(COALESCE(si.company_line_amount, 0)), 0) AS branch_company_total_amount,
@@ -3919,7 +3987,11 @@ function getSalesHistorySelectColumns(branchScope) {
   if (!branchScope?.isBranchFiltered) {
     return `
       sh.*,
-      (SELECT COUNT(*) FROM sales_items si WHERE si.sale_id = sh.id AND COALESCE(si.is_deleted, 0) = 0) AS total_items
+      (SELECT COUNT(*) FROM sales_items si WHERE si.company_id = sh.company_id AND si.invoice_number = sh.invoice_number AND COALESCE(si.is_deleted, 0) = 0) AS total_items,
+      (SELECT COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) FROM sales_items si WHERE si.company_id = sh.company_id AND si.invoice_number = sh.invoice_number AND COALESCE(si.is_deleted, 0) = 0) AS total_actual_weight,
+      (SELECT COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) FROM sales_items si WHERE si.company_id = sh.company_id AND si.invoice_number = sh.invoice_number AND COALESCE(si.is_deleted, 0) = 0) AS total_billable_weight,
+      (SELECT COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) FROM sales_items si WHERE si.company_id = sh.company_id AND si.invoice_number = sh.invoice_number AND COALESCE(si.is_deleted, 0) = 0) AS total_lamination_gain_weight,
+      (SELECT COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) FROM sales_items si WHERE si.company_id = sh.company_id AND si.invoice_number = sh.invoice_number AND COALESCE(si.is_deleted, 0) = 0) AS estimated_commercial_gain_value
     `;
   }
 
@@ -3927,6 +3999,10 @@ function getSalesHistorySelectColumns(branchScope) {
     sh.*,
     COALESCE(branch_totals.branch_total_items, 0) AS total_items,
     COALESCE(branch_totals.branch_total_weight, 0) AS total_weight,
+    COALESCE(branch_totals.branch_total_actual_weight, 0) AS total_actual_weight,
+    COALESCE(branch_totals.branch_total_billable_weight, 0) AS total_billable_weight,
+    COALESCE(branch_totals.branch_total_lamination_gain_weight, 0) AS total_lamination_gain_weight,
+    COALESCE(branch_totals.branch_estimated_commercial_gain_value, 0) AS estimated_commercial_gain_value,
     COALESCE(branch_totals.branch_total_amount, 0) AS total_amount,
     COALESCE(branch_totals.branch_customer_total_amount, 0) AS customer_total_amount,
     COALESCE(branch_totals.branch_company_total_amount, 0) AS company_total_amount,
@@ -5734,6 +5810,99 @@ function normalizeBarcodeForComparison(barcode) {
   return String(barcode || "").trim().toUpperCase();
 }
 
+function toNullableLifecycleNumber(value) {
+  const numberValue = Number(value || 0);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
+function toNullableLifecycleString(value) {
+  const clean = String(value ?? "").trim();
+  return clean || null;
+}
+
+async function appendBarcodeLifecycleEvent(connectionOrPool, options = {}) {
+  const strict = Boolean(options.strict);
+
+  try {
+    const db = connectionOrPool || pool;
+    const companyId = toNullableLifecycleNumber(options.companyId ?? options.company_id);
+    const barcode = String(options.barcode || "").trim();
+    const normalizedBarcode = normalizeBarcodeForComparison(options.normalizedBarcode || options.normalized_barcode || barcode);
+    const eventType = String(options.eventType || options.event_type || "").trim().toUpperCase();
+
+    if (!companyId || !normalizedBarcode || !eventType) {
+      if (strict) {
+        throw new Error("Barcode lifecycle event requires company_id, barcode, and event_type");
+      }
+      return null;
+    }
+
+    const cleanBarcode = barcode || normalizedBarcode;
+    const eventPayload = sanitizeAuditPayload(options.eventPayload ?? options.event_payload ?? null);
+    const [result] = await db.query(
+      `
+      INSERT INTO barcode_lifecycle_events
+      (
+        company_id,
+        barcode,
+        normalized_barcode,
+        stock_id,
+        lot_no,
+        serial,
+        process_lot_id,
+        branch_id,
+        from_branch_id,
+        to_branch_id,
+        invoice_number,
+        transfer_id,
+        return_id,
+        refund_payable_id,
+        transaction_id,
+        event_type,
+        event_title,
+        event_description,
+        event_payload,
+        source_table,
+        source_id,
+        created_by,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `,
+      [
+        companyId,
+        cleanBarcode,
+        normalizedBarcode,
+        toNullableLifecycleNumber(options.stockId ?? options.stock_id),
+        toNullableLifecycleString(options.lotNo ?? options.lot_no),
+        toNullableLifecycleString(options.serial),
+        toNullableLifecycleNumber(options.processLotId ?? options.process_lot_id),
+        toNullableLifecycleNumber(options.branchId ?? options.branch_id),
+        toNullableLifecycleNumber(options.fromBranchId ?? options.from_branch_id),
+        toNullableLifecycleNumber(options.toBranchId ?? options.to_branch_id),
+        toNullableLifecycleString(options.invoiceNumber ?? options.invoice_number),
+        toNullableLifecycleNumber(options.transferId ?? options.transfer_id),
+        toNullableLifecycleNumber(options.returnId ?? options.return_id),
+        toNullableLifecycleNumber(options.refundPayableId ?? options.refund_payable_id),
+        toNullableLifecycleNumber(options.transactionId ?? options.transaction_id),
+        eventType,
+        toNullableLifecycleString(options.eventTitle ?? options.event_title) || eventType.replace(/_/g, " "),
+        toNullableLifecycleString(options.eventDescription ?? options.event_description),
+        safeJsonStringify(eventPayload),
+        toNullableLifecycleString(options.sourceTable ?? options.source_table),
+        toNullableLifecycleNumber(options.sourceId ?? options.source_id),
+        toNullableLifecycleNumber(options.createdBy ?? options.created_by)
+      ]
+    );
+
+    return toNullableLifecycleNumber(result?.insertId);
+  } catch (error) {
+    console.warn("Barcode lifecycle event append failed:", error?.message || error);
+    if (strict) throw error;
+    return null;
+  }
+}
+
 function createBarcodeSafetyError(message = DUPLICATE_BARCODE_MESSAGE) {
   const error = new Error(message);
   error.status = 409;
@@ -6347,6 +6516,7 @@ async function buildReturnPreview(connection, {
 
   const settlementSummary = await buildReturnSettlementSummary(connection, cleanCompanyId, invoiceNumber, saleItem);
   const refundEstimate = buildReturnRefundEstimate(saleItem, settlementSummary);
+  const returnCommercialWeights = getBillingCommercialWeights(saleItem || stock || {});
   if (settlementSummary.isSettlementBlocked) {
     blockingReasons.push("Paid/settled invoice return requires refund workflow");
   }
@@ -6384,6 +6554,12 @@ async function buildReturnPreview(connection, {
     blockingReasons: uniqueBlockingReasons,
     warnings: [...new Set(warnings)],
     settlementSummary,
+    physicalBillableWeight: {
+      actualWeight: returnCommercialWeights.actualWeight,
+      billableWeight: returnCommercialWeights.billableWeight,
+      laminationGainWeight: returnCommercialWeights.laminationGainWeight,
+      refundBasis: "Existing refund calculation is unchanged and continues to use sold item weight in Phase 3."
+    },
     estimatedRefundCashAmount: refundEstimate.estimatedRefundCashAmount,
     estimatedRefundMetalWeight: refundEstimate.estimatedRefundMetalWeight,
     refundModeHint: refundEstimate.refundModeHint,
@@ -8242,6 +8418,8 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "ANALYTICS", pattern: /^\/shortage-analytics(?:\.html)?$/i },
   { moduleKey: "ANALYTICS", pattern: /^\/stock-movement-ledger(?:\.html)?$/i },
   { moduleKey: "PROFIT_REPORT", pattern: /^\/profit-report(?:\.html)?$/i },
+  { moduleKey: "PROFIT_REPORT", pattern: /^\/lot-commercial-analytics(?:\.html)?$/i },
+  { moduleKey: "PROFIT_REPORT", pattern: /^\/reports\/lot-commercial-profit(?:\/|$)/i },
   { moduleKey: "TRANSACTION", pattern: /^\/transaction(?:\.html|\/|$)/i },
   { moduleKey: "TRANSACTION", pattern: /^\/transaction-reports(?:\.html)?$/i }
 ];
@@ -9137,6 +9315,9 @@ async function ensureSchema() {
       mm VARCHAR(50) DEFAULT '',
       size VARCHAR(100) DEFAULT '',
       weight DECIMAL(10,3) DEFAULT 0.000,
+      actual_weight DECIMAL(14,3) DEFAULT 0.000,
+      billable_weight DECIMAL(14,3) DEFAULT 0.000,
+      lamination_gain_weight DECIMAL(14,3) DEFAULT 0.000,
       qty INT DEFAULT 1,
       category VARCHAR(120) DEFAULT '',
       lot_number VARCHAR(100) DEFAULT '',
@@ -9157,6 +9338,41 @@ async function ensureSchema() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       deleted_at DATETIME DEFAULT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS barcode_lifecycle_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      barcode VARCHAR(255) NOT NULL,
+      normalized_barcode VARCHAR(255) NOT NULL,
+      stock_id INT DEFAULT NULL,
+      lot_no VARCHAR(120) DEFAULT NULL,
+      serial VARCHAR(80) DEFAULT NULL,
+      process_lot_id INT DEFAULT NULL,
+      branch_id INT DEFAULT NULL,
+      from_branch_id INT DEFAULT NULL,
+      to_branch_id INT DEFAULT NULL,
+      invoice_number VARCHAR(100) DEFAULT NULL,
+      transfer_id INT DEFAULT NULL,
+      return_id INT DEFAULT NULL,
+      refund_payable_id INT DEFAULT NULL,
+      transaction_id INT DEFAULT NULL,
+      event_type VARCHAR(80) NOT NULL,
+      event_title VARCHAR(255) DEFAULT '',
+      event_description TEXT DEFAULT NULL,
+      event_payload JSON DEFAULT NULL,
+      source_table VARCHAR(120) DEFAULT NULL,
+      source_id INT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_barcode_lifecycle_barcode (company_id, normalized_barcode, created_at),
+      INDEX idx_barcode_lifecycle_stock (company_id, stock_id, created_at),
+      INDEX idx_barcode_lifecycle_invoice (company_id, invoice_number),
+      INDEX idx_barcode_lifecycle_lot (company_id, lot_no),
+      INDEX idx_barcode_lifecycle_type (company_id, event_type),
+      INDEX idx_barcode_lifecycle_branch (company_id, branch_id, created_at)
     )
   `);
 
@@ -9261,6 +9477,9 @@ async function ensureSchema() {
       purity VARCHAR(50) DEFAULT '',
       size VARCHAR(100) DEFAULT '',
       weight DECIMAL(10,3) DEFAULT 0.000,
+      actual_weight DECIMAL(14,3) DEFAULT 0.000,
+      billable_weight DECIMAL(14,3) DEFAULT 0.000,
+      lamination_gain_weight DECIMAL(14,3) DEFAULT 0.000,
       lot_number VARCHAR(100) DEFAULT '',
       customer_name VARCHAR(255) DEFAULT '',
       pure_weight DECIMAL(12,3) DEFAULT 0.000,
@@ -9692,6 +9911,9 @@ async function ensureSchema() {
       metal_type VARCHAR(20) DEFAULT '',
       purity DECIMAL(8,3) DEFAULT 0.000,
       gross_weight DECIMAL(14,3) DEFAULT 0.000,
+      actual_weight DECIMAL(14,3) DEFAULT 0.000,
+      billable_weight DECIMAL(14,3) DEFAULT 0.000,
+      lamination_gain_weight DECIMAL(14,3) DEFAULT 0.000,
       net_weight DECIMAL(14,3) DEFAULT 0.000,
       fine_weight DECIMAL(14,3) DEFAULT 0.000,
       qty DECIMAL(14,3) DEFAULT 0.000,
@@ -10099,6 +10321,27 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS process_lamination_weights (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT DEFAULT NULL,
+      process_lot_id INT DEFAULT NULL,
+      lot_no VARCHAR(120) NOT NULL,
+      actual_process_weight DECIMAL(14,3) DEFAULT 0.000,
+      lamination_gain_weight DECIMAL(14,3) DEFAULT 0.000,
+      billable_weight DECIMAL(14,3) DEFAULT 0.000,
+      status VARCHAR(30) DEFAULT 'DRAFT',
+      remarks TEXT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      approved_by INT DEFAULT NULL,
+      approved_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_lamination_lot_status (company_id, lot_no, status),
+      INDEX idx_lamination_process_lot (company_id, process_lot_id)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS outside_karigar_ledger (
       id INT AUTO_INCREMENT PRIMARY KEY,
       company_id INT DEFAULT NULL,
@@ -10502,6 +10745,9 @@ async function ensureSchema() {
   if (await tableExists("stock")) {
     await addColumnIfMissing("stock", "company_id", "INT DEFAULT NULL");
     await addColumnIfMissing("stock", "qty", "INT DEFAULT 1");
+    await addColumnIfMissing("stock", "actual_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("stock", "billable_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("stock", "lamination_gain_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("stock", "category", "VARCHAR(120) DEFAULT ''");
     await addColumnIfMissing("stock", "source", "VARCHAR(120) DEFAULT ''");
     await addColumnIfMissing("stock", "manual_lot_id", "INT DEFAULT NULL");
@@ -10587,6 +10833,9 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_items", "returned_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("sales_items", "return_id", "INT DEFAULT NULL");
     await addColumnIfMissing("sales_items", "return_transaction_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("sales_items", "actual_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("sales_items", "billable_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("sales_items", "lamination_gain_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("sales_items", "pure_weight", "DECIMAL(12,3) DEFAULT 0.000");
     await addColumnIfMissing("sales_items", "company_rate_per_gram", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_items", "selling_rate_per_gram", "DECIMAL(12,2) DEFAULT 0.00");
@@ -10898,6 +11147,54 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_recovery_inputs", "weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("process_step_recovery_inputs", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_recovery_inputs", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("process_lamination_weights")) {
+    await addColumnIfMissing("process_lamination_weights", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "lot_no", "VARCHAR(120) NOT NULL");
+    await addColumnIfMissing("process_lamination_weights", "actual_process_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lamination_weights", "lamination_gain_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lamination_weights", "billable_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("process_lamination_weights", "status", "VARCHAR(30) DEFAULT 'DRAFT'");
+    await addColumnIfMissing("process_lamination_weights", "remarks", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "approved_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "approved_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("process_lamination_weights", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("process_lamination_weights", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+
+  if (await tableExists("barcode_lifecycle_events")) {
+    await addColumnIfMissing("barcode_lifecycle_events", "company_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "barcode", "VARCHAR(255) NOT NULL DEFAULT ''");
+    await addColumnIfMissing("barcode_lifecycle_events", "normalized_barcode", "VARCHAR(255) NOT NULL DEFAULT ''");
+    await addColumnIfMissing("barcode_lifecycle_events", "stock_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "lot_no", "VARCHAR(120) DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "serial", "VARCHAR(80) DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "process_lot_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "from_branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "to_branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "invoice_number", "VARCHAR(100) DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "transfer_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "return_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "refund_payable_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "transaction_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "event_type", "VARCHAR(80) NOT NULL DEFAULT ''");
+    await addColumnIfMissing("barcode_lifecycle_events", "event_title", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("barcode_lifecycle_events", "event_description", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "event_payload", "JSON DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "source_table", "VARCHAR(120) DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "source_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "created_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("barcode_lifecycle_events", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_barcode", "(company_id, normalized_barcode, created_at)");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_stock", "(company_id, stock_id, created_at)");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_invoice", "(company_id, invoice_number)");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_lot", "(company_id, lot_no)");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_type", "(company_id, event_type)");
+    await addIndexIfMissing("barcode_lifecycle_events", "idx_barcode_lifecycle_branch", "(company_id, branch_id, created_at)");
   }
 
   if (await tableExists("outside_karigar_ledger")) {
@@ -11269,6 +11566,11 @@ async function ensureSchema() {
     await addUniqueIndexIfMissing("process_step_recovery_inputs", "uq_process_step_recovery_stock", "(company_id, stock_id)");
   }
 
+  if (await tableExists("process_lamination_weights")) {
+    await addIndexIfMissing("process_lamination_weights", "idx_lamination_lot_status", "(company_id, lot_no, status)");
+    await addIndexIfMissing("process_lamination_weights", "idx_lamination_process_lot", "(company_id, process_lot_id)");
+  }
+
   if (await tableExists("sales_history")) {
     await addIndexIfMissing("sales_history", "idx_sales_company_invoice", "(company_id, invoice_number)");
     await addIndexIfMissing("sales_history", "idx_sales_company_status", "(company_id, status)");
@@ -11411,6 +11713,9 @@ async function ensureSchema() {
     await addColumnIfMissing("transaction_lines", "metal_type", "VARCHAR(20) DEFAULT ''");
     await addColumnIfMissing("transaction_lines", "purity", "DECIMAL(8,3) DEFAULT 0.000");
     await addColumnIfMissing("transaction_lines", "gross_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "actual_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "billable_weight", "DECIMAL(14,3) DEFAULT 0.000");
+    await addColumnIfMissing("transaction_lines", "lamination_gain_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("transaction_lines", "net_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("transaction_lines", "fine_weight", "DECIMAL(14,3) DEFAULT 0.000");
     await addColumnIfMissing("transaction_lines", "qty", "DECIMAL(14,3) DEFAULT 0.000");
@@ -12204,15 +12509,17 @@ async function postBillingToTransactionFoundation(connection, payload) {
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index] || {};
+    const commercialWeights = getBillingCommercialWeights(item);
     await connection.query(
       `
       INSERT INTO transaction_lines
       (
         transaction_id, line_no, item_name, barcode, lot_no, metal_type,
-        purity, gross_weight, fine_weight, qty, rate_per_gram, metal_value,
+        purity, gross_weight, actual_weight, billable_weight, lamination_gain_weight,
+        fine_weight, qty, rate_per_gram, metal_value,
         making_charge, hallmark_charge, line_amount, remarks
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         saleTransactionId,
@@ -12222,7 +12529,10 @@ async function postBillingToTransactionFoundation(connection, payload) {
         String(item.lot || item.lot_number || "").trim(),
         normalizeMetalType(item.metalType || item.metal_type || metalType),
         toNumber(item.purity),
-        toNumber(item.weight),
+        commercialWeights.billableWeight,
+        commercialWeights.actualWeight,
+        commercialWeights.billableWeight,
+        commercialWeights.laminationGainWeight,
         toNumber(item.fineWeight ?? item.fine_weight ?? item.weight),
         toNumber(item.qty || 1),
         ratePerGram,
@@ -12230,7 +12540,9 @@ async function postBillingToTransactionFoundation(connection, payload) {
         mcRate,
         toNumber(item.hallmarkCharge ?? item.hallmark_charge ?? 0),
         toNumber(item.totalPrice ?? item.total_price ?? 0),
-        "Billing item line"
+        commercialWeights.laminationGainWeight > 0
+          ? `Billing item line | Actual ${commercialWeights.actualWeight.toFixed(3)}g | Billable ${commercialWeights.billableWeight.toFixed(3)}g | Lamination ${commercialWeights.laminationGainWeight.toFixed(3)}g`
+          : "Billing item line"
       ]
     );
   }
@@ -12750,6 +13062,26 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       salesParams
     );
 
+    const itemCommercialWhereParts = ["COALESCE(si.is_deleted, 0) = 0"];
+    const itemCommercialParams = [];
+    if (companyId !== null) {
+      itemCommercialWhereParts.push("si.company_id = ?");
+      itemCommercialParams.push(companyId);
+    }
+    appendSalesItemBranchScope(itemCommercialWhereParts, itemCommercialParams, branchScope, { itemAlias: "si" });
+    const [salesCommercialSummary] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) AS total_actual_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) AS total_billable_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) AS total_lamination_gain_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) AS estimated_commercial_gain_value
+      FROM sales_items si
+      WHERE ${itemCommercialWhereParts.join(" AND ")}
+      `,
+      itemCommercialParams
+    );
+
     const [recentInvoices] = await pool.query(
       `
       SELECT
@@ -12848,6 +13180,10 @@ app.get("/api/dashboard", authMiddleware, async (req, res) => {
       damagedReturns: returnSummary.damagedReturnCount,
       totalSales: Number(salesSummary[0]?.total_sales || 0),
       totalSalesAmount: Number(salesSummary[0]?.total_sales_amount || 0),
+      totalActualWeight: Number(salesCommercialSummary[0]?.total_actual_weight || 0),
+      totalBillableWeight: Number(salesCommercialSummary[0]?.total_billable_weight || 0),
+      totalLaminationGainWeight: Number(salesCommercialSummary[0]?.total_lamination_gain_weight || 0),
+      estimatedCommercialGainValue: Number(salesCommercialSummary[0]?.estimated_commercial_gain_value || 0),
       recentInvoices,
       recentStock,
       recentReturns: returnSummary.recentReturns,
@@ -15415,6 +15751,54 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     };
   }
 
+  const allowance = await getStickerBillableAllowance(connection, companyId, cleanLot, excludeStockId);
+  if (!allowance.ok) return allowance;
+  if (allowance.isManualLot) return { ok: true, ...allowance };
+
+  const totalWeight = allowance.usedStickerWeight + stickerWeight;
+  const totalQty = allowance.usedQty + stickerQty;
+  const allowedWeight = allowance.billableAllowedWeight;
+  const allowedQty = allowance.allowedQty;
+  const remainingBillableWeight = Math.max(allowedWeight - allowance.usedStickerWeight, 0);
+
+  if (allowedQty > 0 && !qtyProvided) {
+    return {
+      ok: false,
+      message: "Sticker quantity is required when quantity tracking is active",
+      ...allowance,
+      remainingBillableWeight
+    };
+  }
+
+  if (allowedWeight > 0 && totalWeight > allowedWeight + 0.0005) {
+    return {
+      ok: false,
+      message: `Sticker weight exceeds ${allowance.laminationGainWeight > 0 ? "approved lamination billable allowance" : "final process output"} for lot ${cleanLot}. Allowed ${allowedWeight.toFixed(3)}g, attempted ${totalWeight.toFixed(3)}g.`,
+      ...allowance,
+      remainingBillableWeight
+    };
+  }
+
+  if (allowedQty > 0 && totalQty > allowedQty + 0.0005) {
+    return {
+      ok: false,
+      message: `Sticker quantity exceeds final process output for lot ${cleanLot}. Allowed ${allowedQty}, attempted ${totalQty}.`,
+      ...allowance,
+      remainingBillableWeight
+    };
+  }
+
+  return {
+    ok: true,
+    ...allowance,
+    remainingBillableWeight
+  };
+}
+
+async function getStickerBillableAllowance(connection, companyId, lotNo, excludeStockId = null) {
+  const cleanLot = normalizeProcessLotNo(lotNo);
+  if (!cleanLot) return { ok: true };
+
   const [lotRows] = await connection.query(
     `
     SELECT *
@@ -15446,7 +15830,11 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   }
 
   if (isManualProcessLot(processLot)) {
-    return { ok: true };
+    return {
+      ok: true,
+      isManualLot: true,
+      laminationStatus: "MANUAL_LOT"
+    };
   }
 
   const finalStep = await getLastCompletedProcessStep(connection, companyId, processLot.id);
@@ -15457,6 +15845,23 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     };
   }
 
+  const [laminationRows] = await connection.query(
+    `
+    SELECT *
+    FROM process_lamination_weights
+    WHERE company_id = ?
+      AND process_lot_id = ?
+    ORDER BY FIELD(UPPER(COALESCE(status, 'DRAFT')), 'APPROVED', 'DRAFT', 'CANCELLED'), id DESC
+    LIMIT 1
+    `,
+    [companyId, processLot.id]
+  );
+  const laminationRecord = laminationRows.length ? normalizeProcessLaminationWeightRow(laminationRows[0]) : null;
+  const isApprovedLamination = laminationRecord?.status === "APPROVED";
+  const actualProcessWeight = toNumber(finalStep.output_weight);
+  const laminationGainWeight = isApprovedLamination ? toNumber(laminationRecord.laminationGainWeight) : 0;
+  const billableAllowedWeight = Number(format3(actualProcessWeight + laminationGainWeight));
+
   const params = [companyId, cleanLot];
   let excludeSql = "";
   if (excludeStockId) {
@@ -15466,7 +15871,8 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
 
   const [usageRows] = await connection.query(
     `
-    SELECT COALESCE(SUM(weight), 0) AS used_weight,
+    SELECT COALESCE(SUM(COALESCE(NULLIF(billable_weight, 0), weight)), 0) AS used_weight,
+      COALESCE(SUM(COALESCE(NULLIF(actual_weight, 0), weight)), 0) AS used_actual_weight,
       COALESCE(SUM(qty), 0) AS used_qty
     FROM stock
     WHERE company_id = ?
@@ -15478,35 +15884,87 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   );
 
   const usedWeight = toNumber(usageRows[0]?.used_weight);
+  const usedActualWeight = toNumber(usageRows[0]?.used_actual_weight);
   const usedQty = toNumber(usageRows[0]?.used_qty);
-  const totalWeight = usedWeight + stickerWeight;
-  const totalQty = usedQty + stickerQty;
-  const allowedWeight = toNumber(finalStep.output_weight);
-  const allowedQty = toNumber(finalStep.output_qty);
-
-  if (allowedQty > 0 && !qtyProvided) {
-    return {
-      ok: false,
-      message: "Sticker quantity is required when quantity tracking is active"
-    };
-  }
-
-  if (allowedWeight > 0 && totalWeight > allowedWeight + 0.0005) {
-    return {
-      ok: false,
-      message: `Sticker weight exceeds final process output for lot ${cleanLot}. Allowed ${allowedWeight.toFixed(3)}g, attempted ${totalWeight.toFixed(3)}g.`
-    };
-  }
-
-  if (allowedQty > 0 && totalQty > allowedQty + 0.0005) {
-    return {
-      ok: false,
-      message: `Sticker quantity exceeds final process output for lot ${cleanLot}. Allowed ${allowedQty}, attempted ${totalQty}.`
-    };
-  }
-
-  return { ok: true };
+  return {
+    ok: true,
+    isManualLot: false,
+    processLotId: Number(processLot.id || 0),
+    actualProcessWeight,
+    laminationGainWeight,
+    billableAllowedWeight,
+    usedStickerWeight: usedWeight,
+    usedActualWeight,
+    usedQty,
+    allowedQty: toNumber(finalStep.output_qty),
+    remainingBillableWeight: Math.max(billableAllowedWeight - usedWeight, 0),
+    laminationStatus: laminationRecord?.status || "NONE"
+  };
 }
+
+function getStickerCommercialWeights(item = {}, allowance = {}) {
+  const billableWeight = Number(format3(item.weight || 0));
+  if (allowance?.isManualLot || !allowance || toNumber(allowance.billableAllowedWeight) <= 0) {
+    return {
+      actualWeight: billableWeight,
+      billableWeight,
+      laminationGainWeight: 0
+    };
+  }
+
+  if (toNumber(allowance.laminationGainWeight) <= 0 || allowance.laminationStatus !== "APPROVED") {
+    return {
+      actualWeight: billableWeight,
+      billableWeight,
+      laminationGainWeight: 0
+    };
+  }
+
+  const actualRatio = toNumber(allowance.actualProcessWeight) / toNumber(allowance.billableAllowedWeight);
+  const actualWeight = Number(format3(billableWeight * actualRatio));
+  return {
+    actualWeight,
+    billableWeight,
+    laminationGainWeight: Number(format3(Math.max(billableWeight - actualWeight, 0)))
+  };
+}
+
+app.get("/process/lots/:lotNo/sticker-allowance", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.query.lotNo || req.query.lot_no);
+    connection = await pool.getConnection();
+    const allowance = await getStickerBillableAllowance(connection, access.companyScope, lotNo);
+    if (!allowance.ok) {
+      return res.status(allowance.status || 400).json({
+        success: false,
+        message: allowance.message
+      });
+    }
+
+    return res.json({
+      success: true,
+      lotNo,
+      ...allowance
+    });
+  } catch (error) {
+    console.error("Get sticker allowance error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Sticker allowance fetch failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
 
 async function moveCompletedProcessLotToStock(connection, companyId, processLot, finalStep, userId = null) {
   const workCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory);
@@ -16015,7 +16473,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         material_label, given_weight, returned_weight, used_weight, stock_item_id, status,
         issued_by, issued_at, notes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, 0.000, ?, 'ISSUED', ?, NOW(), ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, ?, ?, 'ISSUED', ?, NOW(), ?)
       `,
       [
         access.companyScope,
@@ -16024,6 +16482,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         finalKarigarId,
         finalKarigarName,
         materialLabel,
+        parsedGiven.value,
         parsedGiven.value,
         Number(additiveStockItem.id || 0),
         access.actingUserId,
@@ -17762,10 +18221,11 @@ app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["S
     for (const additiveRow of additiveRows) {
       const issue = normalizeAdditiveIssueRow(additiveRow);
       if (toNumber(issue.returnedWeight) > 0 || issue.returnStockMovementId) {
+        const materialType = normalizeAdditiveMaterialType(issue.materialLabel) || "additive material";
         await connection.rollback();
         return res.status(409).json({
           success: false,
-          message: "KDM/Solder return or adjustment already exists"
+          message: `${materialType} return or adjustment already exists`
         });
       }
 
@@ -17777,7 +18237,7 @@ app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["S
         await connection.rollback();
         return res.status(409).json({
           success: false,
-          message: "KDM/Solder stock item is missing"
+          message: `${materialType} stock item is missing`
         });
       }
 
@@ -17939,13 +18399,23 @@ app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["S
       });
     }
 
-    await recalcProcessStepAdditiveTotals(connection, access.companyScope, stepId, {
-      forUpdate: true
-    });
-    const effectiveAdditiveGivenWeight = toNumber(beforeStep.additive_given_weight);
-    const effectiveAdditiveReturnedWeight = toNumber(beforeStep.additive_returned_weight);
-    const effectiveAdditiveUsedWeight = toNumber(beforeStep.additive_used_weight);
-    const effectiveAdditiveMaterialLabel = beforeStep.additive_material_label || beforeStep.additiveMaterialLabel || "";
+    const reversedAdditiveTotals = additiveRows.length
+      ? await recalcProcessStepAdditiveTotals(connection, access.companyScope, stepId, {
+        forUpdate: true
+      })
+      : null;
+    const effectiveAdditiveGivenWeight = reversedAdditiveTotals
+      ? reversedAdditiveTotals.additiveGivenWeight
+      : toNumber(beforeStep.additive_given_weight);
+    const effectiveAdditiveReturnedWeight = reversedAdditiveTotals
+      ? reversedAdditiveTotals.additiveReturnedWeight
+      : toNumber(beforeStep.additive_returned_weight);
+    const effectiveAdditiveUsedWeight = reversedAdditiveTotals
+      ? reversedAdditiveTotals.additiveUsedWeight
+      : toNumber(beforeStep.additive_used_weight);
+    const effectiveAdditiveMaterialLabel = reversedAdditiveTotals
+      ? reversedAdditiveTotals.additiveMaterialLabel
+      : (beforeStep.additive_material_label || beforeStep.additiveMaterialLabel || "");
     const weightValidation = validateProcessStepWeightBalance({
       inputWeight: beforeStep.input_weight,
       outputWeight: correctionValues.outputWeight,
@@ -18475,6 +18945,397 @@ app.get("/process/loss-summary", authMiddleware, async (req, res) => {
       message: "Process loss summary fetch failed",
       error: getErrorDetail(error)
     });
+  }
+});
+
+function normalizeLaminationWeightStatus(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  if (clean === "APPROVED" || clean === "CANCELLED") return clean;
+  return "DRAFT";
+}
+
+function normalizeProcessLaminationWeightRow(row = null) {
+  if (!row) return null;
+  return {
+    ...row,
+    id: Number(row.id || 0),
+    company_id: Number(row.company_id || 0),
+    companyId: Number(row.companyId ?? row.company_id ?? 0),
+    process_lot_id: row.process_lot_id === null || row.process_lot_id === undefined ? null : Number(row.process_lot_id),
+    processLotId: (row.processLotId ?? row.process_lot_id) === null || (row.processLotId ?? row.process_lot_id) === undefined ? null : Number(row.processLotId ?? row.process_lot_id),
+    lot_no: String(row.lot_no || ""),
+    lotNo: String(row.lotNo ?? row.lot_no ?? ""),
+    actual_process_weight: toNumber(row.actual_process_weight),
+    actualProcessWeight: toNumber(row.actualProcessWeight ?? row.actual_process_weight),
+    lamination_gain_weight: toNumber(row.lamination_gain_weight),
+    laminationGainWeight: toNumber(row.laminationGainWeight ?? row.lamination_gain_weight),
+    billable_weight: toNumber(row.billable_weight),
+    billableWeight: toNumber(row.billableWeight ?? row.billable_weight),
+    status: normalizeLaminationWeightStatus(row.status),
+    remarks: String(row.remarks || ""),
+    created_by: row.created_by === null || row.created_by === undefined ? null : Number(row.created_by),
+    createdBy: row.createdBy ?? (row.created_by === null || row.created_by === undefined ? null : Number(row.created_by)),
+    approved_by: row.approved_by === null || row.approved_by === undefined ? null : Number(row.approved_by),
+    approvedBy: row.approvedBy ?? (row.approved_by === null || row.approved_by === undefined ? null : Number(row.approved_by)),
+    approved_at: row.approved_at || null,
+    approvedAt: row.approvedAt ?? row.approved_at ?? null,
+    created_at: row.created_at || null,
+    createdAt: row.createdAt ?? row.created_at ?? null,
+    updated_at: row.updated_at || null,
+    updatedAt: row.updatedAt ?? row.updated_at ?? null
+  };
+}
+
+async function resolveProcessLaminationContext(connection, companyId, lotNo, workCategory = "REGULAR_SANKHA") {
+  const cleanLotNo = normalizeProcessLotNo(lotNo);
+  if (!cleanLotNo) {
+    return { ok: false, status: 400, message: "lotNo is required" };
+  }
+
+  const processLot = await getProcessLotForSteps(connection, companyId, cleanLotNo, workCategory);
+  if (!processLot) {
+    return { ok: false, status: 404, message: "Process lot not found" };
+  }
+
+  if (isManualProcessLot(processLot)) {
+    return { ok: false, status: 400, message: "Manual lots are not available for lamination weight yet" };
+  }
+
+  const finalStep = await getLastCompletedProcessStep(connection, companyId, processLot.id);
+  if (!finalStep || toNumber(finalStep.output_weight) <= 0) {
+    return { ok: false, status: 400, message: "Latest completed process output is required before lamination entry" };
+  }
+
+  return {
+    ok: true,
+    lotNo: cleanLotNo,
+    workCategory: normalizeWorkCategory(workCategory),
+    processLot,
+    finalStep,
+    actualProcessWeight: toNumber(finalStep.output_weight)
+  };
+}
+
+async function getActiveProcessLaminationWeight(connection, companyId, processLotId, { forUpdate = false } = {}) {
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM process_lamination_weights
+    WHERE company_id = ?
+      AND process_lot_id = ?
+      AND UPPER(COALESCE(status, 'DRAFT')) IN ('DRAFT', 'APPROVED')
+    ORDER BY id DESC
+    LIMIT 1
+    ${forUpdate ? "FOR UPDATE" : ""}
+    `,
+    [companyId, processLotId]
+  );
+  return rows.length ? normalizeProcessLaminationWeightRow(rows[0]) : null;
+}
+
+app.get("/process/lots/:lotNo/lamination", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
+    connection = await pool.getConnection();
+    const context = await resolveProcessLaminationContext(connection, access.companyScope, lotNo, workCategory);
+    if (!context.ok) {
+      return res.status(context.status || 400).json({ success: false, message: context.message });
+    }
+
+    const record = await getActiveProcessLaminationWeight(connection, access.companyScope, context.processLot.id);
+    return res.json({
+      success: true,
+      lotNo: context.lotNo,
+      processLotId: Number(context.processLot.id || 0),
+      actualProcessWeight: context.actualProcessWeight,
+      lamination: record,
+      billableWeight: record ? record.billableWeight : context.actualProcessWeight
+    });
+  } catch (error) {
+    console.error("Get process lamination weight error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lamination weight fetch failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/lots/:lotNo/lamination", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+    const parsedGain = parseOptionalNumber(req.body.laminationGainWeight ?? req.body.lamination_gain_weight, "Lamination gain weight", 0);
+    const remarks = String(req.body.remarks || "").trim();
+    if (!parsedGain.ok) return res.status(400).json({ success: false, message: parsedGain.message });
+    if (parsedGain.value < 0) return res.status(400).json({ success: false, message: "Lamination gain weight cannot be negative" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await resolveProcessLaminationContext(connection, access.companyScope, lotNo, workCategory);
+    if (!context.ok) {
+      await connection.rollback();
+      return res.status(context.status || 400).json({ success: false, message: context.message });
+    }
+
+    const activeRecord = await getActiveProcessLaminationWeight(connection, access.companyScope, context.processLot.id, { forUpdate: true });
+    if (activeRecord && activeRecord.status === "APPROVED") {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Approved lamination weight already exists. Cancel it before creating a new draft."
+      });
+    }
+
+    const billableWeight = Number(format3(context.actualProcessWeight + parsedGain.value));
+    let recordId = activeRecord?.id || null;
+    if (recordId) {
+      await connection.query(
+        `
+        UPDATE process_lamination_weights
+        SET actual_process_weight = ?,
+            lamination_gain_weight = ?,
+            billable_weight = ?,
+            remarks = ?,
+            updated_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [context.actualProcessWeight, parsedGain.value, billableWeight, remarks, access.companyScope, recordId]
+      );
+    } else {
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO process_lamination_weights
+        (
+          company_id, process_lot_id, lot_no, actual_process_weight,
+          lamination_gain_weight, billable_weight, status, remarks,
+          created_by, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, NOW(), NOW())
+        `,
+        [
+          access.companyScope,
+          Number(context.processLot.id || 0),
+          context.lotNo,
+          context.actualProcessWeight,
+          parsedGain.value,
+          billableWeight,
+          remarks,
+          access.actingUserId || null
+        ]
+      );
+      recordId = Number(insertResult.insertId || 0);
+    }
+
+    const [savedRows] = await connection.query(
+      `
+      SELECT *
+      FROM process_lamination_weights
+      WHERE company_id = ? AND id = ?
+      LIMIT 1
+      `,
+      [access.companyScope, recordId]
+    );
+    const savedRecord = savedRows.length ? normalizeProcessLaminationWeightRow(savedRows[0]) : null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "LAMINATION_WEIGHT_CREATED",
+      entityType: "process_lamination_weight",
+      entityId: String(recordId || ""),
+      moduleName: "process",
+      status: "success",
+      message: "Lamination commercial weight draft saved",
+      afterData: savedRecord
+    });
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Lamination commercial weight draft saved",
+      lamination: savedRecord
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Save process lamination weight error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lamination weight save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/lots/:lotNo/lamination/approve", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await resolveProcessLaminationContext(connection, access.companyScope, lotNo, workCategory);
+    if (!context.ok) {
+      await connection.rollback();
+      return res.status(context.status || 400).json({ success: false, message: context.message });
+    }
+
+    const activeRecord = await getActiveProcessLaminationWeight(connection, access.companyScope, context.processLot.id, { forUpdate: true });
+    if (!activeRecord) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Lamination commercial weight draft not found" });
+    }
+    if (activeRecord.status === "APPROVED") {
+      await connection.commit();
+      return res.json({ success: true, message: "Lamination commercial weight already approved", lamination: activeRecord });
+    }
+
+    const billableWeight = Number(format3(context.actualProcessWeight + activeRecord.laminationGainWeight));
+    await connection.query(
+      `
+      UPDATE process_lamination_weights
+      SET actual_process_weight = ?,
+          billable_weight = ?,
+          status = 'APPROVED',
+          approved_by = ?,
+          approved_at = NOW(),
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND id = ?
+      `,
+      [context.actualProcessWeight, billableWeight, access.actingUserId || null, access.companyScope, activeRecord.id]
+    );
+
+    const [savedRows] = await connection.query(
+      `SELECT * FROM process_lamination_weights WHERE company_id = ? AND id = ? LIMIT 1`,
+      [access.companyScope, activeRecord.id]
+    );
+    const savedRecord = savedRows.length ? normalizeProcessLaminationWeightRow(savedRows[0]) : null;
+    await logActivitySafe(connection, req, access, {
+      actionType: "LAMINATION_WEIGHT_APPROVED",
+      entityType: "process_lamination_weight",
+      entityId: String(activeRecord.id || ""),
+      moduleName: "process",
+      status: "success",
+      message: "Lamination commercial weight approved",
+      beforeData: activeRecord,
+      afterData: savedRecord
+    });
+
+    await connection.commit();
+    return res.json({ success: true, message: "Lamination commercial weight approved", lamination: savedRecord });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Approve process lamination weight error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lamination weight approval failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/process/lots/:lotNo/lamination/cancel", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+    const remarks = String(req.body.remarks || "").trim();
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await resolveProcessLaminationContext(connection, access.companyScope, lotNo, workCategory);
+    if (!context.ok) {
+      await connection.rollback();
+      return res.status(context.status || 400).json({ success: false, message: context.message });
+    }
+
+    const activeRecord = await getActiveProcessLaminationWeight(connection, access.companyScope, context.processLot.id, { forUpdate: true });
+    if (!activeRecord) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Active lamination commercial weight not found" });
+    }
+
+    await connection.query(
+      `
+      UPDATE process_lamination_weights
+      SET status = 'CANCELLED',
+          remarks = CASE WHEN ? <> '' THEN ? ELSE remarks END,
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND id = ?
+      `,
+      [remarks, remarks, access.companyScope, activeRecord.id]
+    );
+
+    const [savedRows] = await connection.query(
+      `SELECT * FROM process_lamination_weights WHERE company_id = ? AND id = ? LIMIT 1`,
+      [access.companyScope, activeRecord.id]
+    );
+    const savedRecord = savedRows.length ? normalizeProcessLaminationWeightRow(savedRows[0]) : null;
+    await logActivitySafe(connection, req, access, {
+      actionType: "LAMINATION_WEIGHT_CANCELLED",
+      entityType: "process_lamination_weight",
+      entityId: String(activeRecord.id || ""),
+      moduleName: "process",
+      status: "success",
+      message: "Lamination commercial weight cancelled",
+      beforeData: activeRecord,
+      afterData: savedRecord
+    });
+
+    await connection.commit();
+    return res.json({ success: true, message: "Lamination commercial weight cancelled", lamination: savedRecord });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Cancel process lamination weight error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lamination weight cancellation failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -19400,6 +20261,9 @@ app.get("/getReturnItem/:barcode", authMiddleware, async (req, res) => {
         si.sku AS sale_sku,
         si.size AS sale_size,
         si.weight AS sale_weight,
+        si.actual_weight AS sale_actual_weight,
+        si.billable_weight AS sale_billable_weight,
+        si.lamination_gain_weight AS sale_lamination_gain_weight,
         si.lot_number AS sale_lot_number
       FROM stock s
       LEFT JOIN (
@@ -19439,7 +20303,10 @@ app.get("/getReturnItem/:barcode", authMiddleware, async (req, res) => {
         product_name: item.product_name || item.sale_product_name || "",
         sku: item.sku || item.sale_sku || "",
         size: item.size || item.sale_size || "",
-        weight: item.weight || item.sale_weight || 0,
+        weight: item.sale_billable_weight || item.billable_weight || item.weight || item.sale_weight || 0,
+        actual_weight: item.sale_actual_weight || item.actual_weight || item.weight || item.sale_weight || 0,
+        billable_weight: item.sale_billable_weight || item.billable_weight || item.weight || item.sale_weight || 0,
+        lamination_gain_weight: item.sale_lamination_gain_weight || item.lamination_gain_weight || 0,
         lot_number: item.lot_number || item.sale_lot_number || ""
       }
     });
@@ -19774,6 +20641,61 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
       ]
     );
 
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: finalCompanyId,
+      barcode,
+      stockId: stockItem.id,
+      lotNo: lotNumber,
+      serial: stockItem.serial,
+      branchId: persistedBranchId,
+      invoiceNumber,
+      returnId: returnInsert.insertId,
+      transactionId: transactionPosting.transactionId,
+      eventType: returnType === "RETURN_TO_STOCK"
+        ? BARCODE_LIFECYCLE_EVENT_TYPES.RETURNED_TO_STOCK
+        : BARCODE_LIFECYCLE_EVENT_TYPES.DAMAGED_RETURNED,
+      eventTitle: returnType === "RETURN_TO_STOCK" ? "Returned To Stock" : "Damaged Returned",
+      eventDescription: returnType === "RETURN_TO_STOCK"
+        ? "Sold barcode was returned to stock"
+        : "Sold barcode was returned as damaged",
+      eventPayload: {
+        returnType,
+        returnReason,
+        customerName,
+        productName,
+        weight: Number.isNaN(weight) ? 0 : weight,
+        stockStatus: nextStockStatus
+      },
+      sourceTable: "return_history",
+      sourceId: returnInsert.insertId,
+      createdBy: access.actingUserId
+    });
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: finalCompanyId,
+      barcode,
+      stockId: stockItem.id,
+      lotNo: lotNumber,
+      serial: stockItem.serial,
+      branchId: persistedBranchId,
+      invoiceNumber,
+      returnId: returnInsert.insertId,
+      refundPayableId: payableInsert.insertId,
+      transactionId: transactionPosting.transactionId,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.REFUND_PAYABLE_CREATED,
+      eventTitle: "Refund Payable Created",
+      eventDescription: "Return refund payable was created",
+      eventPayload: {
+        refundCashAmount,
+        refundMetalWeight,
+        refundModeHint,
+        payableStatus: "OPEN"
+      },
+      sourceTable: "return_refund_payables",
+      sourceId: payableInsert.insertId,
+      createdBy: access.actingUserId
+    });
+
     await writeAuditLogSafe(connection, req, {
       companyId: finalCompanyId,
       userId: access.actingUserId ?? null,
@@ -20082,6 +21004,30 @@ app.post("/returns/refund-payables/:id/cash-refund", authMiddleware, checkRole([
     );
 
     await recalcPartyBalanceSummary(connection, access.companyScope, partyId, transactionId);
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: access.companyScope,
+      barcode: payable.barcode,
+      branchId: returnBranchId,
+      invoiceNumber: payable.invoice_number,
+      returnId: payable.return_id,
+      refundPayableId: payableId,
+      transactionId,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.CASH_REFUND_PAID,
+      eventTitle: "Cash Refund Paid",
+      eventDescription: "Cash refund was paid against return payable",
+      eventPayload: {
+        amount,
+        paymentMode,
+        referenceNo: externalReferenceNo,
+        payableStatus: nextStatus,
+        settledCashAmount: newSettledCashAmount,
+        remainingCashAmount: newRemainingCashAmount
+      },
+      sourceTable: "return_refund_payables",
+      sourceId: payableId,
+      createdBy: access.actingUserId
+    });
 
     await writeAuditLogSafe(connection, req, {
       companyId: access.companyScope,
@@ -20406,6 +21352,33 @@ app.post("/returns/refund-payables/:id/metal-refund", authMiddleware, checkRole(
     );
 
     await recalcPartyBalanceSummary(connection, access.companyScope, partyId, transactionId);
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: access.companyScope,
+      barcode: payable.barcode,
+      branchId: returnBranchId,
+      invoiceNumber: payable.invoice_number,
+      returnId: payable.return_id,
+      refundPayableId: payableId,
+      transactionId,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.METAL_REFUND_GIVEN,
+      eventTitle: "Metal Refund Given",
+      eventDescription: "Metal refund was given against return payable",
+      eventPayload: {
+        metalType,
+        grossWeight,
+        fineWeight,
+        purity,
+        rate,
+        cashValuationAmount,
+        payableStatus: nextStatus,
+        settledMetalWeight: newSettledMetalWeight,
+        remainingMetalWeight: newRemainingMetalWeight
+      },
+      sourceTable: "return_refund_payables",
+      sourceId: payableId,
+      createdBy: access.actingUserId
+    });
 
     await writeAuditLogSafe(connection, req, {
       companyId: access.companyScope,
@@ -20927,6 +21900,36 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         saleItem.id
       ]
     );
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: finalCompanyId,
+      barcode,
+      stockId: stockItem.id,
+      lotNo: lotNumber,
+      serial: stockItem.serial,
+      branchId: persistedBranchId,
+      invoiceNumber,
+      returnId: returnInsert.insertId,
+      transactionId: transactionPosting.transactionId,
+      eventType: returnType === "RETURN_TO_STOCK"
+        ? BARCODE_LIFECYCLE_EVENT_TYPES.RETURNED_TO_STOCK
+        : BARCODE_LIFECYCLE_EVENT_TYPES.DAMAGED_RETURNED,
+      eventTitle: returnType === "RETURN_TO_STOCK" ? "Returned To Stock" : "Damaged Returned",
+      eventDescription: returnType === "RETURN_TO_STOCK"
+        ? "Sold barcode was returned to stock"
+        : "Sold barcode was returned as damaged",
+      eventPayload: {
+        returnType,
+        returnReason,
+        customerName,
+        productName,
+        weight: Number.isNaN(weight) ? 0 : weight,
+        stockStatus: nextStockStatus
+      },
+      sourceTable: "return_history",
+      sourceId: returnInsert.insertId,
+      createdBy: access.actingUserId
+    });
 
     await writeAuditLogSafe(connection, req, {
       companyId: finalCompanyId,
@@ -21658,11 +22661,12 @@ app.get("/materialStock/summary", authMiddleware, async (req, res) => {
   }
 });
 
-function createStickerBulkError(message, status = 400) {
+function createStickerBulkError(message, status = 400, details = null) {
   const error = new Error(message);
   error.status = status;
   error.statusCode = status;
   error.isStickerBulkError = true;
+  error.details = details;
   return error;
 }
 
@@ -21756,9 +22760,11 @@ async function insertStickerStockRow(connection, item, {
   companyId,
   userId,
   branchId,
-  processLot
+  processLot,
+  stickerAllowance = null
 }) {
   const isManualStickerLot = isManualProcessLot(processLot);
+  const commercialWeights = getStickerCommercialWeights(item, stickerAllowance);
 
   await connection.query(
     `
@@ -21770,6 +22776,9 @@ async function insertStickerStockRow(connection, item, {
       mm,
       size,
       weight,
+      actual_weight,
+      billable_weight,
+      lamination_gain_weight,
       qty,
       lot_number,
       barcode,
@@ -21783,7 +22792,7 @@ async function insertStickerStockRow(connection, item, {
       company_id,
       created_by,
       deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       item.serial,
@@ -21793,6 +22802,9 @@ async function insertStickerStockRow(connection, item, {
       item.mm,
       item.size,
       item.weight,
+      commercialWeights.actualWeight,
+      commercialWeights.billableWeight,
+      commercialWeights.laminationGainWeight,
       item.qty,
       item.lot,
       item.barcode,
@@ -21808,6 +22820,39 @@ async function insertStickerStockRow(connection, item, {
       null
     ]
   );
+
+  const stockId = Number(insertResult?.insertId || 0) || null;
+  await appendBarcodeLifecycleEvent(connection, {
+    companyId,
+    barcode: item.barcode,
+    stockId,
+    lotNo: item.lot,
+    serial: item.serial,
+    processLotId: isManualStickerLot ? null : processLot?.id,
+    branchId,
+    eventType: BARCODE_LIFECYCLE_EVENT_TYPES.STICKER_CREATED,
+    eventTitle: "Sticker Created",
+    eventDescription: "Sticker stock row created",
+    eventPayload: {
+      productName: item.productName,
+      sku: item.sku,
+      purity: item.purity,
+      size: item.size,
+      weight: item.weight,
+      actualWeight: commercialWeights.actualWeight,
+      billableWeight: commercialWeights.billableWeight,
+      laminationGainWeight: commercialWeights.laminationGainWeight,
+      qty: item.qty,
+      metalType: item.metalType,
+      processType: item.processType,
+      source: isManualStickerLot ? "MANUAL_ENTRY" : "PROCESS_STICKER"
+    },
+    sourceTable: "stock",
+    sourceId: stockId,
+    createdBy: userId
+  });
+
+  return stockId;
 }
 
 /* =========================
@@ -21894,6 +22939,7 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
       await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item, { req, access });
     }
 
+    const stickerAllowanceByLot = new Map();
     for (const total of lotTotals.values()) {
       const stickerLimit = await validateStickerAgainstProcessOutput(
         connection,
@@ -21905,8 +22951,9 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
         total.qtyProvided
       );
       if (!stickerLimit.ok) {
-        throw createStickerBulkError(stickerLimit.message);
+        throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
       }
+      stickerAllowanceByLot.set(normalizeProcessLotNo(total.lot), stickerLimit);
     }
 
     const processLotByLot = new Map();
@@ -21919,7 +22966,8 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
         companyId: finalCompanyId,
         userId: finalUserId,
         branchId: stockBranch.branchId,
-        processLot: processLotByLot.get(lotKey)
+        processLot: processLotByLot.get(lotKey),
+        stickerAllowance: stickerAllowanceByLot.get(lotKey)
       });
     }
 
@@ -21942,6 +22990,7 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
     return res.status(err?.isStickerBulkError ? Number(err.status || err.statusCode || 400) : getBarcodeSafetyStatus(err)).json({
       success: false,
       message: err?.isStickerBulkError ? err.message : getBarcodeSafetyMessage(err, "Bulk sticker save failed"),
+      stickerAllowance: err?.isStickerBulkError ? err.details || null : null,
       error: getErrorDetail(err)
     });
   } finally {
@@ -22051,12 +23100,14 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     if (!stickerLimit.ok) {
       return res.json({
         success: false,
-        message: stickerLimit.message
+        message: stickerLimit.message,
+        stickerAllowance: stickerLimit
       });
     }
 
     const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
     const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+    const commercialWeights = getStickerCommercialWeights({ weight: Number(format3(parsedWeight.value)) }, stickerLimit);
 
     await assertActiveBarcodeAvailable(finalCompanyId, {
       barcode: cleanBarcode,
@@ -22074,7 +23125,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       context: "ADD_STICKER"
     });
 
-    await pool.query(
+    const [insertResult] = await pool.query(
       `
       INSERT INTO stock (
         serial,
@@ -22084,6 +23135,9 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         mm,
         size,
         weight,
+        actual_weight,
+        billable_weight,
+        lamination_gain_weight,
         qty,
         lot_number,
         barcode,
@@ -22097,7 +23151,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         company_id,
         created_by,
         deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         cleanSerial,
@@ -22107,6 +23161,9 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
         String(mm || "").trim(),
         String(size).trim(),
         Number(format3(parsedWeight.value)),
+        commercialWeights.actualWeight,
+        commercialWeights.billableWeight,
+        commercialWeights.laminationGainWeight,
         parsedQty.value,
         cleanLot,
         cleanBarcode,
@@ -22123,9 +23180,41 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       ]
     );
 
+    const stockId = Number(insertResult?.insertId || 0) || null;
+    await appendBarcodeLifecycleEvent(pool, {
+      companyId: finalCompanyId,
+      barcode: cleanBarcode,
+      stockId,
+      lotNo: cleanLot,
+      serial: cleanSerial,
+      processLotId: isManualStickerLot ? null : stickerProcessLot?.id,
+      branchId: stockBranch.branchId,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.STICKER_CREATED,
+      eventTitle: "Sticker Created",
+      eventDescription: "Sticker stock row created",
+      eventPayload: {
+        productName: String(productName).trim(),
+        sku: String(sku).trim(),
+        purity: String(purity).trim(),
+        size: String(size).trim(),
+        weight: Number(format3(parsedWeight.value)),
+        actualWeight: commercialWeights.actualWeight,
+        billableWeight: commercialWeights.billableWeight,
+        laminationGainWeight: commercialWeights.laminationGainWeight,
+        qty: parsedQty.value,
+        metalType: String(metalType || "").trim(),
+        processType: String(processType || "").trim(),
+        source: isManualStickerLot ? "MANUAL_ENTRY" : "PROCESS_STICKER"
+      },
+      sourceTable: "stock",
+      sourceId: stockId,
+      createdBy: finalUserId
+    });
+
     return res.json({
       success: true,
-      message: "Sticker added successfully"
+      message: "Sticker added successfully",
+      stickerAllowance: stickerLimit
     });
   } catch (err) {
     console.error("Add sticker error:", err);
@@ -22284,12 +23373,14 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     if (!stickerLimit.ok) {
       return res.json({
         success: false,
-        message: stickerLimit.message
+        message: stickerLimit.message,
+        stickerAllowance: stickerLimit
       });
     }
 
     const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
     const isManualStickerLot = isManualProcessLot(stickerProcessLot);
+    const commercialWeights = getStickerCommercialWeights({ weight: Number(format3(parsedWeight.value)) }, stickerLimit);
     await assertActiveBarcodeAvailable(finalCompanyId, {
       barcode: newBarcode,
       status: String(status || "IN_STOCK").trim(),
@@ -22318,6 +23409,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         mm = ?,
         size = ?,
         weight = ?,
+        actual_weight = ?,
+        billable_weight = ?,
+        lamination_gain_weight = ?,
         qty = ?,
         lot_number = ?,
         barcode = ?,
@@ -22337,6 +23431,9 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
         String(mm || "").trim(),
         String(size).trim(),
         Number(format3(parsedWeight.value)),
+        commercialWeights.actualWeight,
+        commercialWeights.billableWeight,
+        commercialWeights.laminationGainWeight,
         parsedQty.value,
         cleanLot,
         newBarcode,
@@ -22352,7 +23449,8 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
 
     return res.json({
       success: true,
-      message: "Sticker updated successfully"
+      message: "Sticker updated successfully",
+      stickerAllowance: stickerLimit
     });
   } catch (error) {
     console.error("Update sticker error:", error);
@@ -22416,6 +23514,27 @@ app.delete("/deleteSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "
         message: "Sticker item not found"
       });
     }
+
+    await appendBarcodeLifecycleEvent(pool, {
+      companyId,
+      barcode: stockRow.barcode || barcode,
+      stockId: stockRow.id,
+      lotNo: stockRow.lot_number,
+      serial: stockRow.serial,
+      branchId: stockRow.current_branch_id,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.STICKER_DELETED,
+      eventTitle: "Sticker Deleted",
+      eventDescription: "Sticker was soft deleted from stock",
+      eventPayload: {
+        previousStatus: stockRow.status,
+        previousStockState: stockRow.stock_state,
+        productName: stockRow.product_name,
+        weight: stockRow.weight
+      },
+      sourceTable: "stock",
+      sourceId: stockRow.id,
+      createdBy: access.actingUserId ?? getRequestedUserId(req)
+    });
 
     return res.json({
       success: true,
@@ -22501,6 +23620,27 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
       });
     }
 
+    await appendBarcodeLifecycleEvent(pool, {
+      companyId,
+      barcode: restoreStock.barcode || barcode,
+      stockId: restoreStock.id,
+      lotNo: restoreStock.lot_number,
+      serial: restoreStock.serial,
+      branchId: restoreStock.current_branch_id,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.STICKER_RESTORED,
+      eventTitle: "Sticker Restored",
+      eventDescription: "Sticker was restored to stock",
+      eventPayload: {
+        previousStatus: restoreStock.status,
+        previousStockState: restoreStock.stock_state,
+        productName: restoreStock.product_name,
+        weight: restoreStock.weight
+      },
+      sourceTable: "stock",
+      sourceId: restoreStock.id,
+      createdBy: access.actingUserId ?? getRequestedUserId(req)
+    });
+
     return res.json({
       success: true,
       message: "Sticker restored successfully"
@@ -22511,6 +23651,223 @@ app.put("/restoreSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OW
       success: false,
       message: getBarcodeSafetyMessage(err, "Restore failed"),
       error: err.message
+    });
+  }
+});
+
+app.get("/barcode-lifecycle/:barcode", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const barcode = String(req.params.barcode || "").trim();
+    const normalizedBarcode = normalizeBarcodeForComparison(barcode);
+    if (!normalizedBarcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    const whereParts = [
+      "company_id = ?",
+      "normalized_barcode = ?"
+    ];
+    const params = [access.companyScope, normalizedBarcode];
+    if (access.isBranchLocked) {
+      whereParts.push("(branch_id = ? OR from_branch_id = ? OR to_branch_id = ?)");
+      params.push(access.userBranchId, access.userBranchId, access.userBranchId);
+    }
+
+    const [events] = await pool.query(
+      `
+      SELECT *
+      FROM barcode_lifecycle_events
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY created_at ASC, id ASC
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      barcode,
+      normalizedBarcode,
+      events: events.map((event) => ({
+        ...event,
+        event_payload: typeof event.event_payload === "string"
+          ? (() => {
+              try { return JSON.parse(event.event_payload); } catch (_) { return event.event_payload; }
+            })()
+          : event.event_payload
+      }))
+    });
+  } catch (error) {
+    console.error("Barcode lifecycle events error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Barcode lifecycle lookup failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/barcode-lifecycle/:barcode/summary", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const barcode = String(req.params.barcode || "").trim();
+    const normalizedBarcode = normalizeBarcodeForComparison(barcode);
+    if (!normalizedBarcode) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode is required"
+      });
+    }
+
+    const branchEventWhere = access.isBranchLocked
+      ? "AND (branch_id = ? OR from_branch_id = ? OR to_branch_id = ?)"
+      : "";
+    const branchEventParams = access.isBranchLocked
+      ? [access.userBranchId, access.userBranchId, access.userBranchId]
+      : [];
+    const stockBranchWhere = access.isBranchLocked ? "AND current_branch_id = ?" : "";
+    const stockBranchParams = access.isBranchLocked ? [access.userBranchId] : [];
+
+    const [[stockRow], [invoiceRows], [returnRows], [transferRows], [eventCounts], [lastEventRows]] = await Promise.all([
+      pool.query(
+        `
+        SELECT
+          id,
+          serial,
+          barcode,
+          product_name,
+          sku,
+          lot_number,
+          weight,
+          actual_weight,
+          billable_weight,
+          lamination_gain_weight,
+          status,
+          stock_state,
+          current_branch_id,
+          invoice_number,
+          sold_at,
+          deleted_at,
+          updated_at
+        FROM stock
+        WHERE company_id = ?
+          AND UPPER(TRIM(barcode)) = ?
+          ${stockBranchWhere}
+        ORDER BY id DESC
+        LIMIT 1
+        `,
+        [access.companyScope, normalizedBarcode, ...stockBranchParams]
+      ),
+      pool.query(
+        `
+        SELECT DISTINCT invoice_number
+        FROM barcode_lifecycle_events
+        WHERE company_id = ?
+          AND normalized_barcode = ?
+          AND invoice_number IS NOT NULL
+          AND TRIM(invoice_number) <> ''
+          ${branchEventWhere}
+        ORDER BY invoice_number ASC
+        `,
+        [access.companyScope, normalizedBarcode, ...branchEventParams]
+      ),
+      pool.query(
+        `
+        SELECT id, invoice_number, return_type, branch_id, created_at
+        FROM return_history
+        WHERE company_id = ?
+          AND UPPER(TRIM(barcode)) = ?
+          ${access.isBranchLocked ? "AND branch_id = ?" : ""}
+        ORDER BY id DESC
+        `,
+        [access.companyScope, normalizedBarcode, ...stockBranchParams]
+      ),
+      pool.query(
+        `
+        SELECT
+          bti.id AS item_id,
+          bti.transfer_id,
+          bti.item_status,
+          bti.from_branch_id,
+          bti.to_branch_id,
+          bt.transfer_no,
+          bt.status AS transfer_status
+        FROM branch_transfer_items bti
+        LEFT JOIN branch_transfers bt
+          ON bt.id = bti.transfer_id
+         AND bt.company_id = bti.company_id
+        WHERE bti.company_id = ?
+          AND UPPER(TRIM(bti.barcode)) = ?
+          ${access.isBranchLocked ? "AND (bti.from_branch_id = ? OR bti.to_branch_id = ?)" : ""}
+        ORDER BY bti.id DESC
+        `,
+        access.isBranchLocked
+          ? [access.companyScope, normalizedBarcode, access.userBranchId, access.userBranchId]
+          : [access.companyScope, normalizedBarcode]
+      ),
+      pool.query(
+        `
+        SELECT event_type, COUNT(*) AS count
+        FROM barcode_lifecycle_events
+        WHERE company_id = ?
+          AND normalized_barcode = ?
+          ${branchEventWhere}
+        GROUP BY event_type
+        ORDER BY event_type ASC
+        `,
+        [access.companyScope, normalizedBarcode, ...branchEventParams]
+      ),
+      pool.query(
+        `
+        SELECT *
+        FROM barcode_lifecycle_events
+        WHERE company_id = ?
+          AND normalized_barcode = ?
+          ${branchEventWhere}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        `,
+        [access.companyScope, normalizedBarcode, ...branchEventParams]
+      )
+    ]);
+
+    return res.json({
+      success: true,
+      barcode,
+      normalizedBarcode,
+      currentStockState: stockRow[0] || null,
+      invoiceLinks: invoiceRows.map((row) => row.invoice_number).filter(Boolean),
+      returnLinks: returnRows,
+      transferLinks: transferRows,
+      eventCounts: eventCounts.reduce((acc, row) => {
+        acc[row.event_type] = Number(row.count || 0);
+        return acc;
+      }, {}),
+      lastEvent: lastEventRows[0] || null
+    });
+  } catch (error) {
+    console.error("Barcode lifecycle summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Barcode lifecycle summary failed",
+      error: getErrorDetail(error)
     });
   }
 });
@@ -23033,11 +24390,18 @@ app.get("/invoice-drafts/:id/billing", authMiddleware, async (req, res) => {
 
     const [itemRows] = await connection.query(
       `
-      SELECT *
-      FROM invoice_draft_items
-      WHERE draft_id = ?
-        AND UPPER(COALESCE(item_stage, 'PENDING')) = 'READY'
-      ORDER BY id ASC
+      SELECT
+        idi.*,
+        COALESCE(NULLIF(s.actual_weight, 0), idi.weight) AS billing_actual_weight,
+        COALESCE(NULLIF(s.billable_weight, 0), idi.weight) AS billing_billable_weight,
+        COALESCE(s.lamination_gain_weight, 0) AS billing_lamination_gain_weight
+      FROM invoice_draft_items idi
+      LEFT JOIN stock s
+        ON s.company_id = idi.company_id
+       AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(idi.barcode))
+      WHERE idi.draft_id = ?
+        AND UPPER(COALESCE(idi.item_stage, 'PENDING')) = 'READY'
+      ORDER BY idi.id ASC
       `,
       [draftId]
     );
@@ -23061,7 +24425,10 @@ app.get("/invoice-drafts/:id/billing", authMiddleware, async (req, res) => {
         sku: item.sku || "",
         purity: item.purity || "",
         size: item.size || "",
-        weight: toNumber(item.weight),
+        weight: toNumber(item.billing_billable_weight || item.weight),
+        actual_weight: toNumber(item.billing_actual_weight || item.weight),
+        billable_weight: toNumber(item.billing_billable_weight || item.weight),
+        lamination_gain_weight: toNumber(item.billing_lamination_gain_weight),
         lot: item.lot_number || "",
         lot_number: item.lot_number || "",
         customerName: draftRow.customer_name || "",
@@ -23229,6 +24596,7 @@ app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), asy
             message: `Barcode ${barcode} could not be marked as SOLD in this company's stock`
           });
         }
+
       }
     }
 
@@ -23409,6 +24777,13 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       const line = billingLines[index] || {};
       return {
         ...item,
+        weight: line.weight,
+        actualWeight: line.actualWeight,
+        actual_weight: line.actualWeight,
+        billableWeight: line.billableWeight,
+        billable_weight: line.billableWeight,
+        laminationGainWeight: line.laminationGainWeight,
+        lamination_gain_weight: line.laminationGainWeight,
         pureWeight: line.pureWeight,
         pure_weight: line.pureWeight,
         fineWeight: line.pureWeight,
@@ -23501,7 +24876,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       const barcode = String(item.barcode || "").trim();
       const line = billingLines[index] || {};
 
-      await connection.query(
+      const [saleItemInsert] = await connection.query(
         `
         INSERT INTO sales_items
         (
@@ -23513,6 +24888,9 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           purity,
           size,
           weight,
+          actual_weight,
+          billable_weight,
+          lamination_gain_weight,
           lot_number,
           customer_name,
           pure_weight,
@@ -23526,7 +24904,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           company_id,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         `,
         [
           saleId,
@@ -23536,7 +24914,10 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
           String(item.sku || "").trim(),
           String(item.purity || "").trim(),
           String(item.size || "").trim(),
-          Number(item.weight || 0),
+          Number(line.weight || 0),
+          Number(line.actualWeight || 0),
+          Number(line.billableWeight || line.weight || 0),
+          Number(line.laminationGainWeight || 0),
           String(item.lot || item.lot_number || "").trim(),
           String(customerName || "").trim(),
           Number(line.pureWeight || 0),
@@ -23579,6 +24960,46 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
             message: `Barcode ${barcode} could not be marked as SOLD in this company's stock`
           });
         }
+
+        const [stockRows] = await connection.query(
+          `
+          SELECT id, serial, lot_number, current_branch_id
+          FROM stock
+          WHERE company_id = ?
+            AND UPPER(TRIM(barcode)) = ?
+            AND invoice_number = ?
+            AND UPPER(COALESCE(status, '')) = 'SOLD'
+          ORDER BY id DESC
+          LIMIT 1
+          `,
+          [finalCompanyId, normalizeBarcodeForComparison(barcode), cleanInvoiceNumber]
+        );
+        const stockRow = stockRows[0] || null;
+        await appendBarcodeLifecycleEvent(connection, {
+          companyId: finalCompanyId,
+          barcode,
+          stockId: stockRow?.id,
+          lotNo: stockRow?.lot_number || item.lot || item.lot_number,
+          serial: stockRow?.serial || item.serial,
+          branchId: stockRow?.current_branch_id || persistedBranchId,
+          invoiceNumber: cleanInvoiceNumber,
+          eventType: BARCODE_LIFECYCLE_EVENT_TYPES.BILLED,
+          eventTitle: "Billed",
+          eventDescription: "Barcode sold in billing",
+          eventPayload: {
+            customerName: String(customerName || "").trim(),
+            paymentStatus: String(paymentStatus || "").trim(),
+            weight: Number(line.weight || 0),
+            actualWeight: Number(line.actualWeight || 0),
+            billableWeight: Number(line.billableWeight || line.weight || 0),
+            laminationGainWeight: Number(line.laminationGainWeight || 0),
+            sellingRatePerGram: Number(line.sellingRatePerGram || 0),
+            customerLineAmount: Number(line.customerLineAmount || 0)
+          },
+          sourceTable: "sales_items",
+          sourceId: saleItemInsert.insertId,
+          createdBy: access.actingUserId ?? getRequestedUserId(req)
+        });
       }
     }
 
@@ -23839,7 +25260,11 @@ app.get("/getInvoiceItems/:invoiceNumber", authMiddleware, async (req, res) => {
 
     const [items] = await pool.query(
       `
-      SELECT si.*
+      SELECT
+        si.*,
+        COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0) AS effective_actual_weight,
+        COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) AS effective_billable_weight,
+        COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) AS effective_lamination_gain_weight
       FROM sales_items si
       WHERE ${itemWhereParts.join(" AND ")}
       ORDER BY si.id DESC
@@ -25006,6 +26431,29 @@ async function cancelSimpleUnpaidSaleInvoice({
     if (affectedRows !== 1) {
       throw new Error(`Stock restore failed for barcode ${barcode}`);
     }
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: cleanCompanyId,
+      barcode,
+      stockId: restoreStockRows[0].id,
+      lotNo: restoreStockRows[0].lot_number,
+      serial: restoreStockRows[0].serial,
+      branchId: restoreStockRows[0].current_branch_id,
+      invoiceNumber: cleanInvoiceNumber,
+      transactionId: null,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.SALE_CANCELLED_STOCK_RESTORED,
+      eventTitle: "Sale Cancelled Stock Restored",
+      eventDescription: "Stock restored during unpaid sale cancellation",
+      eventPayload: {
+        cancellationId,
+        reason: cleanReason,
+        previousStatus: restoreStockRows[0].status,
+        previousStockState: restoreStockRows[0].stock_state
+      },
+      sourceTable: "sales_cancellations",
+      sourceId: cancellationId,
+      createdBy: cancelledBy
+    });
   }
 
   const saleTxn = saleTransactions[0];
@@ -30587,6 +32035,29 @@ app.post("/branch-transfers/:id/dispatch", authMiddleware, async (req, res) => {
       reason: "Transfer dispatched"
     });
 
+    for (const item of lockedItems) {
+      await appendBarcodeLifecycleEvent(connection, {
+        companyId: access.companyScope,
+        barcode: item.barcode,
+        stockId: item.stock_id,
+        transferId,
+        branchId: transfer.from_branch_id,
+        fromBranchId: transfer.from_branch_id,
+        toBranchId: transfer.to_branch_id,
+        eventType: BARCODE_LIFECYCLE_EVENT_TYPES.TRANSFER_DISPATCHED,
+        eventTitle: "Transfer Dispatched",
+        eventDescription: "Barcode dispatched in branch transfer",
+        eventPayload: {
+          transferNo: transfer.transfer_no,
+          previousStockState: "IN_STOCK",
+          stockState: "IN_TRANSIT"
+        },
+        sourceTable: "branch_transfer_items",
+        sourceId: item.item_id,
+        createdBy: access.actingUserId
+      });
+    }
+
     await connection.commit();
 
     return res.json({
@@ -30969,6 +32440,29 @@ app.post("/branch-transfers/:id/receive-scan", authMiddleware, async (req, res) 
       reason: "Transfer barcode received"
     });
 
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: access.companyScope,
+      barcode: stockItem.barcode || barcode,
+      stockId: stockItem.id,
+      lotNo: stockItem.lot_number,
+      transferId,
+      branchId: transfer.to_branch_id,
+      fromBranchId: transfer.from_branch_id,
+      toBranchId: transfer.to_branch_id,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.TRANSFER_RECEIVED,
+      eventTitle: "Transfer Received",
+      eventDescription: "Barcode received in destination branch",
+      eventPayload: {
+        transferNo: transfer.transfer_no,
+        previousStockState: "IN_TRANSIT",
+        stockState: "IN_STOCK",
+        nextTransferStatus: nextStatus
+      },
+      sourceTable: "branch_transfer_items",
+      sourceId: transferItem.id,
+      createdBy: access.actingUserId
+    });
+
     await connection.commit();
 
     return res.json({
@@ -31132,6 +32626,30 @@ app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, r
       afterData: shortageTransfer,
       reason: notes || "Transfer shortage confirmed"
     });
+
+    for (const item of shortageItems) {
+      await appendBarcodeLifecycleEvent(connection, {
+        companyId: access.companyScope,
+        barcode: item.barcode,
+        stockId: item.stock_id,
+        transferId,
+        branchId: transfer.from_branch_id,
+        fromBranchId: transfer.from_branch_id,
+        toBranchId: transfer.to_branch_id,
+        eventType: BARCODE_LIFECYCLE_EVENT_TYPES.TRANSFER_SHORTAGE,
+        eventTitle: "Transfer Shortage",
+        eventDescription: "Barcode marked as shortage in branch transfer",
+        eventPayload: {
+          transferNo: transfer.transfer_no,
+          notes: notes || "Shortage confirmed at destination branch",
+          previousItemStatus: item.item_status,
+          stockState: "TRANSFER_SHORTAGE"
+        },
+        sourceTable: "branch_transfer_items",
+        sourceId: item.id,
+        createdBy: access.actingUserId
+      });
+    }
 
     await connection.commit();
 
@@ -31485,6 +33003,29 @@ app.post("/branch-transfers/:id/items/scan", authMiddleware, async (req, res) =>
         stock: stockItem
       },
       reason: "Transfer item added"
+    });
+
+    await appendBarcodeLifecycleEvent(connection, {
+      companyId: access.companyScope,
+      barcode: stockItem.barcode || barcode,
+      stockId: stockItem.id,
+      lotNo: stockItem.lot_number,
+      transferId,
+      branchId: transfer.from_branch_id,
+      fromBranchId: transfer.from_branch_id,
+      toBranchId: transfer.to_branch_id,
+      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.TRANSFER_DRAFT_ADDED,
+      eventTitle: "Transfer Draft Added",
+      eventDescription: "Barcode added to branch transfer draft",
+      eventPayload: {
+        transferNo: transfer.transfer_no,
+        itemStatus: "PENDING_DISPATCH",
+        weight: stockItem.weight,
+        productName: stockItem.product_name
+      },
+      sourceTable: "branch_transfer_items",
+      sourceId: insertResult.insertId,
+      createdBy: access.actingUserId
     });
 
     await connection.commit();
@@ -35138,6 +36679,30 @@ async function buildStockSalesReconciliation(companyId, branchScope) {
   {
     const params = [companyId];
     const rows = await runReconQuery(`
+      SELECT
+        si.id AS sales_item_id,
+        si.invoice_number,
+        si.barcode,
+        COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0) AS actual_weight,
+        COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) AS billable_weight,
+        COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) AS lamination_gain_weight
+      FROM sales_items si
+      WHERE si.company_id = ?
+        AND COALESCE(si.is_deleted, 0) = 0
+        ${salesItemBranchClause("si", branchScope, params)}
+        AND (
+          COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) < COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)
+          OR COALESCE(si.lamination_gain_weight, 0) < 0
+          OR ABS(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)) > 0.0005
+        )
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("stock-sales", "SALES_COMMERCIAL_WEIGHT_MISMATCH", "Sales commercial weight mismatch", rows.map((row) => createReconciliationIssue("stock-sales", "SALES_COMMERCIAL_WEIGHT_MISMATCH", "MEDIUM", "Sales actual, billable, and lamination gain weights do not reconcile", row))));
+  }
+
+  {
+    const params = [companyId];
+    const rows = await runReconQuery(`
       SELECT id AS stock_id, barcode, invoice_number, status, stock_state, deleted_at
       FROM stock
       WHERE company_id = ?
@@ -35451,6 +37016,25 @@ async function buildBranchTransferReconciliation(companyId, branchScope) {
 
 async function buildProcessReconciliation(companyId, branchScope) {
   const groups = [];
+  const [
+    hasExpectedTotalQtyColumn,
+    hasTotalKhadiCountColumn
+  ] = await Promise.all([
+    columnExists("process_lots", "expected_total_qty"),
+    columnExists("process_lots", "total_khadi_count")
+  ]);
+  const hasProcessLotOutputColumns = Boolean(hasExpectedTotalQtyColumn && hasTotalKhadiCountColumn);
+
+  if (!hasProcessLotOutputColumns) {
+    groups.push(createReconciliationGroup("process", "PROCESS_SCHEMA_FALLBACK_ACTIVE", "Process schema fallback active", [
+      createReconciliationIssue("process", "PROCESS_SCHEMA_FALLBACK_ACTIVE", "LOW", "Process lot output quantity columns are missing; sticker output check is using final_weight fallback", {
+        expected_total_qty_column: hasExpectedTotalQtyColumn ? "present" : "missing",
+        total_khadi_count_column: hasTotalKhadiCountColumn ? "present" : "missing",
+        fallback_basis: "final_weight"
+      })
+    ]));
+  }
+
   {
     const rows = await runReconQuery(`
       SELECT id AS process_step_id, lot_no, step_no, input_weight, output_weight, additive_used_weight
@@ -35488,16 +37072,149 @@ async function buildProcessReconciliation(companyId, branchScope) {
 
   {
     const params = [companyId];
+    const processOutputSelect = hasProcessLotOutputColumns
+      ? `
+          COALESCE(pl.expected_total_qty, 0) AS expected_total_qty,
+          COALESCE(pl.total_khadi_count, 0) AS total_khadi_count,
+          GREATEST(COALESCE(pl.expected_total_qty, 0), COALESCE(pl.total_khadi_count, 0), 0) AS output_limit
+        `
+      : `
+          0 AS expected_total_qty,
+          0 AS total_khadi_count,
+          COALESCE(pl.final_weight, 0) AS output_limit
+        `;
+    const processOutputGroupBy = hasProcessLotOutputColumns
+      ? "pl.id, pl.lot_no, pl.final_weight, pl.expected_total_qty, pl.total_khadi_count"
+      : "pl.id, pl.lot_no, pl.final_weight";
     const rows = await runReconQuery(`
-      SELECT pl.id AS process_lot_id, pl.lot_no, pl.final_weight, COUNT(s.id) AS stock_output_count
-      FROM process_lots pl
-      LEFT JOIN stock s ON s.company_id = pl.company_id AND s.lot_number = pl.lot_no AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
-      WHERE pl.company_id = ?
-      GROUP BY pl.id, pl.lot_no, pl.final_weight
-      HAVING stock_output_count > GREATEST(COALESCE(pl.expected_total_qty, 0), COALESCE(pl.total_khadi_count, 0), 0)
+      SELECT *
+      FROM (
+        SELECT
+          pl.id AS process_lot_id,
+          pl.lot_no,
+          pl.final_weight,
+          ${processOutputSelect},
+          COUNT(s.id) AS stock_output_count
+        FROM process_lots pl
+        LEFT JOIN stock s ON s.company_id = pl.company_id AND s.lot_number = pl.lot_no AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        WHERE pl.company_id = ?
+        GROUP BY ${processOutputGroupBy}
+      ) process_output
+      WHERE stock_output_count > output_limit
       LIMIT 200
     `, params);
     groups.push(createReconciliationGroup("process", "STICKER_OUTPUT_EXCEEDS_PROCESS_OUTPUT", "Sticker output exceeds process output", rows.map((row) => createReconciliationIssue("process", "STICKER_OUTPUT_EXCEEDS_PROCESS_OUTPUT", "MEDIUM", "Stock/sticker output count exceeds process expected output", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT
+        pl.id AS process_lot_id,
+        pl.lot_no,
+        final_step.output_weight AS actual_process_weight,
+        COALESCE(SUM(COALESCE(NULLIF(s.actual_weight, 0), s.weight)), 0) AS sticker_actual_weight
+      FROM process_lots pl
+      INNER JOIN (
+        SELECT ps.*
+        FROM process_steps ps
+        INNER JOIN (
+          SELECT company_id, process_lot_id, MAX(step_no) AS max_step_no
+          FROM process_steps
+          WHERE company_id = ?
+            AND status = 'COMPLETED'
+          GROUP BY company_id, process_lot_id
+        ) latest ON latest.company_id = ps.company_id
+          AND latest.process_lot_id = ps.process_lot_id
+          AND latest.max_step_no = ps.step_no
+        WHERE ps.company_id = ?
+          AND ps.status = 'COMPLETED'
+      ) final_step ON final_step.company_id = pl.company_id AND final_step.process_lot_id = pl.id
+      LEFT JOIN stock s ON s.company_id = pl.company_id
+        AND s.lot_number = pl.lot_no
+        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+      WHERE pl.company_id = ?
+      GROUP BY pl.id, pl.lot_no, final_step.output_weight
+      HAVING sticker_actual_weight > actual_process_weight + 0.001
+      LIMIT 200
+    `, [companyId, companyId, companyId]);
+    groups.push(createReconciliationGroup("process", "STICKER_ACTUAL_WEIGHT_EXCEEDS_PROCESS_OUTPUT", "Sticker actual weight exceeds process output", rows.map((row) => createReconciliationIssue("process", "STICKER_ACTUAL_WEIGHT_EXCEEDS_PROCESS_OUTPUT", "HIGH", "Physical sticker actual weight exceeds final process output", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT
+        pl.id AS process_lot_id,
+        pl.lot_no,
+        final_step.output_weight AS actual_process_weight,
+        COALESCE(lw.lamination_gain_weight, 0) AS approved_lamination_gain_weight,
+        final_step.output_weight + COALESCE(lw.lamination_gain_weight, 0) AS billable_allowed_weight,
+        COALESCE(SUM(COALESCE(NULLIF(s.billable_weight, 0), s.weight)), 0) AS sticker_billable_weight
+      FROM process_lots pl
+      INNER JOIN (
+        SELECT ps.*
+        FROM process_steps ps
+        INNER JOIN (
+          SELECT company_id, process_lot_id, MAX(step_no) AS max_step_no
+          FROM process_steps
+          WHERE company_id = ?
+            AND status = 'COMPLETED'
+          GROUP BY company_id, process_lot_id
+        ) latest ON latest.company_id = ps.company_id
+          AND latest.process_lot_id = ps.process_lot_id
+          AND latest.max_step_no = ps.step_no
+        WHERE ps.company_id = ?
+          AND ps.status = 'COMPLETED'
+      ) final_step ON final_step.company_id = pl.company_id AND final_step.process_lot_id = pl.id
+      LEFT JOIN process_lamination_weights lw ON lw.company_id = pl.company_id
+        AND lw.process_lot_id = pl.id
+        AND UPPER(COALESCE(lw.status, '')) = 'APPROVED'
+      LEFT JOIN stock s ON s.company_id = pl.company_id
+        AND s.lot_number = pl.lot_no
+        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+      WHERE pl.company_id = ?
+      GROUP BY pl.id, pl.lot_no, final_step.output_weight, lw.lamination_gain_weight
+      HAVING sticker_billable_weight > billable_allowed_weight + 0.001
+      LIMIT 200
+    `, [companyId, companyId, companyId]);
+    groups.push(createReconciliationGroup("process", "STICKER_BILLABLE_EXCEEDS_LAMINATION_ALLOWANCE", "Sticker billable exceeds lamination allowance", rows.map((row) => createReconciliationIssue("process", "STICKER_BILLABLE_EXCEEDS_LAMINATION_ALLOWANCE", "HIGH", "Sticker billable weight exceeds process output plus approved lamination gain", row))));
+  }
+
+  {
+    const rows = await runReconQuery(`
+      SELECT
+        pl.id AS process_lot_id,
+        pl.lot_no,
+        final_step.output_weight AS actual_process_weight,
+        COALESCE(SUM(COALESCE(NULLIF(s.billable_weight, 0), s.weight)), 0) AS sticker_billable_weight
+      FROM process_lots pl
+      INNER JOIN (
+        SELECT ps.*
+        FROM process_steps ps
+        INNER JOIN (
+          SELECT company_id, process_lot_id, MAX(step_no) AS max_step_no
+          FROM process_steps
+          WHERE company_id = ?
+            AND status = 'COMPLETED'
+          GROUP BY company_id, process_lot_id
+        ) latest ON latest.company_id = ps.company_id
+          AND latest.process_lot_id = ps.process_lot_id
+          AND latest.max_step_no = ps.step_no
+        WHERE ps.company_id = ?
+          AND ps.status = 'COMPLETED'
+      ) final_step ON final_step.company_id = pl.company_id AND final_step.process_lot_id = pl.id
+      LEFT JOIN process_lamination_weights lw ON lw.company_id = pl.company_id
+        AND lw.process_lot_id = pl.id
+        AND UPPER(COALESCE(lw.status, '')) = 'APPROVED'
+      LEFT JOIN stock s ON s.company_id = pl.company_id
+        AND s.lot_number = pl.lot_no
+        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+      WHERE pl.company_id = ?
+        AND lw.id IS NULL
+      GROUP BY pl.id, pl.lot_no, final_step.output_weight
+      HAVING sticker_billable_weight > actual_process_weight + 0.001
+      LIMIT 200
+    `, [companyId, companyId, companyId]);
+    groups.push(createReconciliationGroup("process", "STICKER_BILLABLE_EXCEEDS_OUTPUT_WITHOUT_LAMINATION", "Sticker billable exceeds output without lamination", rows.map((row) => createReconciliationIssue("process", "STICKER_BILLABLE_EXCEEDS_OUTPUT_WITHOUT_LAMINATION", "MEDIUM", "Sticker billable weight exceeds process output without approved lamination gain", row))));
   }
 
   {
@@ -35683,6 +37400,578 @@ app.get("/reconciliation/branch-transfer", authMiddleware, (req, res) => handleR
 app.get("/reconciliation/process", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "process"));
 app.get("/reconciliation/refund-payables", authMiddleware, (req, res) => handleReconciliationEndpoint(req, res, "refund-payables"));
 
+app.get("/reports/lot-commercial-profit/:lotNo", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "LOT_COMMERCIAL_PROFIT_REPORT_READ" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo);
+    const dateFrom = String(req.query.dateFrom || req.query.from || "").trim();
+    const dateTo = String(req.query.dateTo || req.query.to || "").trim();
+    const customer = String(req.query.customer || "").trim();
+    const paymentStatus = String(req.query.paymentStatus || "").trim().toUpperCase();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "Lot number is required"
+      });
+    }
+    if (dateFrom && !datePattern.test(dateFrom)) {
+      return res.status(400).json({
+        success: false,
+        message: "dateFrom must be in YYYY-MM-DD format"
+      });
+    }
+    if (dateTo && !datePattern.test(dateTo)) {
+      return res.status(400).json({
+        success: false,
+        message: "dateTo must be in YYYY-MM-DD format"
+      });
+    }
+
+    const companyId = access.companyScope;
+    const stockActualExpr = "COALESCE(NULLIF(s.actual_weight, 0), s.weight, 0)";
+    const stockBillableExpr = "COALESCE(NULLIF(s.billable_weight, 0), s.weight, 0)";
+    const stockGainExpr = `COALESCE(NULLIF(s.lamination_gain_weight, 0), GREATEST(${stockBillableExpr} - ${stockActualExpr}, 0), 0)`;
+    const saleActualExpr = "COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)";
+    const saleBillableExpr = "COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)";
+    const saleGainExpr = `COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(${saleBillableExpr} - ${saleActualExpr}, 0), 0)`;
+
+    const [processLotRows] = await pool.query(
+      `
+      SELECT *
+      FROM process_lots
+      WHERE company_id = ?
+        AND lot_no = ?
+      ORDER BY
+        CASE WHEN UPPER(COALESCE(work_category, 'REGULAR_SANKHA')) NOT IN ('KDM', 'PIN') THEN 0 ELSE 1 END,
+        CASE WHEN UPPER(COALESCE(status, 'OPEN')) = 'COMPLETED' THEN 0 ELSE 1 END,
+        id ASC
+      `,
+      [companyId, lotNo]
+    );
+    const processLots = processLotRows.map(normalizeProcessLotRow);
+    const processLot = processLots.find((lot) => getWorkCategoryDestination(lot.workCategory || lot.work_category) === "STICKER") || processLots[0] || null;
+    const processLotId = Number(processLot?.id || 0) || null;
+    const lotStatus = processLot ? normalizeProcessLotStatus(processLot.status) : "NO_PROCESS_LOT";
+    const lotDestination = processLot ? getWorkCategoryDestination(processLot.workCategory || processLot.work_category) : "";
+    const isStickerReadyLot = Boolean(processLot && lotStatus === "COMPLETED" && lotDestination === "STICKER");
+    const stockHasProcessLotId = await columnExists("stock", "process_lot_id");
+
+    const [laminationRows] = await pool.query(
+      `
+      SELECT *
+      FROM process_lamination_weights
+      WHERE company_id = ?
+        AND ${processLotId ? "process_lot_id = ?" : "lot_no = ?"}
+        AND UPPER(COALESCE(status, '')) = 'APPROVED'
+      ORDER BY approved_at DESC, id DESC
+      LIMIT 1
+      `,
+      [companyId, processLotId || lotNo]
+    );
+    const laminationRow = laminationRows[0] || null;
+
+    const [finalProcessRows] = await pool.query(
+      `
+      SELECT output_weight
+      FROM process_steps
+      WHERE company_id = ?
+        AND ${processLotId ? "process_lot_id = ?" : "lot_no = ?"}
+        AND UPPER(COALESCE(status, 'COMPLETED')) = 'COMPLETED'
+      ORDER BY step_no DESC, id DESC
+      LIMIT 1
+      `,
+      [companyId, processLotId || lotNo]
+    );
+    const finalProcessOutput = toNumber(finalProcessRows[0]?.output_weight);
+
+    const trustedStickerFallbackSql = `
+      s.lot_number = ?
+      AND UPPER(COALESCE(s.source, '')) <> 'MANUAL_ENTRY'
+      AND UPPER(COALESCE(s.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+      AND UPPER(COALESCE(s.process_type, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+      AND UPPER(COALESCE(s.category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+      AND COALESCE(s.manual_lot_id, 0) = 0
+      AND TRIM(COALESCE(s.barcode, '')) <> ''
+    `;
+    const trustedStickerFallbackParams = [lotNo];
+    const stockMatchParts = [
+      "s.company_id = ?",
+      "UPPER(COALESCE(s.status, '')) <> 'DELETED'"
+    ];
+    const stockMatchParams = [companyId];
+    if (!isStickerReadyLot) {
+      stockMatchParts.push("1 = 0");
+    } else if (stockHasProcessLotId && processLotId) {
+      stockMatchParts.push(`(s.process_lot_id = ? OR (COALESCE(s.process_lot_id, 0) = 0 AND ${trustedStickerFallbackSql}))`);
+      stockMatchParams.push(processLotId, ...trustedStickerFallbackParams);
+    } else {
+      stockMatchParts.push(`(${trustedStickerFallbackSql})`);
+      stockMatchParams.push(...trustedStickerFallbackParams);
+    }
+    const stockMatchSql = stockMatchParts.join(" AND ");
+
+    const directStockMatchParts = [
+      "s.company_id = ?",
+      "UPPER(COALESCE(s.status, '')) <> 'DELETED'",
+      "s.process_lot_id = ?"
+    ];
+    const directStockMatchParams = [companyId, processLotId];
+    if (stockHasProcessLotId && processLotId && isStickerReadyLot) {
+      appendBranchScopeFilter(directStockMatchParts, directStockMatchParams, branchScope, { alias: "s" });
+    }
+    const directMatchRows = stockHasProcessLotId && processLotId && isStickerReadyLot
+      ? await pool.query(
+        `
+        SELECT COUNT(*) AS total
+        FROM stock s
+        WHERE ${directStockMatchParts.join(" AND ")}
+        `,
+        directStockMatchParams
+      )
+      : [[{ total: 0 }]];
+    const directStockRowsMatched = Number(directMatchRows[0]?.[0]?.total || 0);
+
+    const stockWhereParts = [
+      stockMatchSql
+    ];
+    const stockParams = [...stockMatchParams];
+    appendBranchScopeFilter(stockWhereParts, stockParams, branchScope, { alias: "s" });
+
+    const [stockSummaryRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(${stockActualExpr}), 0) AS total_actual_weight,
+        COALESCE(SUM(${stockBillableExpr}), 0) AS total_billable_weight,
+        COALESCE(SUM(${stockGainExpr}), 0) AS total_gain_weight,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN ${stockActualExpr} ELSE 0 END), 0) AS remaining_actual_weight,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN ${stockBillableExpr} ELSE 0 END), 0) AS remaining_billable_weight,
+        COALESCE(SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN ${stockGainExpr} ELSE 0 END), 0) AS remaining_gain_weight,
+        SUM(CASE WHEN COALESCE(NULLIF(s.actual_weight, 0), 0) = 0 AND COALESCE(s.weight, 0) > 0 THEN 1 ELSE 0 END) AS missing_actual_count,
+        SUM(CASE WHEN COALESCE(NULLIF(s.billable_weight, 0), 0) = 0 AND COALESCE(s.weight, 0) > 0 THEN 1 ELSE 0 END) AS missing_billable_count,
+        SUM(CASE WHEN COALESCE(s.lamination_gain_weight, 0) = 0 AND COALESCE(NULLIF(s.billable_weight, 0), s.weight, 0) > COALESCE(NULLIF(s.actual_weight, 0), s.weight, 0) + 0.0005 THEN 1 ELSE 0 END) AS missing_gain_count,
+        COUNT(*) AS sticker_count
+      FROM stock s
+      WHERE ${stockWhereParts.join(" AND ")}
+      `,
+      stockParams
+    );
+    const stockSummary = stockSummaryRows[0] || {};
+    const stockRowsMatched = Number(stockSummary.sticker_count || 0);
+    const matchMode = directStockRowsMatched > 0
+      ? "PROCESS_LOT_ID"
+      : (stockRowsMatched > 0 ? "LOT_NUMBER_FALLBACK" : "NONE");
+
+    const [excludedRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM stock s
+      WHERE s.company_id = ?
+        AND s.lot_number = ?
+        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        AND NOT (${stockMatchSql})
+      `,
+      [companyId, lotNo, ...stockMatchParams]
+    );
+    const excludedSameLotNumberRows = Number(excludedRows[0]?.total || 0);
+
+    const saleWhereParts = [
+      "si.company_id = ?",
+      `EXISTS (
+        SELECT 1
+        FROM stock s
+        WHERE ${stockMatchSql}
+          AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      )`,
+      "COALESCE(si.is_deleted, 0) = 0",
+      "COALESCE(sh.is_deleted, 0) = 0",
+      "UPPER(COALESCE(sh.status, 'ACTIVE')) <> 'DELETED'",
+      "sh.cancelled_at IS NULL"
+    ];
+    const saleParams = [companyId, ...stockMatchParams];
+    if (dateFrom) {
+      saleWhereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) >= ?");
+      saleParams.push(dateFrom);
+    }
+    if (dateTo) {
+      saleWhereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) <= ?");
+      saleParams.push(dateTo);
+    }
+    if (customer) {
+      saleWhereParts.push("LOWER(COALESCE(sh.customer_name, si.customer_name, '')) LIKE ?");
+      saleParams.push(`%${customer.toLowerCase()}%`);
+    }
+    if (paymentStatus) {
+      saleWhereParts.push("UPPER(COALESCE(sh.payment_status, '')) = ?");
+      saleParams.push(paymentStatus);
+    }
+    appendSalesItemBranchScope(saleWhereParts, saleParams, branchScope, { itemAlias: "si" });
+
+    const salesJoinSql = `
+      FROM sales_items si
+      INNER JOIN sales_history sh
+        ON sh.company_id = si.company_id
+       AND sh.invoice_number = si.invoice_number
+      WHERE ${saleWhereParts.join(" AND ")}
+    `;
+
+    const [soldSummaryRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(${saleActualExpr}), 0) AS actual_sold,
+        COALESCE(SUM(${saleBillableExpr}), 0) AS billable_sold,
+        COALESCE(SUM(${saleGainExpr}), 0) AS commercial_gain_sold,
+        COALESCE(SUM(${saleGainExpr} * COALESCE(NULLIF(si.selling_rate_per_gram, 0), NULLIF(sh.selling_rate_per_gram, 0), NULLIF(sh.rate_per_gram, 0), 0)), 0) AS estimated_commercial_gain_value,
+        COUNT(*) AS sold_item_count
+      ${salesJoinSql}
+      `,
+      saleParams
+    );
+    const soldSummary = soldSummaryRows[0] || {};
+
+    const [invoiceRows] = await pool.query(
+      `
+      SELECT
+        si.invoice_number AS invoiceNumber,
+        MAX(COALESCE(sh.invoice_date, DATE(sh.created_at))) AS date,
+        MAX(COALESCE(sh.customer_name, si.customer_name, '')) AS customerName,
+        MAX(COALESCE(si.branch_id, sh.branch_id)) AS branchId,
+        MAX(COALESCE(sh.payment_status, '')) AS paymentStatus,
+        MAX(COALESCE(sh.paid_amount, 0)) AS paidAmount,
+        MAX(COALESCE(sh.due_amount, 0)) AS dueAmount,
+        COALESCE(SUM(${saleActualExpr}), 0) AS actualWeight,
+        COALESCE(SUM(${saleBillableExpr}), 0) AS billableWeight,
+        COALESCE(SUM(${saleGainExpr}), 0) AS laminationGainWeight,
+        COALESCE(SUM(${saleGainExpr} * COALESCE(NULLIF(si.selling_rate_per_gram, 0), NULLIF(sh.selling_rate_per_gram, 0), NULLIF(sh.rate_per_gram, 0), 0)), 0) AS estimatedCommercialGainValue,
+        COUNT(*) AS itemCount
+      ${salesJoinSql}
+      GROUP BY si.invoice_number
+      ORDER BY MAX(sh.id) DESC, si.invoice_number DESC
+      LIMIT 500
+      `,
+      saleParams
+    );
+
+    const stockDetailWhereParts = [
+      stockMatchSql
+    ];
+    const stockDetailParams = [...stockMatchParams];
+    appendBranchScopeFilter(stockDetailWhereParts, stockDetailParams, branchScope, { alias: "s" });
+    const [barcodeRows] = await pool.query(
+      `
+      SELECT
+        s.serial,
+        s.barcode,
+        s.status,
+        s.stock_state,
+        s.current_branch_id AS currentBranch,
+        sh.invoice_number AS invoiceNumber,
+        COALESCE(sh.customer_name, si.customer_name, '') AS customerName,
+        ${stockActualExpr} AS actualWeight,
+        ${stockBillableExpr} AS billableWeight,
+        ${stockGainExpr} AS laminationGainWeight,
+        COALESCE(NULLIF(si.selling_rate_per_gram, 0), NULLIF(sh.selling_rate_per_gram, 0), NULLIF(sh.rate_per_gram, 0), 0) AS saleRate,
+        ${stockGainExpr} * COALESCE(NULLIF(si.selling_rate_per_gram, 0), NULLIF(sh.selling_rate_per_gram, 0), NULLIF(sh.rate_per_gram, 0), 0) AS commercialGainValue,
+        COALESCE(rh.return_type, '') AS returnStatus
+      FROM stock s
+      LEFT JOIN sales_items si
+        ON si.company_id = s.company_id
+       AND UPPER(TRIM(si.barcode)) = UPPER(TRIM(s.barcode))
+       AND COALESCE(si.is_deleted, 0) = 0
+      LEFT JOIN sales_history sh
+        ON sh.company_id = si.company_id
+       AND sh.invoice_number = si.invoice_number
+       AND COALESCE(sh.is_deleted, 0) = 0
+       AND UPPER(COALESCE(sh.status, 'ACTIVE')) <> 'DELETED'
+       AND sh.cancelled_at IS NULL
+      LEFT JOIN return_history rh
+        ON rh.company_id = s.company_id
+       AND UPPER(TRIM(rh.barcode)) = UPPER(TRIM(s.barcode))
+       AND (COALESCE(rh.invoice_number, '') = COALESCE(sh.invoice_number, '') OR COALESCE(rh.invoice_number, '') = COALESCE(s.invoice_number, ''))
+      WHERE ${stockDetailWhereParts.join(" AND ")}
+      ORDER BY CAST(COALESCE(s.serial, '0') AS UNSIGNED) ASC, s.serial ASC, s.id ASC
+      LIMIT 1000
+      `,
+      stockDetailParams
+    );
+
+    const returnWhereParts = [
+      "rh.company_id = ?",
+      `EXISTS (
+        SELECT 1
+        FROM stock s
+        WHERE ${stockMatchSql}
+          AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
+      )`
+    ];
+    const returnParams = [companyId, ...stockMatchParams];
+    if (branchScope.isBranchFiltered) {
+      returnWhereParts.push("(rh.branch_id = ? OR si.branch_id = ? OR s.current_branch_id = ?)");
+      returnParams.push(branchScope.branchId, branchScope.branchId, branchScope.branchId);
+    }
+    const [returnRows] = await pool.query(
+      `
+      SELECT
+        rh.invoice_number AS invoiceNumber,
+        rh.barcode,
+        rh.return_type AS returnType,
+        rh.branch_id AS branchId,
+        COALESCE(NULLIF(si.actual_weight, 0), NULLIF(s.actual_weight, 0), rh.weight, s.weight, si.weight, 0) AS actualWeight,
+        COALESCE(NULLIF(si.billable_weight, 0), NULLIF(s.billable_weight, 0), rh.weight, s.weight, si.weight, 0) AS billableWeight,
+        COALESCE(NULLIF(si.lamination_gain_weight, 0), NULLIF(s.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), NULLIF(s.billable_weight, 0), rh.weight, s.weight, si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), NULLIF(s.actual_weight, 0), rh.weight, s.weight, si.weight, 0), 0), 0) AS laminationGainWeight,
+        COALESCE(rfp.payable_status, '') AS refundPayableStatus,
+        CASE WHEN si.id IS NULL THEN 1 ELSE 0 END AS missingSaleItemLink
+      FROM return_history rh
+      LEFT JOIN sales_items si
+        ON si.company_id = rh.company_id
+       AND UPPER(TRIM(si.barcode)) = UPPER(TRIM(rh.barcode))
+       AND si.invoice_number = rh.invoice_number
+      LEFT JOIN stock s
+        ON s.company_id = rh.company_id
+       AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
+      LEFT JOIN return_refund_payables rfp
+        ON rfp.company_id = rh.company_id
+       AND rfp.return_id = rh.id
+      WHERE ${returnWhereParts.join(" AND ")}
+      ORDER BY rh.id DESC
+      LIMIT 500
+      `,
+      returnParams
+    );
+
+    const movementWhereParts = [
+      "bti.company_id = ?",
+      stockMatchSql
+    ];
+    const movementParams = [companyId, ...stockMatchParams];
+    if (branchScope.isBranchFiltered) {
+      movementWhereParts.push("(bti.from_branch_id = ? OR bti.to_branch_id = ? OR s.current_branch_id = ?)");
+      movementParams.push(branchScope.branchId, branchScope.branchId, branchScope.branchId);
+    }
+    const [movementRows] = await pool.query(
+      `
+      SELECT
+        bt.transfer_no AS transferNo,
+        bti.from_branch_id AS fromBranch,
+        bti.to_branch_id AS toBranch,
+        bti.barcode,
+        bt.status AS transferStatus,
+        bti.item_status AS itemStatus
+      FROM branch_transfer_items bti
+      INNER JOIN branch_transfers bt
+        ON bt.company_id = bti.company_id
+       AND bt.id = bti.transfer_id
+      INNER JOIN stock s
+        ON s.company_id = bti.company_id
+       AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(bti.barcode))
+      WHERE ${movementWhereParts.join(" AND ")}
+      ORDER BY bt.id DESC, bti.id DESC
+      LIMIT 500
+      `,
+      movementParams
+    );
+
+    const cancelledWhereParts = [
+      "si.company_id = ?",
+      `EXISTS (
+        SELECT 1
+        FROM stock s
+        WHERE ${stockMatchSql}
+          AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
+      )`,
+      "(COALESCE(sh.is_deleted, 0) = 1 OR UPPER(COALESCE(sh.status, '')) IN ('DELETED', 'CANCELLED') OR sh.cancelled_at IS NOT NULL)"
+    ];
+    const cancelledParams = [companyId, ...stockMatchParams];
+    appendSalesItemBranchScope(cancelledWhereParts, cancelledParams, branchScope, { itemAlias: "si" });
+    const [cancelledRows] = await pool.query(
+      `
+      SELECT DISTINCT si.invoice_number
+      FROM sales_items si
+      INNER JOIN sales_history sh
+        ON sh.company_id = si.company_id
+       AND sh.invoice_number = si.invoice_number
+      WHERE ${cancelledWhereParts.join(" AND ")}
+      LIMIT 50
+      `,
+      cancelledParams
+    );
+
+    const totalStickerActualWeight = toNumber(stockSummary.total_actual_weight);
+    const totalStickerBillableWeight = toNumber(stockSummary.total_billable_weight);
+    const totalStickerGainWeight = toNumber(stockSummary.total_gain_weight);
+    const originalActualOutput = laminationRow
+      ? toNumber(laminationRow.actual_process_weight)
+      : (finalProcessOutput || totalStickerActualWeight);
+    const approvedLaminationGain = laminationRow ? toNumber(laminationRow.lamination_gain_weight) : 0;
+    const totalBillableAllowance = laminationRow
+      ? toNumber(laminationRow.billable_weight)
+      : originalActualOutput + approvedLaminationGain;
+    const actualSold = toNumber(soldSummary.actual_sold);
+    const billableSold = toNumber(soldSummary.billable_sold);
+    const commercialGainSold = toNumber(soldSummary.commercial_gain_sold);
+    const remainingActualStock = toNumber(stockSummary.remaining_actual_weight);
+    const remainingBillableStock = toNumber(stockSummary.remaining_billable_weight);
+    const remainingCommercialGain = toNumber(stockSummary.remaining_gain_weight);
+    const paidAmount = invoiceRows.reduce((sum, row) => sum + toNumber(row.paidAmount), 0);
+    const dueAmount = invoiceRows.reduce((sum, row) => sum + toNumber(row.dueAmount), 0);
+
+    const warnings = [];
+    if (laminationRow && (toNumber(stockSummary.missing_actual_count) || toNumber(stockSummary.missing_billable_count) || toNumber(stockSummary.missing_gain_count))) {
+      warnings.push({
+        code: "MISSING_COMMERCIAL_FIELDS",
+        message: "Some stock rows are using fallback commercial weights",
+        count: toNumber(stockSummary.missing_actual_count) + toNumber(stockSummary.missing_billable_count) + toNumber(stockSummary.missing_gain_count)
+      });
+    }
+    if (totalBillableAllowance > 0 && totalStickerBillableWeight > totalBillableAllowance + 0.001) {
+      warnings.push({
+        code: "BILLABLE_EXCEEDS_ALLOWANCE",
+        message: "Sticker billable weight exceeds approved lot allowance",
+        stickerBillableWeight: totalStickerBillableWeight,
+        totalBillableAllowance
+      });
+    }
+    if (Math.abs((actualSold + remainingActualStock) - totalStickerActualWeight) > 0.001) {
+      warnings.push({
+        code: "SOLD_REMAINING_MISMATCH",
+        message: "Sold actual weight plus remaining actual stock does not match sticker actual weight",
+        actualSold,
+        remainingActualStock,
+        totalStickerActualWeight
+      });
+    }
+    const unlinkedReturns = returnRows.filter((row) => Number(row.missingSaleItemLink || 0) === 1);
+    if (unlinkedReturns.length) {
+      warnings.push({
+        code: "RETURNED_ITEM_NOT_LINKED",
+        message: "Some returns are not linked to a sale item for this lot",
+        count: unlinkedReturns.length
+      });
+    }
+    if (cancelledRows.length) {
+      warnings.push({
+        code: "CANCELLED_INVOICE_EXCLUDED",
+        message: "Cancelled or deleted invoices were excluded from net sold calculations",
+        invoices: cancelledRows.map((row) => row.invoice_number).filter(Boolean)
+      });
+    }
+    if (!isStickerReadyLot || stockRowsMatched === 0) {
+      warnings.push({
+        code: "LOT_NOT_COMPLETED_OR_NO_STICKERS",
+        message: isStickerReadyLot
+          ? "No linked sticker stock rows were found for this completed process lot"
+          : "Lot is not completed/sticker-ready, so same lot-number stock rows were excluded",
+        processLotId,
+        lotStatus,
+        excludedSameLotNumberRows
+      });
+    }
+
+    return res.json({
+      success: true,
+      lotSummary: {
+        lotNo,
+        processLotId,
+        lotStatus,
+        originalActualOutput,
+        approvedLaminationGain,
+        totalBillableAllowance,
+        totalStickerActualWeight,
+        totalStickerBillableWeight,
+        totalStickerGainWeight,
+        actualSold,
+        billableSold,
+        commercialGainSold,
+        remainingActualStock,
+        remainingBillableStock,
+        remainingCommercialGain,
+        paidAmount,
+        dueAmount,
+        estimatedCommercialGainValue: toNumber(soldSummary.estimated_commercial_gain_value)
+      },
+      invoices: invoiceRows.map((row) => ({
+        invoiceNumber: row.invoiceNumber || "",
+        date: row.date || "",
+        customerName: row.customerName || "",
+        branchId: row.branchId ?? null,
+        paymentStatus: row.paymentStatus || "",
+        paidAmount: toNumber(row.paidAmount),
+        dueAmount: toNumber(row.dueAmount),
+        actualWeight: toNumber(row.actualWeight),
+        billableWeight: toNumber(row.billableWeight),
+        laminationGainWeight: toNumber(row.laminationGainWeight),
+        estimatedCommercialGainValue: toNumber(row.estimatedCommercialGainValue),
+        itemCount: Number(row.itemCount || 0)
+      })),
+      barcodes: barcodeRows.map((row) => ({
+        serial: row.serial || "",
+        barcode: row.barcode || "",
+        status: row.status || "",
+        stock_state: row.stock_state || "",
+        currentBranch: row.currentBranch ?? null,
+        invoiceNumber: row.invoiceNumber || "",
+        customerName: row.customerName || "",
+        actualWeight: toNumber(row.actualWeight),
+        billableWeight: toNumber(row.billableWeight),
+        laminationGainWeight: toNumber(row.laminationGainWeight),
+        saleRate: toNumber(row.saleRate),
+        commercialGainValue: toNumber(row.commercialGainValue),
+        returnStatus: row.returnStatus || ""
+      })),
+      returns: returnRows.map((row) => ({
+        invoiceNumber: row.invoiceNumber || "",
+        barcode: row.barcode || "",
+        returnType: row.returnType || "",
+        branchId: row.branchId ?? null,
+        actualWeight: toNumber(row.actualWeight),
+        billableWeight: toNumber(row.billableWeight),
+        laminationGainWeight: toNumber(row.laminationGainWeight),
+        refundPayableStatus: row.refundPayableStatus || ""
+      })),
+      branchMovements: movementRows.map((row) => ({
+        transferNo: row.transferNo || "",
+        fromBranch: row.fromBranch ?? null,
+        toBranch: row.toBranch ?? null,
+        barcode: row.barcode || "",
+        transferStatus: row.transferStatus || "",
+        itemStatus: row.itemStatus || ""
+      })),
+      warnings,
+      diagnostics: {
+        processLotId,
+        lotStatus,
+        stockRowsMatched,
+        matchMode,
+        excludedSameLotNumberRows
+      },
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Lot commercial profit report error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lot commercial profit report failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.get("/api/reports/profit", authMiddleware, async (req, res) => {
   try {
     const access = await resolveBranchAccessContext(req, {
@@ -35691,6 +37980,14 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "PROFIT_REPORT_READ" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
     }
 
     const fromDate = String(req.query.from || "").trim();
@@ -35728,34 +38025,33 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
       params.push(toDate);
     }
 
-    if (access.isBranchLocked) {
-      whereParts.push(`
-        EXISTS (
-          SELECT 1
-          FROM sales_items si
-          INNER JOIN stock s
-            ON s.company_id = si.company_id
-           AND s.barcode = si.barcode
-          WHERE si.company_id = sh.company_id
-            AND si.invoice_number = sh.invoice_number
-            AND COALESCE(si.is_deleted, 0) = 0
-            AND s.current_branch_id = ?
-        )
-      `);
-      params.push(access.userBranchId);
-    }
+    appendSalesBranchScope(whereParts, params, branchScope, { saleAlias: "sh" });
+    const branchTotals = buildSalesBranchTotalsJoin(branchScope);
 
     const [rows] = await pool.query(
       `
       SELECT
-        COALESCE(SUM(COALESCE(sh.total_amount, 0)), 0) AS total_sales,
-        COALESCE(SUM(COALESCE(sh.company_total_amount, 0)), 0) AS total_cost,
-        COALESCE(SUM(COALESCE(sh.total_amount, 0) - COALESCE(sh.company_total_amount, 0)), 0) AS total_profit,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_amount, 0)), 0)" : "COALESCE(SUM(COALESCE(sh.total_amount, 0)), 0)"} AS total_sales,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_company_total_amount, 0)), 0)" : "COALESCE(SUM(COALESCE(sh.company_total_amount, 0)), 0)"} AS total_cost,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_amount, 0) - COALESCE(branch_totals.branch_company_total_amount, 0)), 0)" : "COALESCE(SUM(COALESCE(sh.total_amount, 0) - COALESCE(sh.company_total_amount, 0)), 0)"} AS total_profit,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_actual_weight, 0)), 0)" : "(SELECT COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) FROM sales_items si INNER JOIN sales_history sh2 ON sh2.company_id = si.company_id AND sh2.invoice_number = si.invoice_number WHERE si.company_id = ? AND COALESCE(si.is_deleted, 0) = 0 AND COALESCE(sh2.is_deleted, 0) = 0 AND UPPER(COALESCE(sh2.status, 'ACTIVE')) <> 'DELETED' " + (fromDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) >= ? " : "") + (toDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) <= ? " : "") + ")"} AS total_actual_weight,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_billable_weight, 0)), 0)" : "(SELECT COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) FROM sales_items si INNER JOIN sales_history sh2 ON sh2.company_id = si.company_id AND sh2.invoice_number = si.invoice_number WHERE si.company_id = ? AND COALESCE(si.is_deleted, 0) = 0 AND COALESCE(sh2.is_deleted, 0) = 0 AND UPPER(COALESCE(sh2.status, 'ACTIVE')) <> 'DELETED' " + (fromDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) >= ? " : "") + (toDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) <= ? " : "") + ")"} AS total_billable_weight,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_total_lamination_gain_weight, 0)), 0)" : "(SELECT COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) FROM sales_items si INNER JOIN sales_history sh2 ON sh2.company_id = si.company_id AND sh2.invoice_number = si.invoice_number WHERE si.company_id = ? AND COALESCE(si.is_deleted, 0) = 0 AND COALESCE(sh2.is_deleted, 0) = 0 AND UPPER(COALESCE(sh2.status, 'ACTIVE')) <> 'DELETED' " + (fromDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) >= ? " : "") + (toDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) <= ? " : "") + ")"} AS total_lamination_gain_weight,
+        ${branchScope.isBranchFiltered ? "COALESCE(SUM(COALESCE(branch_totals.branch_estimated_commercial_gain_value, 0)), 0)" : "(SELECT COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) FROM sales_items si INNER JOIN sales_history sh2 ON sh2.company_id = si.company_id AND sh2.invoice_number = si.invoice_number WHERE si.company_id = ? AND COALESCE(si.is_deleted, 0) = 0 AND COALESCE(sh2.is_deleted, 0) = 0 AND UPPER(COALESCE(sh2.status, 'ACTIVE')) <> 'DELETED' " + (fromDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) >= ? " : "") + (toDate ? "AND COALESCE(sh2.invoice_date, DATE(sh2.created_at)) <= ? " : "") + ")"} AS estimated_commercial_gain_value,
         COUNT(*) AS total_invoices
       FROM sales_history sh
+      ${branchTotals.sql}
       WHERE ${whereParts.join(" AND ")}
       `,
-      params
+      branchScope.isBranchFiltered
+        ? [...branchTotals.params, ...params]
+        : [
+          access.companyScope, ...(fromDate ? [fromDate] : []), ...(toDate ? [toDate] : []),
+          access.companyScope, ...(fromDate ? [fromDate] : []), ...(toDate ? [toDate] : []),
+          access.companyScope, ...(fromDate ? [fromDate] : []), ...(toDate ? [toDate] : []),
+          access.companyScope, ...(fromDate ? [fromDate] : []), ...(toDate ? [toDate] : []),
+          ...params
+        ]
     );
 
     const summary = rows[0] || {};
@@ -35764,6 +38060,10 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
       totalSales: toNumber(summary.total_sales),
       totalCost: toNumber(summary.total_cost),
       totalProfit: toNumber(summary.total_profit),
+      totalActualWeight: toNumber(summary.total_actual_weight),
+      totalBillableWeight: toNumber(summary.total_billable_weight),
+      totalLaminationGainWeight: toNumber(summary.total_lamination_gain_weight),
+      estimatedCommercialGainValue: toNumber(summary.estimated_commercial_gain_value),
       totalInvoices: Number(summary.total_invoices || 0)
     });
   } catch (error) {
@@ -35771,6 +38071,123 @@ app.get("/api/reports/profit", authMiddleware, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Profit report fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/reports/lamination-profit", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const branchScope = await resolveSalesReadBranchScope(pool, req, access, { action: "LAMINATION_PROFIT_REPORT_READ" });
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
+    }
+
+    const fromDate = String(req.query.from || req.query.fromDate || "").trim();
+    const toDate = String(req.query.to || req.query.toDate || "").trim();
+    const lotNo = String(req.query.lotNo || req.query.lot || "").trim();
+    const customer = String(req.query.customer || "").trim();
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+    if (fromDate && !datePattern.test(fromDate)) {
+      return res.status(400).json({ success: false, message: "from must be in YYYY-MM-DD format" });
+    }
+    if (toDate && !datePattern.test(toDate)) {
+      return res.status(400).json({ success: false, message: "to must be in YYYY-MM-DD format" });
+    }
+
+    const whereParts = [
+      "si.company_id = ?",
+      "COALESCE(si.is_deleted, 0) = 0",
+      "COALESCE(sh.is_deleted, 0) = 0",
+      "UPPER(COALESCE(sh.status, 'ACTIVE')) <> 'DELETED'"
+    ];
+    const params = [access.companyScope];
+
+    if (fromDate) {
+      whereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("COALESCE(sh.invoice_date, DATE(sh.created_at)) <= ?");
+      params.push(toDate);
+    }
+    if (lotNo) {
+      whereParts.push("si.lot_number = ?");
+      params.push(lotNo);
+    }
+    if (customer) {
+      whereParts.push("LOWER(COALESCE(sh.customer_name, si.customer_name, '')) LIKE ?");
+      params.push(`%${customer.toLowerCase()}%`);
+    }
+    appendSalesItemBranchScope(whereParts, params, branchScope, { itemAlias: "si" });
+
+    const fromSql = `
+      FROM sales_items si
+      INNER JOIN sales_history sh
+        ON sh.company_id = si.company_id
+       AND sh.invoice_number = si.invoice_number
+      WHERE ${whereParts.join(" AND ")}
+    `;
+
+    const [summaryRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) AS total_actual_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) AS total_billable_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) AS total_lamination_gain_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) AS estimated_commercial_gain_value,
+        COUNT(DISTINCT si.invoice_number) AS invoice_count
+      ${fromSql}
+      `,
+      params
+    );
+
+    const [invoiceRows] = await pool.query(
+      `
+      SELECT
+        si.invoice_number,
+        MAX(sh.customer_name) AS customer_name,
+        MAX(sh.invoice_date) AS invoice_date,
+        MAX(sh.branch_id) AS branch_id,
+        COALESCE(SUM(COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0)), 0) AS total_actual_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0)), 0) AS total_billable_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0)), 0) AS total_lamination_gain_weight,
+        COALESCE(SUM(COALESCE(NULLIF(si.lamination_gain_weight, 0), GREATEST(COALESCE(NULLIF(si.billable_weight, 0), si.weight, 0) - COALESCE(NULLIF(si.actual_weight, 0), si.weight, 0), 0), 0) * COALESCE(NULLIF(si.selling_rate_per_gram, 0), 0)), 0) AS estimated_commercial_gain_value
+      ${fromSql}
+      GROUP BY si.invoice_number
+      ORDER BY MAX(sh.id) DESC
+      LIMIT 500
+      `,
+      params
+    );
+
+    const summary = summaryRows[0] || {};
+    return res.json({
+      success: true,
+      totalActualWeight: toNumber(summary.total_actual_weight),
+      totalBillableWeight: toNumber(summary.total_billable_weight),
+      totalLaminationGainWeight: toNumber(summary.total_lamination_gain_weight),
+      estimatedCommercialGainValue: toNumber(summary.estimated_commercial_gain_value),
+      invoiceCount: Number(summary.invoice_count || 0),
+      invoices: invoiceRows
+    });
+  } catch (error) {
+    console.error("Lamination profit report error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Lamination profit report failed",
       error: getErrorDetail(error)
     });
   }
