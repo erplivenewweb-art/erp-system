@@ -8,6 +8,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   "sales-dashboard": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "admin-approval": ["SUPERADMIN", "OWNER"],
   "company-plans": ["SUPERADMIN"],
+  "company-package-enforcement": ["SUPERADMIN"],
   "enforcement-qa-dashboard": ["SUPERADMIN"],
   sticker: ["SUPERADMIN", "OWNER", "STAFF"],
   stock: ["SUPERADMIN", "OWNER", "STAFF"],
@@ -40,6 +41,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   "branch-snapshots": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "branch-reconciliation-runs": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "branch-exception-queue": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "backup-health": ["OWNER"],
   settings: ["SUPERADMIN", "OWNER"]
 };
 
@@ -49,6 +51,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "sales-dashboard.html": "sales-dashboard",
   "admin-approval.html": "admin-approval",
   "company-plans.html": "company-plans",
+  "company-package-enforcement.html": "company-package-enforcement",
   "enforcement-qa-dashboard.html": "enforcement-qa-dashboard",
   "sticker.html": "sticker",
   "stock.html": "stock",
@@ -81,6 +84,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "branch-snapshots.html": "branch-snapshots",
   "branch-reconciliation-runs.html": "branch-reconciliation-runs",
   "branch-exception-queue.html": "branch-exception-queue",
+  "backup-health.html": "backup-health",
   "settings.html": "settings"
 };
 
@@ -91,7 +95,7 @@ const ERP_ALL_COMPANIES_VALUE = "__ALL__";
 const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
 const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
-const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "enforcement-qa-dashboard"]);
+const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "company-package-enforcement", "enforcement-qa-dashboard"]);
 const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
 const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "sales-dashboard",
@@ -124,7 +128,7 @@ const ERP_NAVIGATION_GROUPS = {
   }
 };
 const ERP_NAVIGATION_ITEMS = [
-  { mode: "production", pageKey: "production-dashboard", href: "production-dashboard.html", label: "Production Dashboard", icon: "fas fa-chart-pie", moduleKey: "PRODUCTION" },
+  { mode: "production", pageKey: "production-dashboard", href: "production-dashboard.html", label: "Production Dashboard", icon: "fas fa-chart-pie", moduleKey: "PRODUCTION_REPORTS" },
   { mode: "production", pageKey: "process", href: "process.html", label: "Process", icon: "fas fa-screwdriver-wrench", moduleKey: "PROCESS" },
   { mode: "production", pageKey: "sticker", href: "sticker.html", label: "Sticker", icon: "fas fa-barcode", moduleKey: "STICKER" },
   { mode: "production", pageKey: "material-stock", href: "material-stock.html", label: "Material Stock", icon: "fas fa-box-open", moduleKey: "MATERIAL_STOCK" },
@@ -133,6 +137,7 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "production", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" },
   { mode: "production", pageKey: "admin-approval", href: "admin-approval.html", label: "Admin Approval", icon: "fas fa-user-check", moduleKey: "ADMIN_APPROVAL" },
   { mode: "production", pageKey: "company-plans", href: "company-plans.html", label: "Company Plans", icon: "fas fa-layer-group", moduleKey: "ADMIN_APPROVAL" },
+  { mode: "production", pageKey: "company-package-enforcement", href: "company-package-enforcement.html", label: "Package Enforcement", icon: "fas fa-building-shield", moduleKey: "ADMIN_APPROVAL" },
   { mode: "production", pageKey: "enforcement-qa-dashboard", href: "enforcement-qa-dashboard.html", label: "Enforcement QA", icon: "fas fa-shield-halved", moduleKey: "ADMIN_APPROVAL" },
   { mode: "sales", pageKey: "sales-dashboard", href: "sales-dashboard.html", label: "Store Dashboard", icon: "fas fa-store", moduleKey: "STORE" },
   { mode: "sales", pageKey: "stock", href: "stock.html", label: "Stock", icon: "fas fa-boxes-stacked", moduleKey: "STOCK" },
@@ -145,16 +150,18 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION" },
   { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "lot-commercial-analytics", href: "lot-commercial-analytics.html", label: "Lot Commercial Analytics", icon: "fas fa-chart-line", moduleKey: "PROFIT_REPORT" },
-  { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline" },
-  { mode: "sales", pageKey: "reconciliation-dashboard", href: "reconciliation-dashboard.html", label: "ERP Health Check", icon: "fas fa-heart-pulse" },
+  { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline", moduleKey: "AUDIT" },
+  { mode: "sales", pageKey: "reconciliation-dashboard", href: "reconciliation-dashboard.html", label: "ERP Health Check", icon: "fas fa-heart-pulse", moduleKey: "AUDIT" },
+  { mode: "sales", pageKey: "backup-health", href: "backup-health.html", label: "Backup Health", icon: "fas fa-database", moduleKey: "BACKUP_HEALTH" },
   { mode: "sales", group: "branch", pageKey: "branch-management", href: "branch-management.html", label: "Branch Management", icon: "fas fa-code-branch", moduleKey: "BRANCH" },
   { mode: "sales", group: "branch", pageKey: "branch-transfer", href: "branch-transfer.html", label: "Branch Transfer", icon: "fas fa-truck-ramp-box", moduleKey: "BRANCH_TRANSFER" },
   { mode: "sales", group: "branch", pageKey: "branch-receive", href: "branch-receive.html", label: "Branch Receive", icon: "fas fa-barcode", moduleKey: "BRANCH_RECEIVE" },
-  { mode: "sales", group: "branch", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route", moduleKey: "BRANCH_RECEIVE" },
-  { mode: "sales", group: "branch", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple", moduleKey: "ANALYTICS" },
-  { mode: "sales", group: "branch", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half", moduleKey: "ANALYTICS" },
-  { mode: "sales", group: "branch", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation", moduleKey: "ANALYTICS" },
-  { mode: "sales", group: "branch", pageKey: "stock-movement-ledger", href: "stock-movement-ledger.html", label: "Stock Movement Ledger", icon: "fas fa-timeline", moduleKey: "ANALYTICS" },
+  { mode: "sales", group: "branch", pageKey: "branch-transfer-history", href: "branch-transfer-history.html", label: "Transfer History", icon: "fas fa-route", moduleKey: "BRANCH_TRANSFER" },
+  { mode: "sales", group: "branch", pageKey: "branch-shortage-report", href: "branch-shortage-report.html", label: "Shortage Report", icon: "fas fa-triangle-exclamation", moduleKey: "BRANCH_TRANSFER" },
+  { mode: "sales", group: "branch", pageKey: "branch-analytics", href: "branch-analytics.html", label: "Branch Analytics", icon: "fas fa-chart-simple", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "transfer-ageing-report", href: "transfer-ageing-report.html", label: "Transfer Ageing", icon: "fas fa-hourglass-half", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "shortage-analytics", href: "shortage-analytics.html", label: "Shortage Analytics", icon: "fas fa-circle-exclamation", moduleKey: "BRANCH_AUDIT" },
+  { mode: "sales", group: "branch", pageKey: "stock-movement-ledger", href: "stock-movement-ledger.html", label: "Stock Movement Ledger", icon: "fas fa-timeline", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", group: "branch", pageKey: "branch-reconciliation", href: "branch-reconciliation.html", label: "Branch Reconciliation", icon: "fas fa-scale-balanced", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", group: "branch", pageKey: "branch-audit-dashboard", href: "branch-audit-dashboard.html", label: "Branch Audit Dashboard", icon: "fas fa-shield-halved", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", group: "branch", pageKey: "branch-snapshots", href: "branch-snapshots.html", label: "Branch Snapshots", icon: "fas fa-camera-retro", moduleKey: "BRANCH_AUDIT" },
@@ -162,6 +169,9 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", group: "branch", pageKey: "branch-exception-queue", href: "branch-exception-queue.html", label: "Exception Queue", icon: "fas fa-list-check", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" }
 ];
+const ERP_PAGE_MODULE_KEYS = {
+  dashboard: "DASHBOARD"
+};
 
 function getLoggedInUser() {
   if (typeof window.getErpLoggedInUser === "function") {
@@ -397,6 +407,10 @@ function hasSelectedCompanyForSuperAdmin() {
   return !isSuperAdmin() || getSelectedCompanyValue() !== "";
 }
 
+function hasValidSuperAdminCompanyScope() {
+  return !isSuperAdmin() || isAllCompaniesSelected() || Boolean(getSelectedCompanyId());
+}
+
 function getSelectedCompanyName() {
   if (isAllCompaniesSelected()) return "Super Admin (All Companies)";
   const selectedId = getSelectedCompanyId();
@@ -460,12 +474,12 @@ function handleSuperAdminCompanyChange(value) {
   clearCompanySelectionBlock();
   clearCompanySelectionWarning();
 
-  if (isCompanySelectionRequiredForPage() && !getSelectedCompanyId()) {
+  if (isCompanySelectionRequiredForPage() && !hasValidSuperAdminCompanyScope()) {
     showCompanySelectionBlock();
     return;
   }
 
-  if (!isCompanySelectionRequiredForPage() && !getSelectedCompanyId()) {
+  if (!isCompanySelectionRequiredForPage() && !hasValidSuperAdminCompanyScope()) {
     showCompanySelectionWarning();
   }
 
@@ -481,7 +495,7 @@ async function populateSuperAdminCompanySelect(select) {
 }
 
 function showCompanySelectionBlock() {
-  if (!isCompanySelectionRequiredForPage() || getSelectedCompanyId()) return;
+  if (!isCompanySelectionRequiredForPage() || hasValidSuperAdminCompanyScope()) return;
   document.body.classList.add("superadmin-company-missing");
 
   if (!document.getElementById("superAdminCompanyBlock")) {
@@ -505,7 +519,7 @@ function clearCompanySelectionBlock() {
 
 function showCompanySelectionWarning() {
   if (!isSuperAdmin() || isCompanySelectionRequiredForPage() || ERP_ADMIN_ALL_COMPANY_PAGES.has(getCurrentPageKey())) return;
-  if (getSelectedCompanyId()) return;
+  if (hasValidSuperAdminCompanyScope()) return;
 
   const topbar = document.querySelector(".topbar");
   if (!topbar || document.getElementById("superAdminCompanyWarning")) return;
@@ -792,7 +806,7 @@ function canShowNavigationItem(item, user = null) {
 function getCurrentPageModuleKey() {
   const currentPage = getCurrentPageKey();
   const item = ERP_NAVIGATION_ITEMS.find((navItem) => navItem.pageKey === currentPage);
-  return item?.moduleKey || "";
+  return item?.moduleKey || ERP_PAGE_MODULE_KEYS[currentPage] || "";
 }
 
 function renderModulePreviewWarningIfNeeded() {
@@ -1275,13 +1289,23 @@ function patchFetchWithAuthHeader() {
         "/auth/logout"
       ].some((path) => apiPath.endsWith(path));
 
-      if (!selectedCompanyId && !canBypassCompanySelection) {
+      if (!selectedCompanyId && !isAllCompaniesSelected() && !canBypassCompanySelection) {
         showCompanySelectionBlock();
         return Promise.resolve(new Response(JSON.stringify({
           success: false,
           message: "Please select a company to continue"
         }), {
           status: 400,
+          headers: { "Content-Type": "application/json" }
+        }));
+      }
+
+      if (isAllCompaniesSelected() && !["GET", "HEAD", "OPTIONS"].includes(method) && !canBypassCompanySelection) {
+        return Promise.resolve(new Response(JSON.stringify({
+          success: false,
+          message: "SuperAdmin support mode is read-only for ERP operational data."
+        }), {
+          status: 403,
           headers: { "Content-Type": "application/json" }
         }));
       }

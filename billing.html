@@ -845,7 +845,7 @@
             </div>
 
             <div class="btn-row" style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
-              <button type="button" class="primary-btn" onclick="saveBillingRecord()">Save</button>
+              <button type="button" class="primary-btn" id="saveBillingBtn" onclick="saveBillingRecord()">Save</button>
               <button type="button" class="primary-btn" onclick="calculateBillingTotal()">Calculate Bill</button>
               <button type="button" class="secondary-btn" onclick="printBillingInvoice()">Print GST Invoice</button>
               <button type="button" class="secondary-btn" onclick="downloadBillingInvoice()">Download</button>
@@ -1373,10 +1373,29 @@
       const purity = num(item?.purity);
       return [
         String(item?.itemName || item?.productName || "").trim().toLowerCase(),
-        String(item?.size || "").trim().toLowerCase(),
-        getBillingItemMm(item).toLowerCase(),
+        String(item?.category || item?.productCategory || item?.product_category || "").trim().toLowerCase(),
         purity > 0 ? purity.toFixed(2) : ""
       ].join("||");
+    }
+
+    function getBillingItemSourceBarcodes(item = {}) {
+      return [
+        item.barcode,
+        ...(Array.isArray(item.sourceBarcodes) ? item.sourceBarcodes : []),
+        ...(Array.isArray(item.source_barcodes) ? item.source_barcodes : []),
+        ...(Array.isArray(item.barcodes) ? item.barcodes : [])
+      ].map((barcode) => String(barcode || "").trim()).filter(Boolean);
+    }
+
+    function getBillingItemBasePurities(item = {}) {
+      return [
+        item.basePurity,
+        item.base_purity,
+        item.stockPurity,
+        item.stock_purity,
+        ...(Array.isArray(item.basePurities) ? item.basePurities : []),
+        ...(Array.isArray(item.base_purities) ? item.base_purities : [])
+      ].map((purity) => num(purity)).filter((purity) => purity > 0);
     }
 
     function normalizeBillingItem(item = {}) {
@@ -1392,6 +1411,31 @@
         weight: totalWeight,
         mm: getBillingItemMm(item)
       };
+    }
+
+    function validateBillingSalePurity(items = billingItems) {
+      for (const item of Array.isArray(items) ? items : []) {
+        const salePurity = num(item.purity);
+        const basePurities = getBillingItemBasePurities(item);
+        const minBasePurity = basePurities.length ? Math.max(...basePurities) : 0;
+        if (salePurity > 0 && minBasePurity > 0 && salePurity + 0.0001 < minBasePurity) {
+          return {
+            ok: false,
+            message: `Sale purity cannot be less than stock purity for ${item.itemName || item.productName || item.barcode || "billing item"}`
+          };
+        }
+      }
+
+      return { ok: true, message: "" };
+    }
+
+    function updateBillingSaveState(validation = validateBillingSalePurity()) {
+      const button = document.getElementById("saveBillingBtn");
+      if (button) {
+        button.disabled = !validation.ok;
+        button.title = validation.ok ? "" : validation.message;
+      }
+      return validation;
     }
 
     function aggregateBillingItems(items = []) {
@@ -1410,7 +1454,9 @@
           grouped.set(key, {
             ...item,
             quantity: item.quantity,
-            weight: num(item.weight)
+            weight: num(item.weight),
+            sourceBarcodes: getBillingItemSourceBarcodes(item),
+            basePurities: getBillingItemBasePurities(item)
           });
           return;
         }
@@ -1424,7 +1470,9 @@
           barcode: existing.barcode || item.barcode || "",
           quantity: mergedQuantity,
           weight: mergedWeight,
-          unitWeight: num(existing.unitWeight || item.unitWeight || mergedWeight)
+          unitWeight: num(existing.unitWeight || item.unitWeight || mergedWeight),
+          sourceBarcodes: [...new Set([...getBillingItemSourceBarcodes(existing), ...getBillingItemSourceBarcodes(item)])],
+          basePurities: [...getBillingItemBasePurities(existing), ...getBillingItemBasePurities(item)]
         });
       });
 
@@ -1466,6 +1514,9 @@
         unitWeight: weight,
         weight,
         purity,
+        basePurity: purity,
+        basePurities: purity > 0 ? [purity] : [],
+        sourceBarcodes: [],
         size,
         lot,
         pureWeight: 0,
@@ -1475,6 +1526,7 @@
 
       renderBillingTable();
       calculateBillingTotal();
+      updateBillingSaveState();
       clearBillingItemForm();
       saveBillingItems();
     }
@@ -1571,6 +1623,9 @@
         unitWeight: num(item.unitWeight || item.weight),
         weight: num(item.weight),
         purity: num(item.purity),
+        basePurity: num(item.basePurity || item.base_purity || item.stockPurity || item.stock_purity || item.purity),
+        basePurities: [num(item.basePurity || item.base_purity || item.stockPurity || item.stock_purity || item.purity)].filter((value) => value > 0),
+        sourceBarcodes: [item.barcode || ""].filter(Boolean),
         size: item.size || "",
         lot: item.lot || item.lot_number || "",
         mm: item.mm || item.mmSize || item.mm_size || "",
@@ -1730,6 +1785,7 @@
       if (totalWeightEl) totalWeightEl.textContent = totalWeight.toFixed(3);
 
       updateQuickSummary();
+      updateBillingSaveState();
     }
 
     function updateQuickSummary() {
@@ -2175,6 +2231,12 @@
       }
 
       const record = getBillingRecord();
+      const purityValidation = validateBillingSalePurity(record.items);
+      updateBillingSaveState(purityValidation);
+      if (!purityValidation.ok) {
+        showToast(purityValidation.message, "error");
+        return null;
+      }
 
       const payloadItems = record.items.map((item) => ({
         barcode: item.barcode || "",
@@ -2203,7 +2265,9 @@
         employee_margin_amount: num(item.employeeMarginAmount),
         employeeName: record.employeeName,
         lot: item.lot || "",
-        lot_number: item.lot || ""
+        lot_number: item.lot || "",
+        sourceBarcodes: getBillingItemSourceBarcodes(item),
+        source_barcodes: getBillingItemSourceBarcodes(item)
       }));
 
       try {
@@ -2785,8 +2849,8 @@
               <th>Item</th>
               <th>Qty</th>
               <th>Purity</th>
-              <th>Weight</th>
-              <th>Pure Weight</th>
+              <th>Gross Weight</th>
+              <th>Fine Metal Weight</th>
               <th>Metal Rate (₹/g)</th>
               <th>Making Charge (₹/g)</th>
               <th>Total</th>

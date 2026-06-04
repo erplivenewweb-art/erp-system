@@ -382,6 +382,7 @@
     }
 
     .access-modal,
+    .package-modal,
     .audit-modal {
       width: min(560px, calc(100vw - 28px));
       max-height: min(760px, calc(100vh - 28px));
@@ -393,11 +394,88 @@
       padding: 18px;
     }
 
+    .package-modal {
+      width: min(760px, calc(100vw - 28px));
+    }
+
     .access-modal h3,
+    .package-modal h3,
     .audit-modal h3 {
       margin: 0 0 12px;
       color: #111827;
       font-size: 20px;
+    }
+
+    .package-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    .package-option {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      border: 1px solid #dbe3ec;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .package-option input {
+      margin-top: 3px;
+    }
+
+    .package-option strong {
+      display: block;
+      color: #1e293b;
+      font-size: 14px;
+    }
+
+    .package-option span {
+      display: block;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 3px;
+    }
+
+    .module-checklist {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .module-check-group {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px;
+      background: #f8fafc;
+    }
+
+    .module-check-group h4 {
+      margin: 0 0 8px;
+      color: #334155;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .module-check-row {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px;
+      padding: 6px 0;
+      color: #1e293b;
+      font-size: 13px;
+    }
+
+    .module-check-row span {
+      display: block;
+      color: #64748b;
+      font-size: 12px;
+      margin-top: 2px;
     }
 
     .modal-field {
@@ -939,6 +1017,43 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="packageApprovalModal" aria-hidden="true">
+    <div class="package-modal" role="dialog" aria-modal="true" aria-labelledby="packageApprovalTitle">
+      <h3 id="packageApprovalTitle">Approve Company Package</h3>
+      <p id="packageApprovalTarget" class="small-note"></p>
+      <div class="package-grid">
+        <label class="package-option">
+          <input type="radio" name="approvalPackage" value="PRODUCTION_SYSTEM" onchange="handleApprovalPackageChange()" />
+          <span><strong>Production System</strong><span>Process, lot, sticker, material stock, and production reports.</span></span>
+        </label>
+        <label class="package-option">
+          <input type="radio" name="approvalPackage" value="STORE_SYSTEM" onchange="handleApprovalPackageChange()" />
+          <span><strong>Store System</strong><span>Stock, sticker/manual stock, invoice, billing, return, and sales history.</span></span>
+        </label>
+        <label class="package-option">
+          <input type="radio" name="approvalPackage" value="FULL_ERP" checked onchange="handleApprovalPackageChange()" />
+          <span><strong>Full ERP</strong><span>All production-ready ERP modules.</span></span>
+        </label>
+        <label class="package-option">
+          <input type="radio" name="approvalPackage" value="CUSTOM" onchange="handleApprovalPackageChange()" />
+          <span><strong>Custom</strong><span>Manually enable modules. Dependencies are auto-applied by backend.</span></span>
+        </label>
+      </div>
+      <div class="modal-field hidden" id="customModuleField">
+        <label>Custom Modules</label>
+        <div id="customModuleChecklist" class="module-checklist"></div>
+      </div>
+      <div class="modal-field">
+        <label for="packageApprovalReason">Approval Reason</label>
+        <textarea id="packageApprovalReason" placeholder="Optional approval/package note"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="control-btn" type="button" onclick="closePackageApprovalModal()">Cancel</button>
+        <button class="approve-btn" type="button" onclick="confirmPackageApproval()">Approve Company</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="auditModal" aria-hidden="true">
     <div class="audit-modal" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
       <h3 id="auditModalTitle">Audit History</h3>
@@ -963,6 +1078,8 @@
     let currentCompanyId = null;
     let pendingAccessAction = null;
     let pendingAccessMenu = null;
+    let pendingPackageApprovalRequestId = null;
+    let approvalModuleCatalog = [];
     let barcodeAuditData = {
       summary: null,
       duplicates: []
@@ -1734,19 +1851,148 @@
       updateSummary();
     }
 
-    async function approveCompanyRequest(requestId) {
-      const ok = confirm("Are you sure you want to approve this company request?");
-      if (!ok) return;
+    const APPROVAL_PACKAGE_MODULES = {
+      PRODUCTION_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
+      STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "INVOICE", "BILLING", "RETURN", "SALES", "DAILY_REPORT"],
+      FULL_ERP: null
+    };
+
+    function normalizeModuleKeyForApproval(value) {
+      return String(value || "").trim().toUpperCase();
+    }
+
+    function getSelectedApprovalPackage() {
+      return document.querySelector('input[name="approvalPackage"]:checked')?.value || "FULL_ERP";
+    }
+
+    function getModuleGroupLabel(category) {
+      const clean = String(category || "OTHER").trim().toUpperCase();
+      if (clean === "REPORTING") return "Reports";
+      if (clean === "CORE") return "Core";
+      if (clean === "PRODUCTION") return "Production";
+      if (clean === "STORE") return "Store";
+      if (clean === "BRANCH") return "Branch";
+      if (clean === "FINANCE") return "Finance";
+      if (clean === "FUTURE") return "Backup/Health";
+      if (clean === "BACKUP_HEALTH") return "Backup/Health";
+      return clean.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    async function fetchApprovalModules() {
+      if (approvalModuleCatalog.length) return approvalModuleCatalog;
 
       try {
-        const res = await fetch(`${API_BASE}/approveCompanyRequest/${requestId}`, {
+        const res = await fetch(`${API_BASE}/erp-modules`, { cache: "no-store" });
+        const data = await res.json();
+        approvalModuleCatalog = Array.isArray(data.modules) ? data.modules : [];
+      } catch (error) {
+        console.log("Approval module catalog fetch error:", error);
+        approvalModuleCatalog = [];
+      }
+
+      return approvalModuleCatalog;
+    }
+
+    function renderCustomModuleChecklist() {
+      const target = document.getElementById("customModuleChecklist");
+      if (!target) return;
+
+      if (!approvalModuleCatalog.length) {
+        target.innerHTML = `<div class="empty-box">Module catalog could not be loaded.</div>`;
+        return;
+      }
+
+      const fullEnabled = new Set(approvalModuleCatalog
+        .filter((module) => String(module.module_key || "").toUpperCase() !== "PURCHASE")
+        .map((module) => normalizeModuleKeyForApproval(module.module_key)));
+      const grouped = approvalModuleCatalog.reduce((acc, module) => {
+        const category = getModuleGroupLabel(module.category);
+        if (!acc[category]) acc[category] = [];
+        acc[category].push(module);
+        return acc;
+      }, {});
+      const order = ["Core", "Production", "Store", "Branch", "Finance", "Reports", "Backup/Health", "Future"];
+
+      target.innerHTML = order
+        .filter((category) => grouped[category]?.length)
+        .map((category) => `
+          <div class="module-check-group">
+            <h4>${safeText(category)}</h4>
+            ${grouped[category].map((module) => {
+              const moduleKey = normalizeModuleKeyForApproval(module.module_key);
+              return `
+                <label class="module-check-row">
+                  <input type="checkbox" data-module-key="${moduleKey}" ${fullEnabled.has(moduleKey) ? "checked" : ""} />
+                  <span><strong>${safeText(module.module_name || moduleKey)}</strong><span>${safeText(module.description || moduleKey)}</span></span>
+                </label>
+              `;
+            }).join("")}
+          </div>
+        `)
+        .join("");
+    }
+
+    async function handleApprovalPackageChange() {
+      const packageKey = getSelectedApprovalPackage();
+      const customField = document.getElementById("customModuleField");
+      customField?.classList.toggle("hidden", packageKey !== "CUSTOM");
+      if (packageKey === "CUSTOM") {
+        await fetchApprovalModules();
+        renderCustomModuleChecklist();
+      }
+    }
+
+    async function openPackageApprovalModal(requestId) {
+      pendingPackageApprovalRequestId = requestId;
+      const company = pendingCompaniesData.find((item) => Number(item.id) === Number(requestId)) || null;
+      document.getElementById("packageApprovalTarget").textContent = company
+        ? `${company.company_name || "-"} | ${company.owner_email || "-"}`
+        : `Request ID ${requestId}`;
+      document.querySelector('input[name="approvalPackage"][value="FULL_ERP"]').checked = true;
+      document.getElementById("packageApprovalReason").value = "";
+      await handleApprovalPackageChange();
+      const modal = document.getElementById("packageApprovalModal");
+      modal?.classList.add("show");
+      modal?.setAttribute("aria-hidden", "false");
+    }
+
+    function closePackageApprovalModal() {
+      pendingPackageApprovalRequestId = null;
+      const modal = document.getElementById("packageApprovalModal");
+      modal?.classList.remove("show");
+      modal?.setAttribute("aria-hidden", "true");
+    }
+
+    function getCustomModuleOverrides() {
+      const overrides = {};
+      document.querySelectorAll("#customModuleChecklist [data-module-key]").forEach((input) => {
+        const moduleKey = normalizeModuleKeyForApproval(input.dataset.moduleKey);
+        if (moduleKey) overrides[moduleKey] = Boolean(input.checked);
+      });
+      return overrides;
+    }
+
+    async function confirmPackageApproval() {
+      if (!pendingPackageApprovalRequestId) return;
+
+      const packageKey = getSelectedApprovalPackage();
+      const payload = {
+        actingUserId: loggedInUser?.id,
+        plan_key: packageKey,
+        approval_reason: document.getElementById("packageApprovalReason")?.value.trim() || ""
+      };
+
+      if (packageKey === "CUSTOM") {
+        payload.module_overrides = getCustomModuleOverrides();
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/approveCompanyRequest/${pendingPackageApprovalRequestId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            actingUserId: loggedInUser?.id
-          })
+          body: JSON.stringify(payload)
         });
 
         const data = await res.json();
@@ -1757,11 +2003,16 @@
         }
 
         showToast(data.message || "Company approved", "success");
+        closePackageApprovalModal();
         await loadApprovalData();
       } catch (error) {
         console.log("Approve company error:", error);
         showToast("Server error", "error");
       }
+    }
+
+    async function approveCompanyRequest(requestId) {
+      await openPackageApprovalModal(requestId);
     }
 
     async function rejectCompanyRequest(requestId) {

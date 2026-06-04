@@ -690,6 +690,37 @@
       return role === "superadmin" || email === "grudrapratap0@gmail.com";
     }
 
+    function logStickerDebug(context, details = {}) {
+      console.debug("[Sticker Debug]", context, details);
+    }
+
+    function isSuperAdminAllCompaniesMode() {
+      return isSuperAdmin() && typeof isAllCompaniesSelected === "function" && isAllCompaniesSelected();
+    }
+
+    function showSuperAdminStickerReadOnly(action = "Sticker action") {
+      const message = "SuperAdmin is read-only. Select a company and login as operational user.";
+      logStickerDebug(`${action} blocked`, { reason: "SUPERADMIN_READ_ONLY_ALL_COMPANIES" });
+      showToast(message, "error");
+      return false;
+    }
+
+    function focusManualLotSection(lotValue = "") {
+      const panel = document.getElementById("manualLotPanel");
+      const manualLotNo = document.getElementById("manualLotNo");
+
+      if (panel) {
+        panel.classList.add("show");
+        panel.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
+      if (manualLotNo && lotValue && !manualLotNo.value.trim()) {
+        manualLotNo.value = lotValue;
+      }
+
+      setTimeout(() => manualLotNo?.focus(), 100);
+    }
+
     function getNormalizedRole() {
       const role = String(getLoggedInUser()?.role || "").trim().toLowerCase();
       return role === "admin" ? "owner" : role;
@@ -807,8 +838,20 @@
 
     function requireCompanyContext() {
       const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      logStickerDebug("requireCompanyContext", {
+        isSuperAdmin: isSuperAdmin(),
+        isAllCompanies: isSuperAdminAllCompaniesMode(),
+        companyId
+      });
+
+      if (isSuperAdminAllCompaniesMode()) {
+        showToast("SuperAdmin sticker page opened in read-only mode.", "info");
+        return true;
+      }
+
       if (companyId === null || Number.isNaN(companyId)) {
-        showToast(isSuperAdmin() ? "Please select a company" : "Company access missing", "error");
+        showToast("Company not selected. Please select a company before using Sticker.", "error");
+        logStickerDebug("requireCompanyContext failed", { reason: "COMPANY_NOT_SELECTED" });
         if (!isSuperAdmin()) window.location.href = "login.html";
         return false;
       }
@@ -1160,8 +1203,14 @@
 
     async function validateStickerLotCompleted(lotValue) {
       const cleanLot = normalizeText(lotValue);
+      logStickerDebug("validateStickerLotCompleted start", {
+        lot: cleanLot,
+        loadedLotCount: processLotStatusMap.size
+      });
+
       if (!cleanLot) {
-        showToast("Please enter the lot number.", "error");
+        showToast("Missing required fields: Lot number is required.", "error");
+        logStickerDebug("validateStickerLotCompleted failed", { reason: "LOT_REQUIRED" });
         return false;
       }
 
@@ -1170,26 +1219,50 @@
       }
 
       if (isManualLot(cleanLot)) {
+        logStickerDebug("validateStickerLotCompleted passed", { lot: cleanLot, reason: "MANUAL_LOT" });
         return true;
       }
 
       if (getProcessLotStatus(cleanLot) !== "COMPLETED") {
-        showToast(`Lot ${cleanLot} is not completed. Complete the lot before creating stickers.`, "error");
+        const lotKnown = processLotStatusMap.has(cleanLot);
+        const message = lotKnown
+          ? `Lot is not completed.\nCreate Manual Lot first.`
+          : `Manual lot not created.\nCreate Manual Lot first.`;
+        showToast(message, "error");
+        logStickerDebug("validateStickerLotCompleted failed", {
+          reason: lotKnown ? "LOT_NOT_COMPLETED" : "MANUAL_LOT_NOT_CREATED",
+          lot: cleanLot,
+          status: getProcessLotStatus(cleanLot) || "NOT_FOUND"
+        });
+        focusManualLotSection(cleanLot);
         return false;
       }
 
+      logStickerDebug("validateStickerLotCompleted passed", { lot: cleanLot, reason: "COMPLETED_PROCESS_LOT" });
       return true;
     }
 
     async function createManualLot() {
+      logStickerDebug("createManualLot start", {
+        isSuperAdmin: isSuperAdmin(),
+        isAllCompanies: isSuperAdminAllCompaniesMode()
+      });
+
+      if (isSuperAdmin()) {
+        showSuperAdminStickerReadOnly("Create Manual Lot");
+        return;
+      }
+
       if (!canCreateManualLot()) {
         showToast("Only Admin or SuperAdmin can create manual lots.", "error");
+        logStickerDebug("createManualLot failed", { reason: "ROLE_NOT_ALLOWED" });
         return;
       }
 
       const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
       if (companyId === null || Number.isNaN(companyId)) {
-        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+        showToast("Company not selected. Please select a company before creating a manual lot.", "error");
+        logStickerDebug("createManualLot failed", { reason: "COMPANY_NOT_SELECTED" });
         return;
       }
 
@@ -1198,11 +1271,13 @@
 
       if (!lotNo) {
         showToast("Please enter the manual lot number.", "error");
+        logStickerDebug("createManualLot failed", { reason: "MANUAL_LOT_NO_REQUIRED" });
         return;
       }
 
       if (!reason) {
         showToast("Please enter the manual lot reason.", "error");
+        logStickerDebug("createManualLot failed", { reason: "MANUAL_REASON_REQUIRED", lotNo });
         return;
       }
 
@@ -1217,6 +1292,12 @@
 
         if (!res.ok || !result?.success) {
           showToast(result?.message || "Manual lot could not be created.", "error");
+          logStickerDebug("createManualLot failed", {
+            reason: "SERVER_REJECTED_MANUAL_LOT",
+            status: res.status,
+            message: result?.message || "",
+            lotNo
+          });
           return;
         }
 
@@ -1228,9 +1309,11 @@
         renderLotButtons();
         syncLotPreview();
         updateNextSerialForCurrentLot();
+        logStickerDebug("createManualLot success", { lotNo, companyId });
         showToast("Manual lot created successfully.", "success");
       } catch (error) {
         console.log("Manual lot create error:", error);
+        logStickerDebug("createManualLot failed", { reason: "SERVER_ERROR", message: error?.message || String(error), lotNo });
         showToast("Manual lot could not be created.", "error");
       }
     }
@@ -1347,24 +1430,41 @@
         const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
         const actingUserId = getCurrentUserId();
         const params = new URLSearchParams();
+        const superAdminAllCompanies = isSuperAdminAllCompaniesMode();
+
+        logStickerDebug("loadFromServer start", {
+          isSuperAdmin: isSuperAdmin(),
+          isAllCompanies: superAdminAllCompanies,
+          companyId,
+          actingUserId
+        });
 
         if (actingUserId !== null && !Number.isNaN(actingUserId)) {
           params.set("actingUserId", String(actingUserId));
         }
 
-        if (companyId === null || Number.isNaN(companyId)) {
-          showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+        if ((companyId === null || Number.isNaN(companyId)) && !superAdminAllCompanies) {
+          showToast("Company not selected. Please select a company before loading Sticker.", "error");
+          logStickerDebug("loadFromServer failed", { reason: "COMPANY_NOT_SELECTED" });
           stockItems = [];
           renderHistory();
           return;
         }
-        params.set("companyId", String(companyId));
+
+        if (companyId !== null && !Number.isNaN(companyId)) {
+          params.set("companyId", String(companyId));
+        }
 
         const url = `${API_BASE}/getStock${params.toString() ? `?${params.toString()}` : ""}`;
 
         const res = await fetch(url, { cache: "no-store" });
         const data = await res.json();
         stockItems = Array.isArray(data) ? data : [];
+        logStickerDebug("loadFromServer stock loaded", {
+          stockCount: stockItems.length,
+          status: res.status,
+          url
+        });
 
         await loadProcessLotStatuses();
         collectLotsFromData();
@@ -1373,7 +1473,8 @@
         renderHistory();
       } catch (err) {
         console.log("Load error:", err);
-        showToast("Load error", "error");
+        logStickerDebug("loadFromServer failed", { reason: "SERVER_LOAD_ERROR", message: err?.message || String(err) });
+        showToast(`Sticker load failed: ${err?.message || "Server load error"}`, "error");
       }
     }
 
@@ -1399,7 +1500,27 @@
       return maxSerial + 1;
     }
 
-    function updateNextSerialForCurrentLot() {
+    async function fetchNextSerialForLot(lot) {
+      const params = buildAuthParams();
+      params.set("lot", lot);
+      const res = await fetch(`${API_BASE}/stickers/next-serial?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.message || "Next serial fetch failed");
+      return Number(data.nextSerial ?? data.next_serial ?? 1) || 1;
+    }
+
+    async function checkSerialExistsOnServer(lot, serial, ignoreBarcode = "") {
+      const params = buildAuthParams();
+      params.set("lot", lot);
+      params.set("serial", serial);
+      if (ignoreBarcode) params.set("ignoreBarcode", ignoreBarcode);
+      const res = await fetch(`${API_BASE}/stickers/check-serial?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.message || "Serial check failed");
+      return Boolean(data.exists);
+    }
+
+    async function updateNextSerialForCurrentLot() {
       const lot = document.getElementById("lotSelector")?.value.trim() || "";
       const serialInput = document.getElementById("stickerSerial");
 
@@ -1410,7 +1531,11 @@
         return;
       }
 
-      serialInput.value = String(getNextSerialForLot(lot));
+      try {
+        serialInput.value = String(await fetchNextSerialForLot(lot));
+      } catch (_) {
+        serialInput.value = String(getNextSerialForLot(lot));
+      }
     }
 
     function keepFieldsAndPrepareNext() {
@@ -1429,20 +1554,44 @@
 
     async function addStickerItem() {
       const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      logStickerDebug("addStickerItem start", {
+        isSuperAdmin: isSuperAdmin(),
+        isAllCompanies: isSuperAdminAllCompaniesMode(),
+        companyId,
+        pendingCount: pendingStickerItems.length
+      });
+
+      if (isSuperAdmin()) {
+        showSuperAdminStickerReadOnly("Add Item");
+        return;
+      }
 
       if (companyId === null || Number.isNaN(companyId)) {
-        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+        showToast("Company not selected. Please select a company before adding sticker rows.", "error");
+        logStickerDebug("addStickerItem failed", { reason: "COMPANY_NOT_SELECTED" });
         return;
       }
 
       let data = getStickerFormData();
+      logStickerDebug("addStickerItem form data", {
+        lot: data.lot,
+        serial: data.serial,
+        productName: data.productName,
+        purity: data.purity,
+        sku: data.sku,
+        size: data.size,
+        weight: data.weight,
+        hasBarcode: Boolean(data.barcode)
+      });
 
       if (!data.lot) {
-      showToast("Please enter the lot number.", "error");
+        showToast("Missing required fields: Lot number is required.", "error");
+        logStickerDebug("addStickerItem failed", { reason: "LOT_REQUIRED" });
         return;
       }
 
       if (!(await validateStickerLotCompleted(data.lot))) {
+        logStickerDebug("addStickerItem failed", { reason: "LOT_VALIDATION_FAILED", lot: data.lot });
         return;
       }
 
@@ -1453,14 +1602,35 @@
         data = getStickerFormData();
       }
 
-      if (!data.productName || !data.purity || !data.sku || !data.size || !data.weight) {
-      showToast("Please enter the serial, product, purity, SKU, size, weight, and lot number.", "error");
+      const stickerWeightValue = Number(data.weight || 0);
+      if (!data.productName || !data.purity || !data.sku || !data.size || !data.weight || stickerWeightValue <= 0) {
+        const missingFields = [];
+        if (!data.serial) missingFields.push("Serial");
+        if (!data.productName) missingFields.push("Product");
+        if (!data.purity) missingFields.push("Purity");
+        if (!data.sku) missingFields.push("SKU");
+        if (!data.size) missingFields.push("Size");
+        if (!data.weight || stickerWeightValue <= 0) missingFields.push("Weight greater than 0");
+        showToast(`Missing required fields: ${missingFields.join(", ")}.`, "error");
+        logStickerDebug("addStickerItem failed", { reason: "MISSING_REQUIRED_FIELDS", missingFields, lot: data.lot });
         return;
       }
 
       const expectedNextSerial = getNextSerialForLot(data.lot);
-      if (Number(data.serial) < expectedNextSerial && isDuplicateLotSerialEverywhere(data.lot, data.serial)) {
-      showToast(`Serial ${data.serial} already exists in stock for lot ${data.lot}.`, "error");
+      let serverDuplicateSerial = false;
+      try {
+        serverDuplicateSerial = await checkSerialExistsOnServer(data.lot, data.serial);
+      } catch (error) {
+        logStickerDebug("addStickerItem serial server check failed; falling back to local check", {
+          reason: "SERIAL_CHECK_API_FAILED",
+          lot: data.lot,
+          serial: data.serial,
+          message: error?.message || String(error)
+        });
+      }
+      if (Number(data.serial) < expectedNextSerial && (serverDuplicateSerial || isDuplicateLotSerialEverywhere(data.lot, data.serial))) {
+        showToast(`Duplicate serial: Serial ${data.serial} already exists in stock for lot ${data.lot}.`, "error");
+        logStickerDebug("addStickerItem failed", { reason: "DUPLICATE_SERIAL_IN_STOCK", lot: data.lot, serial: data.serial });
         document.getElementById("stickerSerial").value = String(expectedNextSerial);
         return;
       }
@@ -1471,8 +1641,9 @@
         data = getStickerFormData();
       }
 
-      if (isDuplicateLotSerialEverywhere(data.lot, data.serial)) {
-      showToast(`Serial ${data.serial} already exists in lot ${data.lot}.`, "error");
+      if (serverDuplicateSerial || isDuplicateLotSerialEverywhere(data.lot, data.serial)) {
+        showToast(`Duplicate serial: Serial ${data.serial} already exists in lot ${data.lot}.`, "error");
+        logStickerDebug("addStickerItem failed", { reason: "DUPLICATE_SERIAL", lot: data.lot, serial: data.serial });
         document.getElementById("stickerSerial").value = String(getNextSerialForLot(data.lot));
         return;
       }
@@ -1483,7 +1654,8 @@
         data = getStickerFormData();
 
         if (isDuplicateBarcodeEverywhere(data.barcode)) {
-      showToast("A duplicate barcode was detected.", "error");
+          showToast("A duplicate barcode was detected.", "error");
+          logStickerDebug("addStickerItem failed", { reason: "DUPLICATE_BARCODE", barcode: data.barcode });
           return;
         }
       }
@@ -1515,14 +1687,31 @@
       savePendingItemsToLocal();
       renderStickerList();
       keepFieldsAndPrepareNext();
+      logStickerDebug("addStickerItem success", {
+        lot: data.lot,
+        serial: data.serial,
+        pendingCount: pendingStickerItems.length
+      });
       showToast("The item has been added to the sticker list.", "success");
     }
 
     async function savePendingToServer() {
       const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      logStickerDebug("savePendingToServer start", {
+        isSuperAdmin: isSuperAdmin(),
+        isAllCompanies: isSuperAdminAllCompaniesMode(),
+        companyId,
+        pendingCount: pendingStickerItems.length
+      });
+
+      if (isSuperAdmin()) {
+        showSuperAdminStickerReadOnly("Save Sticker");
+        return;
+      }
 
       if (companyId === null || Number.isNaN(companyId)) {
-        showToast(isSuperAdmin() ? "Please select a company" : "Company access is missing.", "error");
+        showToast("Company not selected. Please select a company before saving stickers.", "error");
+        logStickerDebug("savePendingToServer failed", { reason: "COMPANY_NOT_SELECTED" });
         return;
       }
 
@@ -1578,7 +1767,13 @@
         const result = await res.json();
 
         if (!res.ok || !result.success) {
-      showToast(result.message || "No stickers were saved.", "error");
+          showToast(result.message || "No stickers were saved.", "error");
+          logStickerDebug("savePendingToServer failed", {
+            reason: "SERVER_REJECTED_SAVE",
+            status: res.status,
+            message: result?.message || "",
+            unsavedCount: unsavedItems.length
+          });
           return;
         }
 
@@ -1592,10 +1787,12 @@
         await loadFromServer();
         renderStickerList();
         updateNextSerialForCurrentLot();
-      showToast("All new items have been saved to stock.", "success");
+        logStickerDebug("savePendingToServer success", { savedCount: unsavedItems.length });
+        showToast("All new items have been saved to stock.", "success");
       } catch (err) {
         console.log("Bulk save error:", err);
-        showToast("Server save error", "error");
+        logStickerDebug("savePendingToServer failed", { reason: "SERVER_SAVE_ERROR", message: err?.message || String(err) });
+        showToast(`Server save error: ${err?.message || "Sticker save failed"}`, "error");
       } finally {
         const saveButton = document.getElementById("saveAllStickersBtn");
         if (saveButton) {

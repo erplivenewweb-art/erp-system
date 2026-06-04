@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const { spawn } = require("child_process");
 const LOCAL_ENV_FILE = path.resolve(__dirname, "..", "..", ".env");
 require("dotenv").config({ path: LOCAL_ENV_FILE });
 
@@ -33,6 +34,8 @@ const FRONTEND_MANIFEST_FILE = path.join(FRONTEND_ROOT, "manifest.json");
 const FRONTEND_SERVICE_WORKER_FILE = path.join(FRONTEND_ROOT, "service-worker.js");
 const PROTECTED_PAGES = new Set([
   "dashboard.html",
+  "production-dashboard.html",
+  "sales-dashboard.html",
   "process.html",
   "sticker.html",
   "stock.html",
@@ -45,12 +48,14 @@ const PROTECTED_PAGES = new Set([
   "expense-manager.html",
   "transaction.html",
   "transaction-reports.html",
+  "profit-report.html",
   "reconciliation-dashboard.html",
   "lot-commercial-analytics.html",
   "barcode-lifecycle.html",
   "return.html",
   "admin-approval.html",
   "company-plans.html",
+  "company-package-enforcement.html",
   "enforcement-qa-dashboard.html",
   "sales-history.html",
   "branch-management.html",
@@ -66,7 +71,8 @@ const PROTECTED_PAGES = new Set([
   "branch-audit-dashboard.html",
   "branch-snapshots.html",
   "branch-reconciliation-runs.html",
-  "branch-exception-queue.html"
+  "branch-exception-queue.html",
+  "backup-health.html"
 ]);
 
 const DEFAULT_ALLOWED_APP_ORIGINS = [
@@ -355,7 +361,7 @@ function getEnvWithLocalDefault(key, fallback = "") {
     case "MYSQLUSER":
       return "root";
     case "MYSQLDATABASE":
-      return "erp_system";
+      return "jewellery_erp";
     case "MYSQLPORT":
       return "3306";
     case "MYSQLPASSWORD":
@@ -425,11 +431,37 @@ const startupStatus = {
 };
 
 function logDbStartupConfig() {
-  console.log("[STARTUP] DB CONFIG:", {
+  console.log("[STARTUP] DB CONFIG:", getSafeMysqlStartupConfig());
+}
+
+function getSafeMysqlStartupConfig() {
+  return {
     host: MYSQL_CONFIG.host || "(missing)",
+    user: MYSQL_CONFIG.user || "(missing)",
     database: MYSQL_CONFIG.database || "(missing)",
-    port: MYSQL_CONFIG.port
-  });
+    port: MYSQL_CONFIG.port,
+    passwordExists: Boolean(String(MYSQL_CONFIG.password || "").trim())
+  };
+}
+
+function getMysqlConnectionDiagnostic(error) {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").trim();
+  const safeConfig = JSON.stringify(getSafeMysqlStartupConfig());
+
+  if (code === "ER_ACCESS_DENIED_ERROR") {
+    return `MySQL access denied for configured local credentials. Check MYSQLUSER and MYSQLPASSWORD in .env, then test the same login in MySQL Workbench. Safe config: ${safeConfig}`;
+  }
+
+  if (code === "ER_BAD_DB_ERROR") {
+    return `MySQL database does not exist or is not accessible. Create MYSQLDATABASE or update .env. Safe config: ${safeConfig}`;
+  }
+
+  if (["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT"].includes(code)) {
+    return `MySQL server connection failed. Check MYSQLHOST, MYSQLPORT, and whether MySQL Server is running. Safe config: ${safeConfig}`;
+  }
+
+  return `MySQL startup connection failed${code ? ` (${code})` : ""}${message ? `: ${message}` : ""}. Safe config: ${safeConfig}`;
 }
 
 function logSmtpStartupConfig() {
@@ -3325,13 +3357,15 @@ async function resolveAccessContext(
 
   const isSuperAdmin = isSuperAdminUser(actingUser);
   const isApprovedAdmin = isApprovedAdminUser(actingUser);
+  const requestMethod = String(req.method || "GET").trim().toUpperCase();
+  const isReadOnlyRequest = requestMethod === "GET" || requestMethod === "HEAD" || requestMethod === "OPTIONS";
   const actingCompanyId =
     actingUser.company_id === null || actingUser.company_id === undefined
       ? null
       : Number(actingUser.company_id);
 
   if (isSuperAdmin) {
-    if (requireCompanyScope && requestedCompanyId === null) {
+    if (requireCompanyScope && requestedCompanyId === null && (!allowSuperAdminAll || !isReadOnlyRequest)) {
       return {
         ok: false,
         status: 400,
@@ -3397,7 +3431,7 @@ async function resolveAccessContext(
 
 function normalizeBranchType(value = "", fallback = "STORE") {
   const clean = String(value || fallback).trim().toUpperCase();
-  if (["MAIN", "STORE", "WAREHOUSE", "OFFICE"].includes(clean)) return clean;
+  if (["MAIN", "STORE", "WAREHOUSE", "OFFICE", "PRODUCTION"].includes(clean)) return clean;
   return "";
 }
 
@@ -4036,7 +4070,7 @@ function validateBranchPayload(body = {}, { partial = false } = {}) {
   }
 
   if ((!partial || hasBranchType) && !branchType) {
-    return { ok: false, message: "branch_type must be MAIN, STORE, WAREHOUSE, or OFFICE" };
+    return { ok: false, message: "branch_type must be MAIN, STORE, WAREHOUSE, OFFICE, or PRODUCTION" };
   }
 
   if ((!partial || hasStatus) && !status) {
@@ -5988,49 +6022,66 @@ async function validateInvoiceSaveRequest(connection, invoiceNumber, items, comp
   }
 
   for (const item of items) {
-    const barcode = String(item.barcode || "").trim();
+    const itemBarcodes = getItemSourceBarcodes(item);
 
-    if (!barcode) continue;
+    if (!itemBarcodes.length) continue;
 
-    await ensureSingleStockBarcode(companyId, barcode, connection);
+    for (const barcode of itemBarcodes) {
+      await ensureSingleStockBarcode(companyId, barcode, connection);
 
-    const [stockRows] = await connection.query(
-      `
-      SELECT id, status, stock_state, current_branch_id, company_id
-      FROM stock
-      WHERE barcode = ? AND company_id = ?
-        ${getSellableStockFilterSql()}
-      LIMIT 1
-      `,
-      [barcode, companyId]
-    );
+      const [stockRows] = await connection.query(
+        `
+        SELECT id, status, stock_state, current_branch_id, company_id, purity
+        FROM stock
+        WHERE barcode = ? AND company_id = ?
+          ${getSellableStockFilterSql()}
+        LIMIT 1
+        `,
+        [barcode, companyId]
+      );
 
-    if (!stockRows.length) {
-      return {
-        ok: false,
-        status: 400,
-        message: `Barcode ${barcode} was not found in this company's stock`
-      };
-    }
+      if (!stockRows.length) {
+        return {
+          ok: false,
+          status: 400,
+          message: `Barcode ${barcode} was not found in this company's stock`
+        };
+      }
 
-    const stockRow = stockRows[0];
-    const stockStatus = String(stockRow.status || "").trim().toUpperCase();
-    const effectiveStockState = getEffectiveStockState(stockRow);
+      const stockRow = stockRows[0];
+      const stockStatus = String(stockRow.status || "").trim().toUpperCase();
+      const effectiveStockState = getEffectiveStockState(stockRow);
 
-    if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
-      return {
-        ok: false,
-        status: 400,
-        message: `Barcode ${barcode} is not in sellable stock`
-      };
-    }
+      if (stockStatus !== "IN_STOCK" || effectiveStockState !== "IN_STOCK") {
+        return {
+          ok: false,
+          status: 400,
+          message: `Barcode ${barcode} is not in sellable stock`
+        };
+      }
 
-    if (branchScope?.isBranchFiltered && Number(stockRow.current_branch_id || 0) !== Number(branchScope.branchId || 0)) {
-      return {
-        ok: false,
-        status: 403,
-        message: `Barcode ${barcode} does not belong to the selected billing branch`
-      };
+      if (branchScope?.isBranchFiltered && Number(stockRow.current_branch_id || 0) !== Number(branchScope.branchId || 0)) {
+        return {
+          ok: false,
+          status: 403,
+          message: `Barcode ${barcode} does not belong to the selected billing branch`
+        };
+      }
+
+      const activeBranch = await requireActiveBranchForCompany(connection, companyId, stockRow.current_branch_id);
+      if (!activeBranch.ok) {
+        return activeBranch;
+      }
+
+      const salePurity = toNumber(item.purity);
+      const stockPurity = toNumber(stockRow.purity);
+      if (salePurity > 0 && stockPurity > 0 && salePurity + 0.0001 < stockPurity) {
+        return {
+          ok: false,
+          status: 400,
+          message: `Sale purity cannot be less than stock purity for barcode ${barcode}`
+        };
+      }
     }
   }
 
@@ -7837,12 +7888,46 @@ async function runSuperAdminAccessMutation(req, res, {
 }
 
 async function testDbConnection() {
-  const conn = await pool.getConnection();
+  let conn = null;
   try {
+    conn = await pool.getConnection();
     await conn.ping();
+  } catch (error) {
+    const diagnostic = getMysqlConnectionDiagnostic(error);
+    const safeError = new Error(diagnostic);
+    safeError.cause = error;
+    throw safeError;
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
+}
+
+async function requireActiveBranchForCompany(connection, companyId, branchId) {
+  const cleanBranchId = Number(branchId || 0);
+  if (!cleanBranchId) return { ok: true, branch: null };
+
+  const branch = await getBranchForCompany(connection, companyId, cleanBranchId);
+  if (!branch) {
+    return { ok: false, status: 404, message: "Branch not found" };
+  }
+
+  if (String(branch.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE") {
+    return { ok: false, status: 400, message: "Branch is inactive" };
+  }
+
+  return { ok: true, branch };
+}
+
+function getItemSourceBarcodes(item = {}) {
+  const sources = [
+    item.barcode,
+    item.sourceBarcode,
+    item.source_barcode,
+    ...(Array.isArray(item.sourceBarcodes) ? item.sourceBarcodes : []),
+    ...(Array.isArray(item.source_barcodes) ? item.source_barcodes : []),
+    ...(Array.isArray(item.barcodes) ? item.barcodes : [])
+  ];
+  return [...new Set(sources.map((barcode) => String(barcode || "").trim()).filter(Boolean))];
 }
 
 async function tableExists(tableName) {
@@ -7964,6 +8049,7 @@ const ERP_MODULE_CATALOG = [
   { key: "PROCESS", name: "Process", category: "PRODUCTION", description: "Manufacturing process and lot tracking", sortOrder: 110 },
   { key: "STICKER", name: "Sticker", category: "PRODUCTION", description: "Barcode sticker creation and management", sortOrder: 120 },
   { key: "MATERIAL_STOCK", name: "Material Stock", category: "PRODUCTION", description: "Raw material stock management", sortOrder: 130 },
+  { key: "PRODUCTION_REPORTS", name: "Production Reports", category: "PRODUCTION", description: "Production reporting and analytics", sortOrder: 140 },
   { key: "STORE", name: "Store", category: "STORE", description: "Store and sales dashboard workspace", sortOrder: 200 },
   { key: "STOCK", name: "Stock", category: "STORE", description: "Finished goods stock management", sortOrder: 210 },
   { key: "BILLING", name: "Billing", category: "STORE", description: "Sales billing workflows", sortOrder: 220 },
@@ -7971,6 +8057,7 @@ const ERP_MODULE_CATALOG = [
   { key: "SALES", name: "Sales", category: "STORE", description: "Sales history and sales reports", sortOrder: 240 },
   { key: "RETURN", name: "Return", category: "STORE", description: "Customer return workflows", sortOrder: 250 },
   { key: "DAILY_REPORT", name: "Daily Report", category: "STORE", description: "Daily sales and store reporting", sortOrder: 260 },
+  { key: "CUSTOMER_DUE", name: "Customer Due", category: "FINANCE", description: "Customer due ledger and reports", sortOrder: 295 },
   { key: "EXPENSE", name: "Expense", category: "FINANCE", description: "Expense management", sortOrder: 300 },
   { key: "TRANSACTION", name: "Transaction", category: "FINANCE", description: "Accounts transaction ledger", sortOrder: 310 },
   { key: "PROFIT_REPORT", name: "Profit Report", category: "FINANCE", description: "Profit and loss reporting", sortOrder: 320 },
@@ -7980,20 +8067,25 @@ const ERP_MODULE_CATALOG = [
   { key: "BRANCH_AUDIT", name: "Branch Audit", category: "BRANCH", description: "Branch audit and reconciliation", sortOrder: 430 },
   { key: "AUDIT", name: "Audit", category: "REPORTING", description: "ERP audit reports", sortOrder: 500 },
   { key: "ANALYTICS", name: "Analytics", category: "REPORTING", description: "ERP analytics reports", sortOrder: 510 },
+  { key: "BACKUP_HEALTH", name: "Backup and Health", category: "BACKUP_HEALTH", description: "Backup, restore, and ERP health scan pages", sortOrder: 520 },
   { key: "PURCHASE", name: "Purchase", category: "FUTURE", description: "Future purchase module", sortOrder: 900, defaultEnabled: 0 }
 ];
 
 const ERP_PLAN_CATALOG = [
-  { key: "PRODUCTION_ONLY", name: "Production Only", description: "Manufacturing and production workflow access", isCustom: 0 },
-  { key: "STORE_ONLY", name: "Store Only", description: "Store, sales, billing, and invoice workflow access", isCustom: 0 },
+  { key: "PRODUCTION_SYSTEM", name: "Production System", description: "Manufacturing, process, sticker, and production reporting workflow access", isCustom: 0 },
+  { key: "STORE_SYSTEM", name: "Store System", description: "Store, stock, billing, invoice, return, and sales workflow access", isCustom: 0 },
+  { key: "PRODUCTION_ONLY", name: "Production Only", description: "Alias for Production System", isCustom: 0 },
+  { key: "STORE_ONLY", name: "Store Only", description: "Alias for Store System", isCustom: 0 },
   { key: "BRANCH_STORE", name: "Branch Store", description: "Store workflow access with branch transfer and audit modules", isCustom: 0 },
   { key: "FULL_ERP", name: "Full ERP", description: "All currently available ERP modules", isCustom: 0 },
   { key: "CUSTOM", name: "Custom", description: "Company-specific module selection", isCustom: 1 }
 ];
 
 const ERP_PLAN_MODULES = {
-  PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK"],
-  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
+  PRODUCTION_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
+  STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
+  PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
+  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
   BRANCH_STORE: [
     "DASHBOARD",
     "SETTINGS",
@@ -8124,6 +8216,11 @@ async function backfillCompanySaasAccess() {
     SELECT c.id, ?, 'FULL_ERP', CURDATE(), NULL, 'ACTIVE', NULL, NOW(), NULL, NOW()
     FROM companies c
     WHERE c.id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM company_plan_assignments cpa
+        WHERE cpa.company_id = c.id
+      )
     `,
     [fullErpPlanId]
   );
@@ -8136,6 +8233,11 @@ async function backfillCompanySaasAccess() {
     FROM companies c
     CROSS JOIN erp_modules m
     WHERE c.id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM company_module_access cma
+        WHERE cma.company_id = c.id
+      )
     `
   );
 
@@ -8168,12 +8270,89 @@ function normalizeModuleKey(value = "") {
 }
 
 function normalizePlanKey(value = "") {
+  const clean = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 80);
+  if (clean === "PRODUCTION_ONLY") return "PRODUCTION_SYSTEM";
+  if (clean === "STORE_ONLY") return "STORE_SYSTEM";
+  return clean;
+}
+
+function normalizePlanLookupKey(value = "") {
   return String(value || "")
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9_]/g, "_")
     .replace(/_+/g, "_")
     .slice(0, 80);
+}
+
+const ERP_MODULE_DEPENDENCIES = {
+  BRANCH: ["BRANCH_TRANSFER", "BRANCH_RECEIVE", "BRANCH_AUDIT", "STOCK", "STORE", "SALES", "ANALYTICS"],
+  BILLING: ["STOCK", "STORE", "SALES"],
+  INVOICE: ["STOCK", "STORE"],
+  RETURN: ["STOCK", "STORE", "SALES"],
+  BRANCH_TRANSFER: ["BRANCH", "STOCK", "STORE"],
+  BRANCH_RECEIVE: ["BRANCH", "BRANCH_TRANSFER", "STOCK", "STORE"],
+  PROCESS: ["PRODUCTION"]
+};
+
+function resolveEnabledModuleDependencies(moduleKeys = []) {
+  const enabled = new Set([...moduleKeys].map((moduleKey) => normalizeModuleKey(moduleKey)).filter(Boolean));
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const moduleKey of [...enabled]) {
+      const dependencies = ERP_MODULE_DEPENDENCIES[moduleKey] || [];
+      dependencies.forEach((dependency) => {
+        const normalizedDependency = normalizeModuleKey(dependency);
+        if (normalizedDependency && !enabled.has(normalizedDependency)) {
+          enabled.add(normalizedDependency);
+          changed = true;
+        }
+      });
+    }
+  }
+
+  if (enabled.has("STICKER") && !enabled.has("PROCESS") && !enabled.has("STOCK") && !enabled.has("STORE")) {
+    enabled.add("STOCK");
+    enabled.add("STORE");
+  }
+
+  return enabled;
+}
+
+function getEnabledModuleDependents(moduleKey, enabledKeys = []) {
+  const targetModuleKey = normalizeModuleKey(moduleKey);
+  const enabled = new Set([...enabledKeys].map((key) => normalizeModuleKey(key)).filter(Boolean));
+  if (!targetModuleKey || !enabled.has(targetModuleKey)) return [];
+
+  return [...enabled]
+    .filter((enabledModuleKey) => enabledModuleKey !== targetModuleKey)
+    .filter((enabledModuleKey) => resolveEnabledModuleDependencies([enabledModuleKey]).has(targetModuleKey))
+    .sort();
+}
+
+function normalizeModuleOverrideMap(moduleOverrides = null) {
+  if (!moduleOverrides) return new Map();
+
+  const rows = Array.isArray(moduleOverrides)
+    ? moduleOverrides
+    : Object.entries(moduleOverrides).map(([moduleKey, enabled]) => ({ moduleKey, enabled }));
+
+  return new Map(
+    rows
+      .map((row) => {
+        const moduleKey = normalizeModuleKey(row.module_key ?? row.moduleKey ?? row.key ?? "");
+        if (!moduleKey) return null;
+        return [moduleKey, Boolean(row.enabled)];
+      })
+      .filter(Boolean)
+  );
 }
 
 async function getSaasModuleCatalogRows() {
@@ -8385,6 +8564,16 @@ function isSaasPlanReaderRole(role = "") {
 }
 
 const MODULE_PREVIEW_ROUTE_RULES = [
+  { moduleKey: "DASHBOARD", pattern: /^\/dashboard(?:\.html)?$/i },
+  { moduleKey: "DASHBOARD", pattern: /^\/api\/(?:dashboard|smart-dashboard)$/i },
+  { moduleKey: "SETTINGS", pattern: /^\/settings(?:\.html)?$/i },
+  { moduleKey: "STAFF_MANAGEMENT", pattern: /^\/staff-management(?:\.html)?$/i },
+  { moduleKey: "EXPENSE", pattern: /^\/expense-manager(?:\.html)?$/i },
+  { moduleKey: "EXPENSE", pattern: /^\/expenses(?:\/|$)/i },
+  { moduleKey: "ADMIN_APPROVAL", pattern: /^\/admin-approval(?:\.html)?$/i },
+  { moduleKey: "ADMIN_APPROVAL", pattern: /^\/company-plans(?:\.html)?$/i },
+  { moduleKey: "ADMIN_APPROVAL", pattern: /^\/company-package-enforcement(?:\.html)?$/i },
+  { moduleKey: "ADMIN_APPROVAL", pattern: /^\/enforcement-qa-dashboard(?:\.html)?$/i },
   { moduleKey: "BILLING", pattern: /^\/billing(?:\.html)?$/i },
   { moduleKey: "BILLING", pattern: /^\/saveBilling$/i },
   { moduleKey: "BILLING", pattern: /^\/invoice-drafts(?:\/|$)/i },
@@ -8392,15 +8581,29 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "INVOICE", pattern: /^\/saveInvoice$/i },
   { moduleKey: "PROCESS", pattern: /^\/process(?:\.html)?$/i },
   { moduleKey: "PROCESS", pattern: /^\/process(?:\/|$)/i },
+  { moduleKey: "PRODUCTION_REPORTS", pattern: /^\/production-dashboard(?:\.html)?$/i },
   { moduleKey: "STICKER", pattern: /^\/sticker(?:\.html)?$/i },
   { moduleKey: "STICKER", pattern: /^\/(?:addSticker|addStickersBulk|updateSticker|deleteSticker|restoreSticker|getSticker)(?:\/|$)/i },
+  { moduleKey: "STORE", pattern: /^\/sales-dashboard(?:\.html)?$/i },
   { moduleKey: "STOCK", pattern: /^\/stock(?:\.html)?$/i },
   { moduleKey: "STOCK", pattern: /^\/getStock$/i },
+  { moduleKey: "SALES", pattern: /^\/sales-history(?:\.html|\/|$)/i },
+  { moduleKey: "SALES", pattern: /^\/getSalesHistory$/i },
+  { moduleKey: "DAILY_REPORT", pattern: /^\/daily-report(?:\.html)?$/i },
+  { moduleKey: "DAILY_REPORT", pattern: /^\/getDailyReport$/i },
+  { moduleKey: "RETURN", pattern: /^\/return(?:\.html)?$/i },
+  { moduleKey: "RETURN", pattern: /^\/(?:saveReturn|getReturns|getReturnSummary)(?:\/|$)/i },
+  { moduleKey: "MATERIAL_STOCK", pattern: /^\/material-stock(?:\.html)?$/i },
+  { moduleKey: "MATERIAL_STOCK", pattern: /^\/materialStock(?:\/|$)/i },
   { moduleKey: "BRANCH", pattern: /^\/branch-management(?:\.html)?$/i },
   { moduleKey: "BRANCH", pattern: /^\/branches(?:\/|$)/i },
+  { moduleKey: "BRANCH", pattern: /^\/branch-context$/i },
+  { moduleKey: "BRANCH", pattern: /^\/branch-users(?:\/|$)?$/i },
+  { moduleKey: "BRANCH", pattern: /^\/branch-permission-debug$/i },
   { moduleKey: "BRANCH", pattern: /^\/branch-stock(?:\/|$)/i },
   { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer(?:\.html)?$/i },
   { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-transfer-history(?:\.html)?$/i },
+  { moduleKey: "BRANCH_TRANSFER", pattern: /^\/branch-shortage-report(?:\.html)?$/i },
   { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/incoming$/i },
   { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/[^/]+\/receive-scan$/i },
   { moduleKey: "BRANCH_RECEIVE", pattern: /^\/branch-transfers\/[^/]+\/receive-summary$/i },
@@ -8413,15 +8616,21 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-reconciliation-runs(?:\.html)?$/i },
   { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-exception-queue(?:\.html)?$/i },
   { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-audit(?:\/|$)/i },
-  { moduleKey: "ANALYTICS", pattern: /^\/branch-analytics(?:\.html|\/|$)/i },
-  { moduleKey: "ANALYTICS", pattern: /^\/transfer-ageing-report(?:\.html)?$/i },
-  { moduleKey: "ANALYTICS", pattern: /^\/shortage-analytics(?:\.html)?$/i },
-  { moduleKey: "ANALYTICS", pattern: /^\/stock-movement-ledger(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/branch-analytics(?:\.html|\/|$)/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/transfer-ageing-report(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/shortage-analytics(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/stock-movement-ledger(?:\.html)?$/i },
+  { moduleKey: "BRANCH_AUDIT", pattern: /^\/reconciliation\/branch-transfer$/i },
   { moduleKey: "PROFIT_REPORT", pattern: /^\/profit-report(?:\.html)?$/i },
   { moduleKey: "PROFIT_REPORT", pattern: /^\/lot-commercial-analytics(?:\.html)?$/i },
   { moduleKey: "PROFIT_REPORT", pattern: /^\/reports\/lot-commercial-profit(?:\/|$)/i },
   { moduleKey: "TRANSACTION", pattern: /^\/transaction(?:\.html|\/|$)/i },
-  { moduleKey: "TRANSACTION", pattern: /^\/transaction-reports(?:\.html)?$/i }
+  { moduleKey: "TRANSACTION", pattern: /^\/transaction-reports(?:\.html)?$/i },
+  { moduleKey: "CUSTOMER_DUE", pattern: /^\/transaction\/reports\/customer-due(?:\/|$)/i },
+  { moduleKey: "AUDIT", pattern: /^\/barcode-lifecycle(?:\.html|\/|$)/i },
+  { moduleKey: "AUDIT", pattern: /^\/reconciliation-dashboard(?:\.html)?$/i },
+  { moduleKey: "BACKUP_HEALTH", pattern: /^\/backup-health(?:\.html)?$/i },
+  { moduleKey: "BACKUP_HEALTH", pattern: /^\/(?:backup|restore|go-live\/health-scan)(?:\/|$)/i }
 ];
 
 const MODULE_ROUTE_AUDIT_CANDIDATES = [
@@ -8818,6 +9027,175 @@ async function writeCompanyModuleAccessAudit(connection, {
       String(reason || "").trim() || null
     ]
   );
+}
+
+async function assignCompanyPlanAndModules(connection, {
+  req = null,
+  access = {},
+  companyId,
+  planKey = "FULL_ERP",
+  moduleOverrides = null,
+  reason = "",
+  effectiveFrom = null
+}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const requestedPlanKey = normalizePlanKey(planKey || "FULL_ERP") || "FULL_ERP";
+  const assignmentReason = String(reason || "").trim();
+  const plan = await getPlanForAssignment(connection, requestedPlanKey);
+  if (!plan) {
+    const error = new Error("Plan was not found or is inactive");
+    error.status = 400;
+    throw error;
+  }
+
+  const [currentAssignmentRows] = await connection.query(
+    `
+    SELECT cpa.*, p.plan_key AS current_plan_key
+    FROM company_plan_assignments cpa
+    LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+    WHERE cpa.company_id = ?
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [cleanCompanyId]
+  );
+  const currentAssignment = currentAssignmentRows[0] || null;
+  const oldPlanKey = normalizePlanKey(currentAssignment?.current_plan_key || currentAssignment?.plan_key_snapshot || "FULL_ERP");
+  const oldAccessMap = await getCompanyModuleAccessMap(connection, cleanCompanyId);
+
+  await connection.query(
+    `
+    INSERT INTO company_plan_assignments
+    (
+      company_id,
+      plan_id,
+      plan_key_snapshot,
+      effective_from,
+      effective_until,
+      status,
+      assigned_by,
+      assigned_at,
+      updated_by,
+      updated_at
+    )
+    VALUES (?, ?, ?, COALESCE(?, CURDATE()), NULL, 'ACTIVE', ?, NOW(), ?, NOW())
+    ON DUPLICATE KEY UPDATE
+      plan_id = VALUES(plan_id),
+      plan_key_snapshot = VALUES(plan_key_snapshot),
+      effective_from = VALUES(effective_from),
+      effective_until = VALUES(effective_until),
+      status = VALUES(status),
+      updated_by = VALUES(updated_by),
+      updated_at = NOW()
+    `,
+    [cleanCompanyId, plan.id, plan.plan_key, effectiveFrom, access.actingUserId ?? null, access.actingUserId ?? null]
+  );
+
+  const [moduleRows] = await connection.query(
+    `
+    SELECT module_key
+    FROM erp_modules
+    ORDER BY sort_order ASC, module_key ASC
+    `
+  );
+
+  const overrideMap = normalizeModuleOverrideMap(moduleOverrides);
+  const planModuleKeys = Number(plan.is_custom || 0) === 1
+    ? new Set()
+    : await getPlanModuleKeySet(connection, plan.id);
+  const fallbackKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
+  let enabledKeys = new Set();
+
+  if (Number(plan.is_custom || 0) === 1) {
+    enabledKeys = overrideMap.size
+      ? new Set([...overrideMap.entries()].filter(([, enabled]) => enabled).map(([moduleKey]) => moduleKey))
+      : oldAccessMap.size
+        ? new Set([...oldAccessMap.entries()].filter(([, accessRow]) => accessRow.enabled).map(([moduleKey]) => moduleKey))
+        : new Set(fallbackKeys);
+  } else {
+    enabledKeys = new Set(planModuleKeys);
+  }
+
+  enabledKeys = resolveEnabledModuleDependencies(enabledKeys);
+
+  let updatedModuleCount = 0;
+  let auditRowCount = 0;
+  const source = Number(plan.is_custom || 0) === 1 ? "OVERRIDE" : "PLAN";
+  const defaultReason =
+    assignmentReason ||
+    (Number(plan.is_custom || 0) === 1 ? "Custom package assigned with dependency resolution" : `Plan changed to ${plan.plan_key}`);
+
+  for (const moduleRow of moduleRows) {
+    const moduleKey = normalizeModuleKey(moduleRow.module_key);
+    const oldAccess = oldAccessMap.get(moduleKey);
+    const nextEnabled = enabledKeys.has(moduleKey);
+    const oldSource = String(oldAccess?.source || "").toUpperCase();
+    const shouldWriteModule = !oldAccess || oldAccess.enabled !== nextEnabled || oldSource !== source;
+
+    if (shouldWriteModule) {
+      await connection.query(
+        `
+        INSERT INTO company_module_access
+        (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          enabled = VALUES(enabled),
+          source = VALUES(source),
+          reason = VALUES(reason),
+          updated_by = VALUES(updated_by),
+          updated_at = NOW()
+        `,
+        [cleanCompanyId, moduleKey, Number(nextEnabled), source, defaultReason, access.actingUserId ?? null]
+      );
+      updatedModuleCount += 1;
+
+      await writeCompanyModuleAccessAudit(connection, {
+        companyId: cleanCompanyId,
+        moduleKey,
+        oldEnabled: oldAccess ? oldAccess.enabled : null,
+        newEnabled: nextEnabled,
+        oldPlanKey,
+        newPlanKey: plan.plan_key,
+        changedBy: access.actingUserId,
+        reason: defaultReason
+      });
+      auditRowCount += 1;
+    }
+  }
+
+  if (oldPlanKey !== plan.plan_key) {
+    await writeCompanyModuleAccessAudit(connection, {
+      companyId: cleanCompanyId,
+      moduleKey: "PLAN_ASSIGNMENT",
+      oldEnabled: null,
+      newEnabled: null,
+      oldPlanKey,
+      newPlanKey: plan.plan_key,
+      changedBy: access.actingUserId,
+      reason: defaultReason
+    });
+    auditRowCount += 1;
+  }
+
+  await logActivitySafe(connection, req, access, {
+    companyId: cleanCompanyId,
+    actionType: "ASSIGN_PLAN",
+    entityType: "COMPANY_PLAN",
+    entityId: String(cleanCompanyId),
+    moduleName: "company-plans",
+    status: "success",
+    message: "Company plan assigned",
+    beforeData: { plan_key: oldPlanKey },
+    afterData: { plan_key: plan.plan_key, updatedModuleCount, auditRowCount, dependencyResolved: true }
+  });
+
+  return {
+    plan,
+    oldPlanKey,
+    updatedModuleCount,
+    auditRowCount,
+    enabledModuleKeys: [...enabledKeys]
+  };
 }
 
 async function warnIfSchemaPiecesMissing(tableName, columnNames = [], indexNames = []) {
@@ -12969,6 +13347,156 @@ app.get("/ready", async (req, res) => {
       port: startupStatus.port,
       error: getErrorDetail(error)
     });
+  }
+});
+
+function getBackupDir() {
+  return path.resolve(FRONTEND_ROOT, process.env.BACKUP_DIR || "backups");
+}
+
+function getMysqlToolPath(toolName) {
+  const mysqlBinDir = String(process.env.MYSQL_BIN_DIR || "").trim();
+  if (!mysqlBinDir) return toolName;
+  return path.join(mysqlBinDir, process.platform === "win32" ? `${toolName}.exe` : toolName);
+}
+
+function resolveBackupFilePath(fileName = "") {
+  const backupDir = getBackupDir();
+  const cleanFile = path.basename(String(fileName || "").trim());
+  if (!cleanFile) return null;
+  const resolved = path.resolve(backupDir, cleanFile);
+  return resolved.startsWith(backupDir) ? resolved : null;
+}
+
+function runMysqlProcess(command, args, { inputFile = null, outputFile = null } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      env: { ...process.env, MYSQL_PWD: process.env.MYSQLPASSWORD || "" },
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stderr = "";
+
+    if (inputFile) {
+      fs.createReadStream(inputFile).pipe(child.stdin);
+    } else {
+      child.stdin.end();
+    }
+
+    if (outputFile) {
+      child.stdout.pipe(fs.createWriteStream(outputFile));
+    }
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => resolve({ ok: false, message: error.message }));
+    child.on("close", (code) => resolve({
+      ok: code === 0,
+      code,
+      message: code === 0 ? "ok" : (stderr.trim() || `Process exited with code ${code}`)
+    }));
+  });
+}
+
+async function getEffectiveModuleCountDefaults() {
+  const moduleRows = await getSaasModuleCatalogRows();
+  const fullErpModuleKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
+  return {
+    totalModuleCount: moduleRows.length,
+    fallbackEnabledCount: moduleRows.filter((moduleRow) => fullErpModuleKeys.has(normalizeModuleKey(moduleRow.module_key))).length
+  };
+}
+
+app.get("/backup/health", authMiddleware, checkRole(["OWNER", "ACCOUNTS"]), async (_req, res) => {
+  const backupDir = getBackupDir();
+  const backups = fs.existsSync(backupDir)
+    ? fs.readdirSync(backupDir)
+        .filter((file) => file.toLowerCase().endsWith(".sql"))
+        .map((file) => {
+          const stat = fs.statSync(path.join(backupDir, file));
+          return { file, size: stat.size, modifiedAt: stat.mtime };
+        })
+        .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
+    : [];
+
+  return res.json({
+    success: true,
+    backupDir,
+    mysqlCliConfigured: Boolean(process.env.MYSQL_BIN_DIR),
+    backupCount: backups.length,
+    latestBackup: backups[0] || null,
+    backups: backups.slice(0, 20)
+  });
+});
+
+app.post("/backup/create", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
+  if (isSuperAdminUser(req.user)) return sendSuperAdminReadOnlyError(res);
+  const backupDir = getBackupDir();
+  fs.mkdirSync(backupDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(backupDir, `${MYSQL_CONFIG.database}-backup-${timestamp}.sql`);
+  const result = await runMysqlProcess(
+    getMysqlToolPath("mysqldump"),
+    ["-h", MYSQL_CONFIG.host, "-P", String(MYSQL_CONFIG.port || 3306), "-u", MYSQL_CONFIG.user, "--single-transaction", "--routines", "--triggers", "--events", MYSQL_CONFIG.database],
+    { outputFile: backupFile }
+  );
+
+  if (!result.ok) return res.status(500).json({ success: false, message: "Backup create failed", error: result.message });
+  return res.json({ success: true, message: "Backup created", file: path.basename(backupFile) });
+});
+
+app.get("/backup/download", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
+  if (isSuperAdminUser(req.user)) return res.status(403).json({ success: false, message: "Access denied" });
+  const filePath = resolveBackupFilePath(req.query.file);
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ success: false, message: "Backup file not found" });
+  return res.download(filePath);
+});
+
+app.post("/backup/restore", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
+  if (isSuperAdminUser(req.user)) return sendSuperAdminReadOnlyError(res);
+  if (String(req.body?.confirm || req.body?.CONFIRM_RESTORE || "").trim().toUpperCase() !== "YES") {
+    return res.status(400).json({ success: false, message: "Restore blocked. Set confirm=YES to continue." });
+  }
+
+  const filePath = resolveBackupFilePath(req.body?.file || req.body?.backupFile);
+  if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ success: false, message: "Backup file not found" });
+
+  const result = await runMysqlProcess(
+    getMysqlToolPath("mysql"),
+    ["-h", MYSQL_CONFIG.host, "-P", String(MYSQL_CONFIG.port || 3306), "-u", MYSQL_CONFIG.user, MYSQL_CONFIG.database],
+    { inputFile: filePath }
+  );
+
+  if (!result.ok) return res.status(500).json({ success: false, message: "Restore failed", error: result.message });
+  return res.json({ success: true, message: "Restore completed", file: path.basename(filePath) });
+});
+
+app.get("/go-live/health-scan", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: false });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const readiness = await verifyActiveBarcodeUniquenessReadiness({ companyId: access.companyScope });
+    const backupDir = getBackupDir();
+    const backupExists = fs.existsSync(backupDir) && fs.readdirSync(backupDir).some((file) => file.toLowerCase().endsWith(".sql"));
+    const checks = [
+      { key: "db", ok: startupStatus.db === "connected", message: `DB status: ${startupStatus.db}` },
+      { key: "barcode_uniqueness", ok: readiness.ready, message: readiness.ready ? "Barcode uniqueness ready" : "Barcode uniqueness readiness failed" },
+      { key: "backup", ok: backupExists, message: backupExists ? "At least one backup file exists" : "No local backup file found" },
+      { key: "superadmin_readonly", ok: true, message: "SuperAdmin operational mutation guard is enabled" }
+    ];
+
+    return res.json({
+      success: true,
+      company_id: access.companyScope,
+      allCompanies: access.isSuperAdmin && access.companyScope === null,
+      ready: checks.every((check) => check.ok),
+      checks,
+      barcodeReadiness: readiness
+    });
+  } catch (error) {
+    console.error("Go-live health scan error:", error);
+    return res.status(500).json({ success: false, message: "Go-live health scan failed", error: getErrorDetail(error) });
   }
 });
 
@@ -19267,6 +19795,122 @@ app.post("/process/lots/:lotNo/lamination/approve", authMiddleware, checkRole(["
   }
 });
 
+app.post("/process/lots/:lotNo/lamination/approve-detected", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+    const detectedGain = parseOptionalNumber(
+      req.body.laminationGainWeight ?? req.body.lamination_gain_weight ?? req.body.detectedGainWeight ?? req.body.detected_gain_weight,
+      "Detected lamination gain weight",
+      0
+    );
+    if (!detectedGain.ok) return res.status(400).json({ success: false, message: detectedGain.message });
+    if (detectedGain.value < 0) return res.status(400).json({ success: false, message: "Lamination gain weight cannot be negative" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const context = await resolveProcessLaminationContext(connection, access.companyScope, lotNo, workCategory);
+    if (!context.ok) {
+      await connection.rollback();
+      return res.status(context.status || 400).json({ success: false, message: context.message });
+    }
+
+    const activeRecord = await getActiveProcessLaminationWeight(connection, access.companyScope, context.processLot.id, { forUpdate: true });
+    if (activeRecord && activeRecord.status === "APPROVED") {
+      await connection.commit();
+      return res.json({ success: true, message: "Lamination commercial weight already approved", lamination: activeRecord });
+    }
+
+    const gainWeight = detectedGain.value || toNumber(activeRecord?.laminationGainWeight || 0);
+    const billableWeight = Number(format3(context.actualProcessWeight + gainWeight));
+    let recordId = activeRecord?.id || null;
+
+    if (recordId) {
+      await connection.query(
+        `
+        UPDATE process_lamination_weights
+        SET actual_process_weight = ?,
+            lamination_gain_weight = ?,
+            billable_weight = ?,
+            status = 'APPROVED',
+            approved_by = ?,
+            approved_at = NOW(),
+            updated_at = NOW()
+        WHERE company_id = ? AND id = ?
+        `,
+        [context.actualProcessWeight, gainWeight, billableWeight, access.actingUserId || null, access.companyScope, recordId]
+      );
+    } else {
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO process_lamination_weights
+        (
+          company_id, process_lot_id, lot_no, actual_process_weight,
+          lamination_gain_weight, billable_weight, status, remarks,
+          created_by, approved_by, approved_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?, NOW(), NOW(), NOW())
+        `,
+        [
+          access.companyScope,
+          Number(context.processLot.id || 0),
+          context.lotNo,
+          context.actualProcessWeight,
+          gainWeight,
+          billableWeight,
+          String(req.body.remarks || "Approved detected lamination gain").trim(),
+          access.actingUserId || null,
+          access.actingUserId || null
+        ]
+      );
+      recordId = Number(insertResult.insertId || 0);
+    }
+
+    const [savedRows] = await connection.query(
+      `SELECT * FROM process_lamination_weights WHERE company_id = ? AND id = ? LIMIT 1`,
+      [access.companyScope, recordId]
+    );
+    const savedRecord = savedRows.length ? normalizeProcessLaminationWeightRow(savedRows[0]) : null;
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "LAMINATION_DETECTED_APPROVED",
+      entityType: "process_lamination_weight",
+      entityId: String(recordId || ""),
+      moduleName: "process",
+      status: "success",
+      message: "Detected lamination commercial weight approved",
+      afterData: savedRecord
+    });
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Detected lamination commercial weight approved",
+      lamination: savedRecord
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Approve detected lamination weight error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Detected lamination weight approve failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.post("/process/lots/:lotNo/lamination/cancel", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
   try {
@@ -22858,6 +23502,109 @@ async function insertStickerStockRow(connection, item, {
 /* =========================
    ADD STICKER
 ========================= */
+app.get("/stickers/check-serial", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin && access.companyScope === null) {
+      return res.status(400).json({ success: false, message: "companyId is required" });
+    }
+
+    const lot = String(req.query.lot || req.query.lotNo || req.query.lot_number || "").trim();
+    const serial = String(req.query.serial || "").trim();
+    const ignoreBarcode = String(req.query.ignoreBarcode || req.query.ignore_barcode || "").trim();
+    if (!lot || !serial) {
+      return res.status(400).json({ success: false, message: "lot and serial are required" });
+    }
+
+    const params = [access.companyScope, lot, serial];
+    let ignoreSql = "";
+    if (ignoreBarcode) {
+      ignoreSql = "AND UPPER(TRIM(COALESCE(barcode, ''))) <> ?";
+      params.push(normalizeBarcodeForComparison(ignoreBarcode));
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT id, barcode, lot_number, serial
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
+        AND UPPER(TRIM(COALESCE(serial, ''))) = UPPER(TRIM(?))
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+        AND deleted_at IS NULL
+        ${ignoreSql}
+      LIMIT 1
+      `,
+      params
+    );
+
+    return res.json({
+      success: true,
+      exists: rows.length > 0,
+      duplicate: rows[0] || null
+    });
+  } catch (error) {
+    console.error("Sticker serial check error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Sticker serial check failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/stickers/next-serial", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin && access.companyScope === null) {
+      return res.status(400).json({ success: false, message: "companyId is required" });
+    }
+
+    const lot = String(req.query.lot || req.query.lotNo || req.query.lot_number || "").trim();
+    if (!lot) {
+      return res.status(400).json({ success: false, message: "lot is required" });
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT COALESCE(MAX(CAST(serial AS UNSIGNED)), 0) AS max_serial
+      FROM stock
+      WHERE company_id = ?
+        AND UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
+        AND TRIM(COALESCE(serial, '')) <> ''
+        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
+        AND deleted_at IS NULL
+      `,
+      [access.companyScope, lot]
+    );
+
+    const nextSerial = Number(rows[0]?.max_serial || 0) + 1;
+    return res.json({
+      success: true,
+      lot,
+      nextSerial,
+      next_serial: nextSerial
+    });
+  } catch (error) {
+    console.error("Sticker next serial error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Sticker next serial failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
@@ -22933,6 +23680,10 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
     const stockBranch = await resolveStockCreationBranch(connection, access, req);
     if (!stockBranch.ok) {
       throw createStickerBulkError(stockBranch.message || "Stock branch could not be resolved", stockBranch.status || 400);
+    }
+    const activeStockBranch = await requireActiveBranchForCompany(connection, finalCompanyId, stockBranch.branchId);
+    if (!activeStockBranch.ok) {
+      throw createStickerBulkError(activeStockBranch.message || "Branch is inactive", activeStockBranch.status || 400);
     }
 
     for (const item of normalizedItems) {
@@ -23037,6 +23788,13 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       return res.status(stockBranch.status || 400).json({
         success: false,
         message: stockBranch.message || "Stock branch could not be resolved"
+      });
+    }
+    const activeStockBranch = await requireActiveBranchForCompany(pool, finalCompanyId, stockBranch.branchId);
+    if (!activeStockBranch.ok) {
+      return res.status(activeStockBranch.status || 400).json({
+        success: false,
+        message: activeStockBranch.message || "Branch is inactive"
       });
     }
 
@@ -23882,11 +24640,18 @@ app.get("/invoice-drafts/current", authMiddleware, async (req, res) => {
     const access = await resolveAccessContext(req, {
       requireActingUser: true,
       requireCompanyScope: true,
-      allowSuperAdminAll: false
+      allowSuperAdminAll: true
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+
+    if (access.isSuperAdmin && access.companyScope === null) {
+      return res.json({
+        success: true,
+        ...mapInvoiceDraftPayload(null, [])
+      });
     }
 
     connection = await pool.getConnection();
@@ -24059,6 +24824,14 @@ app.post("/invoice-drafts/current/items", authMiddleware, checkRole(["SUPERADMIN
       return res.status(403).json({
         success: false,
         message: "This barcode does not belong to the selected billing branch"
+      });
+    }
+
+    const activeBranch = await requireActiveBranchForCompany(connection, access.companyScope, stockRow.current_branch_id);
+    if (!activeBranch.ok) {
+      return res.status(activeBranch.status || 400).json({
+        success: false,
+        message: activeBranch.message || "Branch is inactive"
       });
     }
 
@@ -24693,6 +25466,16 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         success: false,
         message: branchScope.message || "Branch access denied"
       });
+    }
+    if (branchScope.branchId) {
+      const activeBillingBranch = await requireActiveBranchForCompany(connection, finalCompanyId, branchScope.branchId);
+      if (!activeBillingBranch.ok) {
+        await connection.rollback();
+        return res.status(activeBillingBranch.status || 400).json({
+          success: false,
+          message: activeBillingBranch.message || "Branch is inactive"
+        });
+      }
     }
 
     let finalInvoiceNumber = String(invoiceNumber || "").trim();
@@ -27512,6 +28295,9 @@ app.put("/approveCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]),
     }
 
     const requestData = requestRows[0];
+    const approvalPlanKey = normalizePlanKey(req.body?.plan_key ?? req.body?.planKey ?? "FULL_ERP") || "FULL_ERP";
+    const moduleOverrides = req.body?.module_overrides ?? req.body?.moduleOverrides ?? null;
+    const approvalReason = String(req.body?.approval_reason ?? req.body?.approvalReason ?? "").trim();
 
     const [existingCompany] = await connection.query(
       `SELECT id FROM companies WHERE LOWER(owner_email) = LOWER(?) LIMIT 1`,
@@ -27573,6 +28359,15 @@ app.put("/approveCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]),
       ]
     );
 
+    const assignmentResult = await assignCompanyPlanAndModules(connection, {
+      req,
+      access,
+      companyId,
+      planKey: approvalPlanKey,
+      moduleOverrides,
+      reason: approvalReason || `Company approved with ${approvalPlanKey} package`
+    });
+
     await connection.query(
       `
       UPDATE company_signup_requests
@@ -27587,7 +28382,9 @@ app.put("/approveCompanyRequest/:id", authMiddleware, checkRole(["SUPERADMIN"]),
     return res.json({
       success: true,
       message: "The company and admin user have been created successfully",
-      companyId
+      companyId,
+      plan_key: assignmentResult.plan.plan_key,
+      enabled_module_count: assignmentResult.enabledModuleKeys.length
     });
   } catch (error) {
     if (connection) {
@@ -28091,159 +28888,14 @@ app.post("/superadmin/company-plans/:companyId/assign", authMiddleware, checkRol
       return res.status(400).json({ success: false, message: "Plan was not found or is inactive" });
     }
 
-    const [currentAssignmentRows] = await connection.query(
-      `
-      SELECT cpa.*, p.plan_key AS current_plan_key
-      FROM company_plan_assignments cpa
-      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
-      WHERE cpa.company_id = ?
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [companyId]
-    );
-    const currentAssignment = currentAssignmentRows[0] || null;
-    const oldPlanKey = normalizePlanKey(currentAssignment?.current_plan_key || currentAssignment?.plan_key_snapshot || "FULL_ERP");
-    const oldAccessMap = await getCompanyModuleAccessMap(connection, companyId);
-
-    await connection.query(
-      `
-      INSERT INTO company_plan_assignments
-      (
-        company_id,
-        plan_id,
-        plan_key_snapshot,
-        effective_from,
-        effective_until,
-        status,
-        assigned_by,
-        assigned_at,
-        updated_by,
-        updated_at
-      )
-      VALUES (?, ?, ?, COALESCE(?, CURDATE()), NULL, 'ACTIVE', ?, NOW(), ?, NOW())
-      ON DUPLICATE KEY UPDATE
-        plan_id = VALUES(plan_id),
-        plan_key_snapshot = VALUES(plan_key_snapshot),
-        effective_from = VALUES(effective_from),
-        effective_until = VALUES(effective_until),
-        status = VALUES(status),
-        updated_by = VALUES(updated_by),
-        updated_at = NOW()
-      `,
-      [companyId, plan.id, plan.plan_key, effectiveFrom, access.actingUserId ?? null, access.actingUserId ?? null]
-    );
-
-    const [moduleRows] = await connection.query(
-      `
-      SELECT module_key
-      FROM erp_modules
-      ORDER BY sort_order ASC, module_key ASC
-      `
-    );
-
-    let updatedModuleCount = 0;
-    let auditRowCount = 0;
-
-    if (Number(plan.is_custom || 0) === 1) {
-      if (!oldAccessMap.size) {
-        const fallbackKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
-
-        for (const moduleRow of moduleRows) {
-          const moduleKey = normalizeModuleKey(moduleRow.module_key);
-          const enabled = fallbackKeys.has(moduleKey);
-          await connection.query(
-            `
-            INSERT INTO company_module_access
-            (company_id, module_key, enabled, source, reason, updated_by, updated_at)
-            VALUES (?, ?, ?, 'OVERRIDE', ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE
-              enabled = VALUES(enabled),
-              source = VALUES(source),
-              reason = VALUES(reason),
-              updated_by = VALUES(updated_by),
-              updated_at = NOW()
-            `,
-            [companyId, moduleKey, Number(enabled), reason || "CUSTOM plan initial FULL_ERP compatibility defaults", access.actingUserId ?? null]
-          );
-          updatedModuleCount += 1;
-          await writeCompanyModuleAccessAudit(connection, {
-            companyId,
-            moduleKey,
-            oldEnabled: null,
-            newEnabled: enabled,
-            oldPlanKey,
-            newPlanKey: plan.plan_key,
-            changedBy: access.actingUserId,
-            reason: reason || "CUSTOM plan assigned"
-          });
-          auditRowCount += 1;
-        }
-      }
-    } else {
-      const planModuleKeys = await getPlanModuleKeySet(connection, plan.id);
-
-      for (const moduleRow of moduleRows) {
-        const moduleKey = normalizeModuleKey(moduleRow.module_key);
-        const oldAccess = oldAccessMap.get(moduleKey);
-        const nextEnabled = planModuleKeys.has(moduleKey);
-        await connection.query(
-          `
-          INSERT INTO company_module_access
-          (company_id, module_key, enabled, source, reason, updated_by, updated_at)
-          VALUES (?, ?, ?, 'PLAN', ?, ?, NOW())
-          ON DUPLICATE KEY UPDATE
-            enabled = VALUES(enabled),
-            source = VALUES(source),
-            reason = VALUES(reason),
-            updated_by = VALUES(updated_by),
-            updated_at = NOW()
-          `,
-          [companyId, moduleKey, Number(nextEnabled), reason || `Plan changed to ${plan.plan_key}`, access.actingUserId ?? null]
-        );
-        updatedModuleCount += 1;
-
-        const shouldAudit = !oldAccess || oldAccess.enabled !== nextEnabled || String(oldAccess.source || "").toUpperCase() !== "PLAN" || oldPlanKey !== plan.plan_key;
-        if (shouldAudit) {
-          await writeCompanyModuleAccessAudit(connection, {
-            companyId,
-            moduleKey,
-            oldEnabled: oldAccess ? oldAccess.enabled : null,
-            newEnabled: nextEnabled,
-            oldPlanKey,
-            newPlanKey: plan.plan_key,
-            changedBy: access.actingUserId,
-            reason: reason || `Plan changed to ${plan.plan_key}`
-          });
-          auditRowCount += 1;
-        }
-      }
-    }
-
-    if (oldPlanKey !== plan.plan_key) {
-      await writeCompanyModuleAccessAudit(connection, {
-        companyId,
-        moduleKey: "PLAN_ASSIGNMENT",
-        oldEnabled: null,
-        newEnabled: null,
-        oldPlanKey,
-        newPlanKey: plan.plan_key,
-        changedBy: access.actingUserId,
-        reason: reason || `Plan changed to ${plan.plan_key}`
-      });
-      auditRowCount += 1;
-    }
-
-    await logActivitySafe(connection, req, access, {
+    const assignmentResult = await assignCompanyPlanAndModules(connection, {
+      req,
+      access,
       companyId,
-      actionType: "ASSIGN_PLAN",
-      entityType: "COMPANY_PLAN",
-      entityId: String(companyId),
-      moduleName: "company-plans",
-      status: "success",
-      message: "Company plan assigned",
-      beforeData: { plan_key: oldPlanKey },
-      afterData: { plan_key: plan.plan_key, updatedModuleCount, auditRowCount }
+      planKey,
+      moduleOverrides: req.body?.module_overrides ?? req.body?.moduleOverrides ?? null,
+      reason,
+      effectiveFrom
     });
 
     await connection.commit();
@@ -28256,8 +28908,8 @@ app.post("/superadmin/company-plans/:companyId/assign", authMiddleware, checkRol
       message: "Company plan assigned successfully",
       company_id: companyId,
       plan: planContext.plan,
-      updated_module_count: updatedModuleCount,
-      audit_row_count: auditRowCount,
+      updated_module_count: assignmentResult.updatedModuleCount,
+      audit_row_count: assignmentResult.auditRowCount,
       enabled_module_count: moduleContext.module_list.filter((row) => row.enabled).length
     });
   } catch (error) {
@@ -28372,37 +29024,80 @@ app.post("/superadmin/company-plans/:companyId/modules/:moduleKey", authMiddlewa
     );
     const planKey = normalizePlanKey(planRows[0]?.plan_key || "FULL_ERP");
 
-    let oldEnabled = oldAccess?.enabled;
-    if (oldEnabled === undefined) {
-      const fallback = await getCompanyEnabledModules(companyId);
-      oldEnabled = Boolean(fallback.modules[moduleKey]);
+    const fallbackContext = oldAccessMap.size ? null : await getCompanyEnabledModules(companyId);
+    const currentEnabledKeys = oldAccessMap.size
+      ? new Set([...oldAccessMap.entries()].filter(([, accessRow]) => accessRow.enabled).map(([key]) => key))
+      : new Set(Object.entries(fallbackContext.modules || {}).filter(([, isEnabled]) => Boolean(isEnabled)).map(([key]) => normalizeModuleKey(key)));
+    const oldEnabled = currentEnabledKeys.has(moduleKey);
+    const defaultReason = reason || "SuperAdmin module override";
+    let targetEnabledKeys;
+
+    if (enabled) {
+      currentEnabledKeys.add(moduleKey);
+      targetEnabledKeys = resolveEnabledModuleDependencies(currentEnabledKeys);
+    } else {
+      const dependentModules = getEnabledModuleDependents(moduleKey, currentEnabledKeys);
+      if (dependentModules.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Cannot disable ${moduleKey} while enabled module(s) depend on it: ${dependentModules.join(", ")}`,
+          module_key: moduleKey,
+          dependent_modules: dependentModules
+        });
+      }
+
+      targetEnabledKeys = new Set(currentEnabledKeys);
+      targetEnabledKeys.delete(moduleKey);
     }
 
-    await connection.query(
-      `
-      INSERT INTO company_module_access
-      (company_id, module_key, enabled, source, reason, updated_by, updated_at)
-      VALUES (?, ?, ?, 'OVERRIDE', ?, ?, NOW())
-      ON DUPLICATE KEY UPDATE
-        enabled = VALUES(enabled),
-        source = VALUES(source),
-        reason = VALUES(reason),
-        updated_by = VALUES(updated_by),
-        updated_at = NOW()
-      `,
-      [companyId, moduleKey, Number(enabled), reason || "SuperAdmin module override", access.actingUserId ?? null]
-    );
+    const changedModuleKeys = enabled
+      ? [...targetEnabledKeys].filter((key) => !currentEnabledKeys.has(key) || key === moduleKey)
+      : oldEnabled
+        ? [moduleKey]
+        : [];
+    let auditRowCount = 0;
 
-    await writeCompanyModuleAccessAudit(connection, {
-      companyId,
-      moduleKey,
-      oldEnabled,
-      newEnabled: enabled,
-      oldPlanKey: planKey,
-      newPlanKey: planKey,
-      changedBy: access.actingUserId,
-      reason: reason || "SuperAdmin module override"
-    });
+    for (const changedModuleKey of changedModuleKeys.sort()) {
+      const oldChangedAccess = oldAccessMap.get(changedModuleKey);
+      const oldChangedEnabled = changedModuleKey === moduleKey
+        ? oldEnabled
+        : Boolean(oldChangedAccess?.enabled || fallbackContext?.modules?.[changedModuleKey]);
+      const nextChangedEnabled = targetEnabledKeys.has(changedModuleKey);
+
+      if (oldChangedAccess && oldChangedAccess.enabled === nextChangedEnabled && String(oldChangedAccess.source || "").toUpperCase() === "OVERRIDE") {
+        continue;
+      }
+
+      await connection.query(
+        `
+        INSERT INTO company_module_access
+        (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+        VALUES (?, ?, ?, 'OVERRIDE', ?, ?, NOW())
+        ON DUPLICATE KEY UPDATE
+          enabled = VALUES(enabled),
+          source = VALUES(source),
+          reason = VALUES(reason),
+          updated_by = VALUES(updated_by),
+          updated_at = NOW()
+        `,
+        [companyId, changedModuleKey, Number(nextChangedEnabled), defaultReason, access.actingUserId ?? null]
+      );
+
+      if (oldChangedEnabled !== nextChangedEnabled || String(oldChangedAccess?.source || "").toUpperCase() !== "OVERRIDE") {
+        await writeCompanyModuleAccessAudit(connection, {
+          companyId,
+          moduleKey: changedModuleKey,
+          oldEnabled: oldChangedEnabled,
+          newEnabled: nextChangedEnabled,
+          oldPlanKey: planKey,
+          newPlanKey: planKey,
+          changedBy: access.actingUserId,
+          reason: changedModuleKey === moduleKey ? defaultReason : `${defaultReason} (dependency for ${moduleKey})`
+        });
+        auditRowCount += 1;
+      }
+    }
 
     await logActivitySafe(connection, req, access, {
       companyId,
@@ -28413,7 +29108,7 @@ app.post("/superadmin/company-plans/:companyId/modules/:moduleKey", authMiddlewa
       status: "success",
       message: "Company module override updated",
       beforeData: { module_key: moduleKey, enabled: oldEnabled },
-      afterData: { module_key: moduleKey, enabled, source: "OVERRIDE" }
+      afterData: { module_key: moduleKey, enabled, source: "OVERRIDE", dependency_resolved: true, changed_module_count: changedModuleKeys.length, audit_row_count: auditRowCount }
     });
 
     await connection.commit();
@@ -28424,7 +29119,10 @@ app.post("/superadmin/company-plans/:companyId/modules/:moduleKey", authMiddlewa
       company_id: companyId,
       module_key: moduleKey,
       enabled,
-      source: "OVERRIDE"
+      source: "OVERRIDE",
+      dependency_resolved: true,
+      changed_modules: changedModuleKeys,
+      audit_row_count: auditRowCount
     });
   } catch (error) {
     if (connection) {
@@ -28620,6 +29318,467 @@ app.get("/superadmin/module-preview-violations", authMiddleware, checkRole(["SUP
     return res.status(500).json({
       success: false,
       message: "Module preview violations fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/admin/package-enforcement/summary", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const globalMode = await getGlobalEnforcementMode();
+    const globalEnforcementMode = normalizeEnforcementMode(globalMode.enforcement_mode || "REPORT_ONLY");
+    const moduleCountDefaults = await getEffectiveModuleCountDefaults();
+    const companyWhere = "c.deleted_at IS NULL AND UPPER(COALESCE(c.access_status, 'ACTIVE')) <> 'SOFT_DELETED'";
+
+    const [totalRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM companies c
+      WHERE ${companyWhere}
+      `
+    );
+
+    const [planRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP') AS plan_key,
+        COALESCE(p.plan_name, cpa.plan_key_snapshot, 'Full ERP') AS plan_name,
+        COUNT(*) AS total
+      FROM companies c
+      LEFT JOIN company_plan_assignments cpa ON cpa.company_id = c.id
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      WHERE ${companyWhere}
+      GROUP BY COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP'), COALESCE(p.plan_name, cpa.plan_key_snapshot, 'Full ERP')
+      ORDER BY total DESC, plan_key ASC
+      `
+    );
+
+    const [modeRows] = await pool.query(
+      `
+      SELECT
+        COALESCE(mes.enforcement_mode, ?) AS enforcement_mode,
+        COUNT(*) AS total
+      FROM companies c
+      LEFT JOIN module_enforcement_settings mes
+        ON mes.scope_type = 'COMPANY'
+       AND mes.company_id = c.id
+      WHERE ${companyWhere}
+      GROUP BY COALESCE(mes.enforcement_mode, ?)
+      `,
+      [globalEnforcementMode, globalEnforcementMode]
+    );
+
+    const [moduleRows] = await pool.query(
+      `
+      SELECT
+        SUM(
+          CASE
+            WHEN COALESCE(cma_summary.module_row_count, 0) = 0 THEN ?
+            ELSE COALESCE(cma_summary.enabled_module_count, 0)
+          END
+        ) AS enabled_total,
+        SUM(
+          GREATEST(0, ? - CASE
+            WHEN COALESCE(cma_summary.module_row_count, 0) = 0 THEN ?
+            ELSE COALESCE(cma_summary.enabled_module_count, 0)
+          END)
+        ) AS disabled_total
+      FROM companies c
+      LEFT JOIN (
+        SELECT
+          company_id,
+          COUNT(*) AS module_row_count,
+          SUM(
+            CASE
+              WHEN em.module_key IS NOT NULL AND COALESCE(cma.enabled, 0) = 1 THEN 1
+              ELSE 0
+            END
+          ) AS enabled_module_count
+        FROM company_module_access cma
+        LEFT JOIN erp_modules em
+          ON UPPER(TRIM(em.module_key)) = UPPER(TRIM(cma.module_key))
+        GROUP BY cma.company_id
+      ) cma_summary ON cma_summary.company_id = c.id
+      WHERE ${companyWhere}
+      `,
+      [
+        moduleCountDefaults.fallbackEnabledCount,
+        moduleCountDefaults.totalModuleCount,
+        moduleCountDefaults.fallbackEnabledCount
+      ]
+    );
+
+    const [violationRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN v.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) AS last_7_days
+      FROM module_access_violation_logs v
+      LEFT JOIN companies c ON c.id = v.company_id
+      WHERE v.company_id IS NULL OR (${companyWhere})
+      `
+    );
+
+    const byMode = modeRows.reduce((acc, row) => {
+      acc[normalizeEnforcementMode(row.enforcement_mode)] = Number(row.total || 0);
+      return acc;
+    }, {});
+
+    return res.json({
+      success: true,
+      summary: {
+        total_companies: Number(totalRows[0]?.total || 0),
+        companies_by_plan: planRows.map((row) => ({
+          plan_key: normalizePlanKey(row.plan_key || "FULL_ERP"),
+          plan_name: row.plan_name || row.plan_key || "Full ERP",
+          total: Number(row.total || 0)
+        })),
+        companies_in_report_only: Number(byMode.REPORT_ONLY || 0),
+        companies_in_hard_enforcement: Number(byMode.HARD_ENFORCEMENT || 0),
+        total_enabled_module_rows: Number(moduleRows[0]?.enabled_total || 0),
+        total_disabled_module_rows: Number(moduleRows[0]?.disabled_total || 0),
+        total_violation_logs: Number(violationRows[0]?.total || 0),
+        violations_last_7_days: Number(violationRows[0]?.last_7_days || 0),
+        global_enforcement_mode: globalEnforcementMode
+      }
+    });
+  } catch (error) {
+    console.error("Package enforcement summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Package enforcement summary failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/admin/package-enforcement/companies", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const pagination = getPagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const globalMode = await getGlobalEnforcementMode();
+    const globalEnforcementMode = normalizeEnforcementMode(globalMode.enforcement_mode || "REPORT_ONLY");
+    const moduleCountDefaults = await getEffectiveModuleCountDefaults();
+    const planKey = normalizePlanKey(req.query.plan_key ?? req.query.planKey ?? "");
+    const requestedMode = String(req.query.enforcement_mode ?? req.query.enforcementMode ?? "").trim().toUpperCase();
+    const enforcementMode = requestedMode ? normalizeEnforcementMode(requestedMode) : "";
+    const search = String(req.query.search || "").trim();
+    const whereParts = [
+      "c.deleted_at IS NULL",
+      "UPPER(COALESCE(c.access_status, 'ACTIVE')) <> 'SOFT_DELETED'"
+    ];
+    const params = [globalEnforcementMode];
+
+    if (planKey) {
+      whereParts.push("COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP') = ?");
+      params.push(planKey);
+    }
+    if (enforcementMode) {
+      whereParts.push("COALESCE(mes.enforcement_mode, ?) = ?");
+      params.push(globalEnforcementMode, enforcementMode);
+    }
+    if (search) {
+      whereParts.push("(c.company_name LIKE ? OR c.owner_email LIKE ? OR CAST(c.id AS CHAR) = ?)");
+      params.push(`%${search}%`, `%${search}%`, search);
+    }
+
+    const whereSql = `WHERE ${whereParts.join(" AND ")}`;
+    const [rows] = await pool.query(
+      `
+      SELECT
+        c.id AS company_id,
+        c.company_name,
+        c.created_at,
+        COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP') AS plan_key,
+        COALESCE(p.plan_name, cpa.plan_key_snapshot, 'Full ERP') AS plan_name,
+        COALESCE(mes.enforcement_mode, ?) AS enforcement_mode,
+        CASE
+          WHEN COALESCE(cma_summary.module_row_count, 0) = 0 THEN ?
+          ELSE COALESCE(cma_summary.enabled_module_count, 0)
+        END AS enabled_module_count,
+        GREATEST(0, ? - CASE
+          WHEN COALESCE(cma_summary.module_row_count, 0) = 0 THEN ?
+          ELSE COALESCE(cma_summary.enabled_module_count, 0)
+        END) AS disabled_module_count,
+        MAX(v.created_at) AS last_violation_at,
+        COUNT(DISTINCT v.id) AS violation_count
+      FROM companies c
+      LEFT JOIN company_plan_assignments cpa ON cpa.company_id = c.id
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      LEFT JOIN module_enforcement_settings mes
+        ON mes.scope_type = 'COMPANY'
+       AND mes.company_id = c.id
+      LEFT JOIN (
+        SELECT
+          company_id,
+          COUNT(*) AS module_row_count,
+          SUM(
+            CASE
+              WHEN em.module_key IS NOT NULL AND COALESCE(cma.enabled, 0) = 1 THEN 1
+              ELSE 0
+            END
+          ) AS enabled_module_count
+        FROM company_module_access cma
+        LEFT JOIN erp_modules em
+          ON UPPER(TRIM(em.module_key)) = UPPER(TRIM(cma.module_key))
+        GROUP BY cma.company_id
+      ) cma_summary ON cma_summary.company_id = c.id
+      LEFT JOIN module_access_violation_logs v ON v.company_id = c.id
+      ${whereSql}
+      GROUP BY
+        c.id,
+        c.company_name,
+        c.created_at,
+        COALESCE(p.plan_key, cpa.plan_key_snapshot, 'FULL_ERP'),
+        COALESCE(p.plan_name, cpa.plan_key_snapshot, 'Full ERP'),
+        COALESCE(mes.enforcement_mode, ?),
+        cma_summary.module_row_count,
+        cma_summary.enabled_module_count
+      ORDER BY c.id DESC
+      ${pagination.sql}
+      `,
+      [
+        params[0],
+        moduleCountDefaults.fallbackEnabledCount,
+        moduleCountDefaults.totalModuleCount,
+        moduleCountDefaults.fallbackEnabledCount,
+        ...params.slice(1),
+        globalEnforcementMode
+      ]
+    );
+
+    setPaginationHeaders(res, pagination);
+
+    return res.json({
+      success: true,
+      companies: rows.map((row) => ({
+        company_id: Number(row.company_id),
+        company_name: row.company_name || "",
+        plan_key: normalizePlanKey(row.plan_key || "FULL_ERP"),
+        plan_name: row.plan_name || row.plan_key || "Full ERP",
+        enforcement_mode: normalizeEnforcementMode(row.enforcement_mode),
+        enabled_module_count: Number(row.enabled_module_count || 0),
+        disabled_module_count: Number(row.disabled_module_count || 0),
+        last_violation_at: row.last_violation_at ?? null,
+        violation_count: Number(row.violation_count || 0),
+        created_at: row.created_at ?? null
+      })),
+      pagination: {
+        limit: pagination.limit,
+        offset: pagination.offset
+      }
+    });
+  } catch (error) {
+    console.error("Package enforcement companies error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Package enforcement companies fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/admin/package-enforcement/companies/:companyId", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: "Company id is required" });
+    }
+
+    const [companyRows] = await pool.query(
+      `
+      SELECT id AS company_id, company_name, owner_name, owner_email, status, access_status, created_at
+      FROM companies
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [companyId]
+    );
+    if (!companyRows.length) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    const planContext = await getCompanyPlanContext(companyId);
+    const moduleContext = await getCompanyEnabledModules(companyId);
+    const effectiveMode = await getEffectiveEnforcementMode(companyId);
+    const enabledModules = moduleContext.module_list.filter((row) => row.enabled);
+    const disabledModules = moduleContext.module_list.filter((row) => !row.enabled);
+    const enabledSet = new Set(enabledModules.map((row) => normalizeModuleKey(row.module_key)));
+    const dependencyWarnings = [];
+
+    for (const moduleRow of enabledModules) {
+      const moduleKey = normalizeModuleKey(moduleRow.module_key);
+      const dependencies = ERP_MODULE_DEPENDENCIES[moduleKey] || [];
+      for (const dependency of dependencies) {
+        const dependencyKey = normalizeModuleKey(dependency);
+        if (dependencyKey && !enabledSet.has(dependencyKey)) {
+          dependencyWarnings.push({
+            module_key: moduleKey,
+            missing_dependency: dependencyKey,
+            message: `${moduleKey} requires ${dependencyKey}`
+          });
+        }
+      }
+    }
+
+    const [violationRows] = await pool.query(
+      `
+      SELECT
+        id,
+        module_key,
+        request_method,
+        request_path,
+        page_key,
+        would_block,
+        user_id,
+        role,
+        created_at
+      FROM module_access_violation_logs
+      WHERE company_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 20
+      `,
+      [companyId]
+    );
+
+    const [auditRows] = await pool.query(
+      `
+      SELECT
+        a.id,
+        a.module_key,
+        a.old_enabled,
+        a.new_enabled,
+        a.old_plan_key,
+        a.new_plan_key,
+        a.changed_by,
+        u.name AS changed_by_name,
+        a.change_reason,
+        a.created_at
+      FROM company_module_access_audit a
+      LEFT JOIN users u ON u.id = a.changed_by
+      WHERE a.company_id = ?
+      ORDER BY a.created_at DESC, a.id DESC
+      LIMIT 20
+      `,
+      [companyId]
+    );
+
+    const [assignmentRows] = await pool.query(
+      `
+      SELECT
+        cpa.id,
+        cpa.company_id,
+        cpa.plan_key_snapshot,
+        p.plan_key,
+        p.plan_name,
+        cpa.status,
+        cpa.effective_from,
+        cpa.effective_until,
+        cpa.assigned_by,
+        cpa.assigned_at,
+        cpa.updated_by,
+        cpa.updated_at
+      FROM company_plan_assignments cpa
+      LEFT JOIN erp_plans p ON p.id = cpa.plan_id
+      WHERE cpa.company_id = ?
+      ORDER BY cpa.assigned_at DESC, cpa.id DESC
+      LIMIT 10
+      `,
+      [companyId]
+    );
+
+    return res.json({
+      success: true,
+      company: companyRows[0],
+      current_plan_assignment: planContext,
+      enforcement_mode: effectiveMode,
+      enabled_modules: enabledModules,
+      disabled_modules: disabledModules,
+      dependency_warnings: dependencyWarnings,
+      violation_logs: violationRows,
+      module_access_audit: auditRows,
+      plan_assignment_history: assignmentRows
+    });
+  } catch (error) {
+    console.error("Package enforcement company detail error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Package enforcement company detail failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.post("/admin/package-enforcement/companies/:companyId/enforcement-mode", authMiddleware, checkRole(["SUPERADMIN"]), async (req, res) => {
+  try {
+    const access = await requireSuperAdminAccess(req, res);
+    if (!access) return;
+
+    const companyId = parsePositiveInteger(req.params.companyId);
+    const rawMode = String(req.body?.enforcement_mode ?? req.body?.mode ?? "").trim().toUpperCase();
+    const reason = String(req.body?.reason || "").trim();
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: "Company id is required" });
+    }
+    if (!["REPORT_ONLY", "HARD_ENFORCEMENT"].includes(rawMode)) {
+      return res.status(400).json({ success: false, message: "enforcement_mode must be REPORT_ONLY or HARD_ENFORCEMENT" });
+    }
+
+    const [companyRows] = await pool.query("SELECT id, company_name FROM companies WHERE id = ? LIMIT 1", [companyId]);
+    if (!companyRows.length) {
+      return res.status(404).json({ success: false, message: "Company not found" });
+    }
+
+    const oldEffective = await getEffectiveEnforcementMode(companyId);
+    await pool.query(
+      `
+      INSERT INTO module_enforcement_settings
+      (scope_type, company_id, enforcement_mode, reason, updated_by, updated_at)
+      VALUES ('COMPANY', ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        enforcement_mode = VALUES(enforcement_mode),
+        reason = VALUES(reason),
+        updated_by = VALUES(updated_by),
+        updated_at = NOW()
+      `,
+      [companyId, rawMode, reason || "Package enforcement dashboard update", access.actingUserId ?? null]
+    );
+
+    await logActivitySafe(pool, req, access, {
+      companyId,
+      actionType: "UPDATE_ENFORCEMENT",
+      entityType: "MODULE_ENFORCEMENT",
+      entityId: String(companyId),
+      moduleName: "company-package-enforcement",
+      status: "success",
+      message: "Company package enforcement mode updated",
+      beforeData: { enforcement_mode: oldEffective.enforcement_mode, source: oldEffective.source },
+      afterData: { company_id: companyId, enforcement_mode: rawMode, reason }
+    });
+
+    return res.json({
+      success: true,
+      message: "Company enforcement mode updated",
+      company_id: companyId,
+      company_name: companyRows[0].company_name || "",
+      enforcement_mode: await getCompanyEnforcementMode(companyId),
+      effective: await getEffectiveEnforcementMode(companyId),
+      global: await getGlobalEnforcementMode()
+    });
+  } catch (error) {
+    console.error("Package enforcement company mode update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Company enforcement mode update failed",
       error: getErrorDetail(error)
     });
   }
@@ -31404,6 +32563,17 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
       });
     }
 
+    if (
+      String(fromBranch.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE" ||
+      String(toBranch.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE"
+    ) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Branch is inactive"
+      });
+    }
+
     const transferNo = await generateTransferNumberForCompany(connection, access.companyScope);
     const [insertResult] = await connection.query(
       `
@@ -31826,6 +32996,17 @@ app.post("/branch-transfers/:id/dispatch", authMiddleware, async (req, res) => {
 
     const fromBranch = await getBranchForCompany(connection, access.companyScope, transfer.from_branch_id);
     const toBranch = await getBranchForCompany(connection, access.companyScope, transfer.to_branch_id);
+
+    if (
+      String(fromBranch?.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE" ||
+      String(toBranch?.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE"
+    ) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Branch is inactive"
+      });
+    }
     if (!fromBranch || !toBranch) {
       await connection.rollback();
       return res.status(404).json({
@@ -32179,6 +33360,13 @@ app.post("/branch-transfers/:id/receive-scan", authMiddleware, async (req, res) 
       return failWithReceiveLog(404, "Destination branch was not found for this company", {
         transfer,
         scanStatus: "BRANCH_NOT_FOUND"
+      });
+    }
+
+    if (String(toBranch.status || "ACTIVE").trim().toUpperCase() !== "ACTIVE") {
+      return failWithReceiveLog(400, "Branch is inactive", {
+        transfer,
+        scanStatus: "BRANCH_INACTIVE"
       });
     }
 
@@ -32553,6 +33741,15 @@ app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, r
       });
     }
 
+    const activeReceiveBranch = await requireActiveBranchForCompany(connection, access.companyScope, transfer.to_branch_id);
+    if (!activeReceiveBranch.ok) {
+      await connection.rollback();
+      return res.status(activeReceiveBranch.status || 400).json({
+        success: false,
+        message: activeReceiveBranch.message || "Branch is inactive"
+      });
+    }
+
     const [shortageItems] = await connection.query(
       `
       SELECT *
@@ -32574,7 +33771,76 @@ app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, r
       });
     }
 
-    await connection.query(
+    const shortageStockIds = [...new Set(shortageItems.map((item) => Number(item.stock_id || 0)).filter(Boolean))];
+    if (shortageStockIds.length !== shortageItems.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Shortage confirmation failed because one or more transfer items are not linked to stock rows"
+      });
+    }
+
+    const stockPlaceholders = shortageStockIds.map(() => "?").join(", ");
+    const [shortageStockRows] = await connection.query(
+      `
+      SELECT
+        s.id,
+        s.company_id,
+        s.current_branch_id,
+        s.status,
+        s.stock_state,
+        bti.id AS transfer_item_id,
+        bti.transfer_id,
+        bti.item_status
+      FROM stock s
+      INNER JOIN branch_transfer_items bti
+        ON bti.stock_id = s.id
+       AND bti.company_id = s.company_id
+      WHERE s.id IN (${stockPlaceholders})
+        AND s.company_id = ?
+        AND bti.transfer_id = ?
+        AND UPPER(COALESCE(bti.item_status, '')) = 'IN_TRANSIT'
+      FOR UPDATE
+      `,
+      [...shortageStockIds, access.companyScope, transferId]
+    );
+
+    const validShortageStockIds = new Set();
+    const invalidShortageRows = [];
+    for (const row of shortageStockRows) {
+      const effectiveState = getEffectiveStockState(row);
+      const isValid =
+        Number(row.company_id || 0) === Number(access.companyScope || 0) &&
+        Number(row.current_branch_id || 0) === Number(transfer.from_branch_id || 0) &&
+        Number(row.transfer_id || 0) === Number(transferId || 0) &&
+        String(row.item_status || "").trim().toUpperCase() === "IN_TRANSIT" &&
+        effectiveState === "IN_TRANSIT";
+
+      if (isValid) {
+        validShortageStockIds.add(Number(row.id));
+      } else {
+        invalidShortageRows.push({
+          stock_id: row.id,
+          transfer_item_id: row.transfer_item_id,
+          stock_state: row.stock_state || "",
+          status: row.status || "",
+          current_branch_id: row.current_branch_id ?? null
+        });
+      }
+    }
+
+    const missingStockIds = shortageStockIds.filter((stockId) => !validShortageStockIds.has(stockId));
+    if (missingStockIds.length || invalidShortageRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Shortage confirmation failed because one or more stock rows are missing or no longer in transit for this transfer",
+        missing_stock_ids: missingStockIds,
+        invalid_stock_rows: invalidShortageRows
+      });
+    }
+
+    const [stockUpdateResult] = await connection.query(
       `
       UPDATE stock s
       INNER JOIN branch_transfer_items bti
@@ -32590,6 +33856,16 @@ app.post("/branch-transfers/:id/confirm-shortage", authMiddleware, async (req, r
       `,
       [transferId, access.companyScope, transfer.from_branch_id]
     );
+
+    if (Number(stockUpdateResult?.affectedRows || 0) !== shortageStockIds.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Shortage confirmation failed because not all expected stock rows could be marked as shortage",
+        expected_stock_updates: shortageStockIds.length,
+        actual_stock_updates: Number(stockUpdateResult?.affectedRows || 0)
+      });
+    }
 
     await connection.query(
       `
@@ -32922,6 +34198,7 @@ app.post("/branch-transfers/:id/items/scan", authMiddleware, async (req, res) =>
         AND UPPER(TRIM(barcode)) = ?
         AND UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) <> 'CANCELLED'
       LIMIT 1
+      FOR UPDATE
       `,
       [access.companyScope, transferId, normalizedBarcode]
     );
@@ -32946,6 +34223,7 @@ app.post("/branch-transfers/:id/items/scan", authMiddleware, async (req, res) =>
         AND UPPER(COALESCE(bti.item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT')
         AND UPPER(COALESCE(bt.status, 'CREATED')) NOT IN ('CANCELLED', 'RECEIVED', 'SHORTAGE')
       LIMIT 1
+      FOR UPDATE
       `,
       [access.companyScope, normalizedBarcode]
     );
@@ -33850,7 +35128,7 @@ app.put("/branches/:id", authMiddleware, async (req, res) => {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "branch_type must be MAIN, STORE, WAREHOUSE, or OFFICE"
+        message: "branch_type must be MAIN, STORE, WAREHOUSE, OFFICE, or PRODUCTION"
       });
     }
 
@@ -37354,6 +38632,42 @@ async function handleReconciliationEndpoint(req, res, moduleName, { includeLedge
       : includeLedger
         ? [moduleName, "ledger"]
         : [moduleName];
+
+    if (resolved.access.isSuperAdmin && companyId === null) {
+      const [companyRows] = await pool.query(
+        `
+        SELECT id, company_name
+        FROM companies
+        WHERE deleted_at IS NULL
+        ORDER BY company_name ASC, id ASC
+        `
+      );
+      const allGroups = [];
+      for (const company of companyRows) {
+        const scopedCompanyId = Number(company.id || 0);
+        if (!scopedCompanyId) continue;
+        const scopedLists = await Promise.all(modules.map((name) => buildReconciliationModuleGroups(name, scopedCompanyId, { isBranchFiltered: false })));
+        scopedLists.flat().forEach((group) => {
+          allGroups.push({
+            ...group,
+            company_id: scopedCompanyId,
+            company_name: company.company_name || ""
+          });
+        });
+      }
+      const summary = summarizeReconciliationGroups(allGroups);
+      return res.json({
+        success: true,
+        company_id: null,
+        allCompanies: true,
+        branch_id: null,
+        module: moduleName,
+        summary,
+        issueGroups: allGroups,
+        groups: allGroups
+      });
+    }
+
     const groupLists = await Promise.all(modules.map((name) => buildReconciliationModuleGroups(name, companyId, resolved.branchScope)));
     const groups = groupLists.flat();
     const summary = summarizeReconciliationGroups(groups);

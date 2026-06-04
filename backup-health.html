@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backup Health</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <style>
+    body { margin: 0; background: #f6f7fb; color: #1f2937; font-family: Arial, sans-serif; }
+    main { max-width: 1120px; margin: 0 auto; padding: 28px 18px 44px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .top-right { display: flex; align-items: center; gap: 12px; }
+    h1 { margin: 0; font-size: 26px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .panel, .table-panel { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; padding: 16px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06); }
+    .table-panel { margin-top: 14px; overflow-x: auto; }
+    button, input { min-height: 38px; border-radius: 6px; border: 1px solid #cbd5e1; padding: 8px 10px; }
+    button { background: #1d4ed8; color: #fff; border-color: #1d4ed8; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #fff; color: #1d4ed8; }
+    button.danger { background: #b91c1c; border-color: #b91c1c; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; font-size: 14px; }
+    th { background: #f8fafc; }
+    .status { font-weight: 800; }
+    .ok { color: #047857; }
+    .bad { color: #b91c1c; }
+    .muted { color: #64748b; font-size: 13px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <h1>Backup Health</h1>
+      <div class="top-right"></div>
+    </div>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Backup Status</h2>
+        <p id="backupStatus" class="status">Loading...</p>
+        <p id="backupMeta" class="muted"></p>
+        <div class="actions">
+          <button type="button" onclick="loadHealth()">Refresh</button>
+          <button type="button" onclick="createBackup()">Create Backup</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Go-Live Scan</h2>
+        <p id="goLiveStatus" class="status">Not run</p>
+        <div id="goLiveChecks" class="muted"></div>
+        <div class="actions">
+          <button type="button" onclick="runGoLiveScan()">Run Scan</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Restore</h2>
+        <p class="muted">Owner only. Type YES to confirm restore from the selected backup file.</p>
+        <input id="restoreFile" placeholder="backup-file.sql" />
+        <input id="restoreConfirm" placeholder="YES" />
+        <div class="actions">
+          <button type="button" class="danger" onclick="restoreBackup()">Restore</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <h2>Recent Backups</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Size</th>
+            <th>Modified</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="backupRows">
+          <tr><td colspan="4">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    requireLogin();
+    requireRole(["OWNER"]);
+    bootstrapSuperAdminCompanyContext();
+
+    const API_BASE = window.ERP_API_BASE;
+
+    async function readJson(response) {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || "Request failed");
+      }
+      return data;
+    }
+
+    function formatSize(bytes) {
+      const size = Number(bytes || 0);
+      if (size < 1024) return `${size} B`;
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+      return `${(size / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    async function loadHealth() {
+      try {
+        const data = await readJson(await fetch(`${API_BASE}/backup/health`, { cache: "no-store" }));
+        document.getElementById("backupStatus").textContent = data.backupCount ? "Backup available" : "No backup found";
+        document.getElementById("backupStatus").className = `status ${data.backupCount ? "ok" : "bad"}`;
+        document.getElementById("backupMeta").textContent = `Folder: ${data.backupDir}`;
+        document.getElementById("backupRows").innerHTML = (data.backups || []).map((item) => `
+          <tr>
+            <td>${item.file}</td>
+            <td>${formatSize(item.size)}</td>
+            <td>${new Date(item.modifiedAt).toLocaleString()}</td>
+            <td><button type="button" class="secondary" onclick="downloadBackup('${item.file.replace(/'/g, "\\'")}')">Download</button></td>
+          </tr>
+        `).join("") || `<tr><td colspan="4">No backups found</td></tr>`;
+      } catch (error) {
+        document.getElementById("backupStatus").textContent = error.message;
+        document.getElementById("backupStatus").className = "status bad";
+      }
+    }
+
+    async function createBackup() {
+      try {
+        await readJson(await fetch(`${API_BASE}/backup/create`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
+        await loadHealth();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    function downloadBackup(file) {
+      window.location.href = `${API_BASE}/backup/download?file=${encodeURIComponent(file)}`;
+    }
+
+    async function restoreBackup() {
+      try {
+        const file = document.getElementById("restoreFile").value.trim();
+        const confirm = document.getElementById("restoreConfirm").value.trim();
+        await readJson(await fetch(`${API_BASE}/backup/restore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file, confirm })
+        }));
+        alert("Restore completed");
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    async function runGoLiveScan() {
+      try {
+        const data = await readJson(await fetch(`${API_BASE}/go-live/health-scan`, { cache: "no-store" }));
+        document.getElementById("goLiveStatus").textContent = data.ready ? "Ready" : "Needs attention";
+        document.getElementById("goLiveStatus").className = `status ${data.ready ? "ok" : "bad"}`;
+        document.getElementById("goLiveChecks").innerHTML = (data.checks || [])
+          .map((check) => `<div class="${check.ok ? "ok" : "bad"}">${check.message}</div>`)
+          .join("");
+      } catch (error) {
+        document.getElementById("goLiveStatus").textContent = error.message;
+        document.getElementById("goLiveStatus").className = "status bad";
+      }
+    }
+
+    loadHealth();
+  </script>
+</body>
+</html>

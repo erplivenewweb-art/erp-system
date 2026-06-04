@@ -1160,9 +1160,8 @@
     function getInvoiceGroupKey(item) {
       return [
         String(item?.productName || item?.product_name || "").trim().toLowerCase(),
-        String(item?.size || "").trim().toLowerCase(),
-        getInvoiceItemMm(item).toLowerCase(),
-        String(item?.lot || item?.lot_number || "").trim().toLowerCase()
+        String(item?.category || item?.productCategory || item?.product_category || "").trim().toLowerCase(),
+        String(item?.purity || "").trim().toLowerCase()
       ].join("||");
     }
 

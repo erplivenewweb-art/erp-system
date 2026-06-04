@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Package Enforcement</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .metric, .panel { background: #fff; border: 1px solid #eadfce; border-radius: 8px; padding: 16px; box-shadow: 0 10px 24px rgba(15,23,42,0.06); }
+    .metric span { display: block; color: #64748b; font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 8px; font-size: 28px; color: #172033; }
+    .panel { margin-bottom: 18px; }
+    .panel-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .panel h3 { margin: 0; display: flex; align-items: center; gap: 10px; color: #2f2a21; }
+    .filters { display: grid; grid-template-columns: 1fr 180px 190px 110px; gap: 10px; margin-bottom: 14px; align-items: end; }
+    .field label { display: block; font-size: 12px; font-weight: 800; color: #5f6b7e; margin-bottom: 6px; text-transform: uppercase; }
+    .field input, .field select { width: 100%; border: 1px solid #e3d7c7; border-radius: 8px; padding: 10px 11px; background: #fffdf8; min-height: 40px; }
+    .btn { border: 0; border-radius: 8px; padding: 10px 13px; cursor: pointer; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; }
+    .btn.primary { background: linear-gradient(180deg, #d9ae67, #bb8134); color: #fff; }
+    .btn.dark { background: #172033; color: #fff; }
+    .btn.ghost { background: #fffaf2; color: #2f2a21; border: 1px solid #eadfce; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .table-wrap { overflow-x: auto; border: 1px solid #edf2f7; border-radius: 8px; background: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; min-width: 920px; }
+    .data-table th, .data-table td { padding: 11px 12px; border-bottom: 1px solid #f1f5f9; text-align: left; font-size: 14px; vertical-align: top; }
+    .data-table th { background: #f8fafc; color: #475569; text-transform: uppercase; font-size: 11px; letter-spacing: 0; }
+    .data-table tr.active-row td { background: #fffaf2; }
+    .badge { display: inline-flex; border-radius: 999px; padding: 6px 9px; font-size: 12px; font-weight: 900; white-space: nowrap; background: #eef2ff; color: #3730a3; }
+    .badge.plan { background: #fff7e7; color: #92400e; }
+    .badge.report { background: #eef2ff; color: #3730a3; }
+    .badge.hard { background: #fff1f1; color: #b42318; }
+    .badge.on { background: #ecfbf3; color: #166534; }
+    .badge.off { background: #fff1f1; color: #b42318; }
+    .badge.warn { background: #fff7e7; color: #92400e; }
+    .muted { color: #64748b; font-size: 13px; }
+    .detail-grid { display: grid; grid-template-columns: minmax(300px, 420px) 1fr; gap: 18px; align-items: start; }
+    .module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .module-list, .audit-list { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+    .module-item, .audit-item { border: 1px solid #edf2f7; border-radius: 8px; padding: 10px 11px; background: #fff; }
+    .mode-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-top: 12px; }
+    .empty-state { padding: 22px; color: #64748b; text-align: center; }
+    .section-stack { display: grid; gap: 18px; }
+    @media (max-width: 1120px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } .detail-grid, .module-grid { grid-template-columns: 1fr; } .filters { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 680px) { .summary-grid, .filters, .mode-row { grid-template-columns: 1fr; } .btn { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><a href="settings.html" class="sidebar-settings-btn" data-page-key="settings" title="Settings" aria-label="Open settings"><i class="fas fa-gear"></i></a><h2>ERP PANEL</h2><p>SuperAdmin</p></div><ul class="menu"></ul></div></aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Package Enforcement</h1><p>Company package and module enforcement status</p></div></div>
+        <div class="top-right"><button type="button" onclick="loadDashboard(true)">Refresh</button><button type="button" onclick="logoutUser()">Logout</button></div>
+      </div>
+
+      <section class="page active">
+        <div id="accessMessage" class="panel" style="display:none;"></div>
+
+        <div class="summary-grid">
+          <div class="metric"><span>Total companies</span><strong id="totalCompanies">0</strong></div>
+          <div class="metric"><span>REPORT_ONLY</span><strong id="reportOnlyCompanies">0</strong></div>
+          <div class="metric"><span>HARD_ENFORCEMENT</span><strong id="hardCompanies">0</strong></div>
+          <div class="metric"><span>Violations 7 days</span><strong id="violations7">0</strong></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3><i class="fas fa-building-shield"></i> Company Enforcement</h3><span id="tableSummary" class="muted">Loading...</span></div>
+          <div class="filters">
+            <div class="field"><label for="searchInput">Search</label><input id="searchInput" placeholder="Company name, email, or ID"></div>
+            <div class="field"><label for="planFilter">Package</label><select id="planFilter"><option value="">All packages</option></select></div>
+            <div class="field"><label for="modeFilter">Mode</label><select id="modeFilter"><option value="">All modes</option><option>REPORT_ONLY</option><option>HARD_ENFORCEMENT</option></select></div>
+            <button class="btn dark" type="button" onclick="loadCompanies(1)"><i class="fas fa-filter"></i> Apply</button>
+          </div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Company</th><th>Package</th><th>Mode</th><th>Modules</th><th>Violations</th><th>Created</th><th>Action</th></tr></thead><tbody id="companyRows"><tr><td colspan="7"><div class="empty-state">Loading companies...</div></td></tr></tbody></table></div>
+          <div class="panel-head" style="margin-top:12px;margin-bottom:0;"><button id="prevBtn" class="btn ghost" type="button" onclick="loadCompanies(currentPage - 1)" disabled><i class="fas fa-chevron-left"></i> Prev</button><span id="pageLabel" class="muted">Page 1</span><button id="nextBtn" class="btn ghost" type="button" onclick="loadCompanies(currentPage + 1)" disabled>Next <i class="fas fa-chevron-right"></i></button></div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="panel">
+            <div class="panel-head"><h3><i class="fas fa-sliders"></i> Company Detail</h3><span id="detailModeBadge" class="badge report">REPORT_ONLY</span></div>
+            <div id="companyDetail"><div class="empty-state">Select a company to review enforcement details.</div></div>
+            <div class="mode-row">
+              <div class="field"><label for="modeSelect">Company enforcement mode</label><select id="modeSelect" disabled><option>REPORT_ONLY</option><option>HARD_ENFORCEMENT</option></select></div>
+              <button id="saveModeBtn" class="btn primary" type="button" onclick="saveCompanyMode()" disabled><i class="fas fa-floppy-disk"></i> Save Mode</button>
+            </div>
+          </div>
+
+          <div class="section-stack">
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-toggle-on"></i> Module Access</h3><span id="moduleSummary" class="muted">No company selected</span></div>
+              <div class="module-grid">
+                <div><h3 style="font-size:15px;margin-bottom:10px;">Enabled</h3><div id="enabledModules" class="module-list"><div class="empty-state">Select company.</div></div></div>
+                <div><h3 style="font-size:15px;margin-bottom:10px;">Disabled</h3><div id="disabledModules" class="module-list"><div class="empty-state">Select company.</div></div></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3><i class="fas fa-triangle-exclamation"></i> Dependency Warnings</h3><span id="warningCount" class="muted">0 warnings</span></div>
+              <div id="dependencyWarnings" class="audit-list"><div class="empty-state">Select company.</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="panel">
+            <div class="panel-head"><h3><i class="fas fa-ban"></i> Violation Logs</h3><span class="muted">Last 20</span></div>
+            <div id="violationLogs" class="audit-list"><div class="empty-state">Select company.</div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3><i class="fas fa-clock-rotate-left"></i> Audit History</h3><span class="muted">Latest rows</span></div>
+            <div id="auditHistory" class="audit-list"><div class="empty-state">Select company.</div></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/toast.js"></script>
+  <script>
+    let summary = null;
+    let companies = [];
+    let selectedCompanyId = null;
+    let selectedDetail = null;
+    let currentPage = 1;
+    let currentLimit = 25;
+
+    function notify(message, type = "info") {
+      if (window.showToast) showToast(message, type);
+      else alert(message);
+    }
+
+    function api(path, options = {}) {
+      return fetch(path, {
+        credentials: "include",
+        cache: "no-store",
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+    }
+
+    async function readJson(response) {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) throw new Error(data.message || "Request failed");
+      return data;
+    }
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function fmtDate(value) {
+      if (!value) return "-";
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function badge(value, type = "") {
+      const clean = String(value || "-").trim().toUpperCase();
+      const cls = type || (clean === "HARD_ENFORCEMENT" ? "hard" : clean === "REPORT_ONLY" ? "report" : "plan");
+      return `<span class="badge ${cls}">${esc(clean)}</span>`;
+    }
+
+    function renderAccessError(message) {
+      const box = document.getElementById("accessMessage");
+      box.style.display = "block";
+      box.innerHTML = `<strong>Unauthorized</strong><br><span class="muted">${esc(message || "This page is available only to SuperAdmin.")}</span>`;
+    }
+
+    async function loadDashboard(showToastOnSuccess = false) {
+      try {
+        if (typeof requirePageAccess === "function" && !requirePageAccess("company-package-enforcement")) {
+          renderAccessError("You do not have access to Package Enforcement.");
+          return;
+        }
+        await loadSummary();
+        await loadCompanies(1);
+        if (showToastOnSuccess) notify("Package enforcement refreshed", "success");
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    async function loadSummary() {
+      const data = await readJson(await api("/admin/package-enforcement/summary"));
+      summary = data.summary || {};
+      document.getElementById("totalCompanies").textContent = Number(summary.total_companies || 0);
+      document.getElementById("reportOnlyCompanies").textContent = Number(summary.companies_in_report_only || 0);
+      document.getElementById("hardCompanies").textContent = Number(summary.companies_in_hard_enforcement || 0);
+      document.getElementById("violations7").textContent = Number(summary.violations_last_7_days || 0);
+      renderPlanFilter();
+    }
+
+    function renderPlanFilter() {
+      const rows = summary?.companies_by_plan || [];
+      const current = document.getElementById("planFilter").value;
+      document.getElementById("planFilter").innerHTML = `<option value="">All packages</option>${rows.map((row) => `<option value="${esc(row.plan_key)}">${esc(row.plan_key)} (${Number(row.total || 0)})</option>`).join("")}`;
+      document.getElementById("planFilter").value = current;
+    }
+
+    async function loadCompanies(page = 1) {
+      currentPage = Math.max(1, Number(page || 1));
+      const params = new URLSearchParams({ page: String(currentPage), limit: String(currentLimit) });
+      const planKey = document.getElementById("planFilter").value;
+      const mode = document.getElementById("modeFilter").value;
+      const search = document.getElementById("searchInput").value.trim();
+      if (planKey) params.set("plan_key", planKey);
+      if (mode) params.set("enforcement_mode", mode);
+      if (search) params.set("search", search);
+
+      const data = await readJson(await api(`/admin/package-enforcement/companies?${params.toString()}`));
+      companies = data.companies || [];
+      renderCompanies();
+      document.getElementById("prevBtn").disabled = currentPage <= 1;
+      document.getElementById("nextBtn").disabled = companies.length < currentLimit;
+      document.getElementById("pageLabel").textContent = `Page ${currentPage}`;
+    }
+
+    function renderCompanies() {
+      document.getElementById("tableSummary").textContent = `${companies.length} shown`;
+      document.getElementById("companyRows").innerHTML = companies.length ? companies.map((company) => `
+        <tr class="${Number(selectedCompanyId) === Number(company.company_id) ? "active-row" : ""}">
+          <td><strong>${esc(company.company_name || "-")}</strong><br><span class="muted">ID ${Number(company.company_id)}</span></td>
+          <td>${badge(company.plan_key, "plan")}<br><span class="muted">${esc(company.plan_name || "")}</span></td>
+          <td>${badge(company.enforcement_mode)}</td>
+          <td><span class="badge on">${Number(company.enabled_module_count || 0)} enabled</span><br><span class="badge off">${Number(company.disabled_module_count || 0)} disabled</span></td>
+          <td>${Number(company.violation_count || 0)}<br><span class="muted">${fmtDate(company.last_violation_at)}</span></td>
+          <td>${fmtDate(company.created_at)}</td>
+          <td><button class="btn primary" type="button" onclick="selectCompany(${Number(company.company_id)})"><i class="fas fa-eye"></i> Review</button></td>
+        </tr>
+      `).join("") : `<tr><td colspan="7"><div class="empty-state">No companies match the filters.</div></td></tr>`;
+    }
+
+    async function selectCompany(companyId) {
+      selectedCompanyId = Number(companyId);
+      renderCompanies();
+      try {
+        const data = await readJson(await api(`/admin/package-enforcement/companies/${selectedCompanyId}`));
+        selectedDetail = data;
+        renderDetail();
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function renderDetail() {
+      const company = selectedDetail?.company || {};
+      const plan = selectedDetail?.current_plan_assignment?.plan || {};
+      const effective = selectedDetail?.enforcement_mode || {};
+      const mode = effective.enforcement_mode || "REPORT_ONLY";
+      const modeBadge = document.getElementById("detailModeBadge");
+      modeBadge.textContent = mode;
+      modeBadge.className = `badge ${mode === "HARD_ENFORCEMENT" ? "hard" : "report"}`;
+      document.getElementById("modeSelect").disabled = false;
+      document.getElementById("modeSelect").value = mode;
+      document.getElementById("saveModeBtn").disabled = false;
+      document.getElementById("companyDetail").innerHTML = `
+        <p><strong>${esc(company.company_name || "-")}</strong><br><span class="muted">ID ${Number(company.company_id || selectedCompanyId)}</span></p>
+        <p>${badge(plan.plan_key || "FULL_ERP", "plan")} <span class="muted">${esc(plan.plan_name || "")}</span></p>
+        <p><span class="muted">Mode source:</span> ${esc(effective.source || "DEFAULT")}</p>
+        <p><span class="muted">Created:</span> ${fmtDate(company.created_at)}</p>
+      `;
+      renderModules();
+      renderWarnings();
+      renderViolations();
+      renderAudit();
+    }
+
+    function moduleItem(row, enabled) {
+      return `<div class="module-item"><strong>${esc(row.module_key)}</strong><br><span class="muted">${esc(row.module_name || "")}</span><br>${badge(enabled ? "ENABLED" : "DISABLED", enabled ? "on" : "off")}</div>`;
+    }
+
+    function renderModules() {
+      const enabled = selectedDetail?.enabled_modules || [];
+      const disabled = selectedDetail?.disabled_modules || [];
+      document.getElementById("moduleSummary").textContent = `${enabled.length} enabled, ${disabled.length} disabled`;
+      document.getElementById("enabledModules").innerHTML = enabled.length ? enabled.map((row) => moduleItem(row, true)).join("") : `<div class="empty-state">No enabled modules.</div>`;
+      document.getElementById("disabledModules").innerHTML = disabled.length ? disabled.map((row) => moduleItem(row, false)).join("") : `<div class="empty-state">No disabled modules.</div>`;
+    }
+
+    function renderWarnings() {
+      const warnings = selectedDetail?.dependency_warnings || [];
+      document.getElementById("warningCount").textContent = `${warnings.length} warning${warnings.length === 1 ? "" : "s"}`;
+      document.getElementById("dependencyWarnings").innerHTML = warnings.length ? warnings.map((row) => `
+        <div class="audit-item">${badge("WARNING", "warn")} <strong>${esc(row.module_key)}</strong><br><span class="muted">${esc(row.message)}</span></div>
+      `).join("") : `<div class="empty-state">No dependency warnings.</div>`;
+    }
+
+    function renderViolations() {
+      const rows = selectedDetail?.violation_logs || [];
+      document.getElementById("violationLogs").innerHTML = rows.length ? rows.map((row) => `
+        <div class="audit-item"><strong>${esc(row.module_key)}</strong> ${badge(row.would_block ? "WOULD_BLOCK" : "LOGGED", row.would_block ? "warn" : "report")}<br><code>${esc(row.request_method)} ${esc(row.request_path)}</code><br><span class="muted">${fmtDate(row.created_at)}</span></div>
+      `).join("") : `<div class="empty-state">No violation logs.</div>`;
+    }
+
+    function renderAudit() {
+      const audits = selectedDetail?.module_access_audit || [];
+      const plans = selectedDetail?.plan_assignment_history || [];
+      const auditHtml = audits.map((row) => `
+        <div class="audit-item"><strong>${esc(row.module_key)}</strong><br><span class="muted">${esc(row.old_plan_key || "-")} to ${esc(row.new_plan_key || "-")} | ${esc(row.old_enabled)} to ${esc(row.new_enabled)}</span><br><span class="muted">${fmtDate(row.created_at)}</span></div>
+      `).join("");
+      const planHtml = plans.map((row) => `
+        <div class="audit-item">${badge(row.plan_key || row.plan_key_snapshot || "FULL_ERP", "plan")}<br><span class="muted">${esc(row.status || "")} | ${fmtDate(row.assigned_at || row.updated_at)}</span></div>
+      `).join("");
+      document.getElementById("auditHistory").innerHTML = auditHtml || planHtml ? `${auditHtml}${planHtml}` : `<div class="empty-state">No audit history.</div>`;
+    }
+
+    async function saveCompanyMode() {
+      if (!selectedCompanyId) return;
+      const mode = document.getElementById("modeSelect").value;
+      if (mode === "HARD_ENFORCEMENT") {
+        const ok = confirm("Enable HARD_ENFORCEMENT for this company only? Disabled modules may be blocked for this company.");
+        if (!ok) return;
+      }
+
+      try {
+        await readJson(await api(`/admin/package-enforcement/companies/${selectedCompanyId}/enforcement-mode`, {
+          method: "POST",
+          body: JSON.stringify({ enforcement_mode: mode, reason: "Updated from package enforcement dashboard" })
+        }));
+        notify("Company enforcement mode updated", "success");
+        await loadSummary();
+        await loadCompanies(currentPage);
+        await selectCompany(selectedCompanyId);
+      } catch (error) {
+        notify(error.message, "error");
+      }
+    }
+
+    function toggleSidebar() {
+      document.getElementById("sidebar")?.classList.toggle("collapsed");
+    }
+
+    function logoutUser() {
+      if (window.clearAuthSession) clearAuthSession();
+      location.href = "login.html";
+    }
+
+    document.getElementById("searchInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") loadCompanies(1);
+    });
+    document.addEventListener("DOMContentLoaded", loadDashboard);
+  </script>
+  <script src="js/help-guide.js"></script>
+</body>
+</html>
