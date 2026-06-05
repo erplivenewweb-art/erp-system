@@ -8468,6 +8468,17 @@ const ERP_PLAN_MODULES = {
   CUSTOM: []
 };
 
+const PHASE3_ACCOUNTING_MODULE_KEYS = [
+  "TRANSACTION_REPORTS",
+  "CUSTOMER_LEDGER",
+  "BRANCH_CASH_BOOK",
+  "PAYMENT_ACCOUNTS",
+  "DAILY_CLOSING",
+  "TRANSACTION_REVERSAL"
+];
+
+const PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS = ["FULL_ERP", "STORE_SYSTEM", "STORE_ONLY"];
+
 async function seedSaasModuleCatalog() {
   let inserted = 0;
 
@@ -8608,15 +8619,121 @@ async function backfillCompanySaasAccess() {
   };
 }
 
+async function backfillPhase3AccountingModuleAccess() {
+  if (
+    !(await tableExists("companies")) ||
+    !(await tableExists("erp_modules")) ||
+    !(await tableExists("erp_plans")) ||
+    !(await tableExists("company_plan_assignments")) ||
+    !(await tableExists("company_module_access"))
+  ) {
+    return { companyCount: 0, moduleAccessInserted: 0 };
+  }
+
+  const moduleKeyPlaceholders = PHASE3_ACCOUNTING_MODULE_KEYS.map(() => "?").join(", ");
+  const planKeyPlaceholders = PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS.map(() => "?").join(", ");
+
+  const [companyRows] = await pool.query(
+    `
+    SELECT COUNT(*) AS company_count
+    FROM companies c
+    LEFT JOIN company_plan_assignments cpa ON cpa.id = (
+      SELECT cpa2.id
+      FROM company_plan_assignments cpa2
+      WHERE cpa2.company_id = c.id
+        AND UPPER(COALESCE(cpa2.status, 'ACTIVE')) = 'ACTIVE'
+        AND (cpa2.effective_until IS NULL OR cpa2.effective_until >= CURDATE())
+      ORDER BY cpa2.effective_from DESC, cpa2.id DESC
+      LIMIT 1
+    )
+    LEFT JOIN erp_plans ep ON ep.id = cpa.plan_id
+    WHERE c.id IS NOT NULL
+      AND COALESCE(NULLIF(UPPER(ep.plan_key), ''), NULLIF(UPPER(cpa.plan_key_snapshot), ''), 'FULL_ERP') IN (${planKeyPlaceholders})
+    `,
+    PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS
+  );
+
+  const [moduleAccessResult] = await pool.query(
+    `
+    INSERT IGNORE INTO company_module_access
+    (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+    SELECT c.id, em.module_key, 1, 'PLAN', 'Phase 3 accounting module access backfill', NULL, NOW()
+    FROM companies c
+    LEFT JOIN company_plan_assignments cpa ON cpa.id = (
+      SELECT cpa2.id
+      FROM company_plan_assignments cpa2
+      WHERE cpa2.company_id = c.id
+        AND UPPER(COALESCE(cpa2.status, 'ACTIVE')) = 'ACTIVE'
+        AND (cpa2.effective_until IS NULL OR cpa2.effective_until >= CURDATE())
+      ORDER BY cpa2.effective_from DESC, cpa2.id DESC
+      LIMIT 1
+    )
+    LEFT JOIN erp_plans ep ON ep.id = cpa.plan_id
+    CROSS JOIN erp_modules em
+    WHERE c.id IS NOT NULL
+      AND em.module_key IN (${moduleKeyPlaceholders})
+      AND COALESCE(NULLIF(UPPER(ep.plan_key), ''), NULLIF(UPPER(cpa.plan_key_snapshot), ''), 'FULL_ERP') IN (${planKeyPlaceholders})
+      AND NOT EXISTS (
+        SELECT 1
+        FROM company_module_access cma
+        WHERE cma.company_id = c.id
+          AND cma.module_key = em.module_key
+      )
+    `,
+    [...PHASE3_ACCOUNTING_MODULE_KEYS, ...PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS]
+  );
+
+  return {
+    companyCount: Number(companyRows[0]?.company_count || 0),
+    moduleAccessInserted: Number(moduleAccessResult?.affectedRows || 0)
+  };
+}
+
+async function auditPhase3AccountingBackfillSafe(backfillResult = {}) {
+  if (!Number(backfillResult.moduleAccessInserted || 0)) return;
+
+  try {
+    await writeAuditLogSafe(
+      pool,
+      {
+        headers: {},
+        originalUrl: "/startup/phase3-accounting-module-backfill",
+        path: "/startup/phase3-accounting-module-backfill",
+        method: "STARTUP",
+        ip: ""
+      },
+      {
+        actionType: "PHASE3_ACCOUNTING_MODULE_BACKFILL",
+        entityType: "COMPANY_MODULE_ACCESS",
+        entityId: "PHASE3_ACCOUNTING",
+        moduleName: "saas_module_access",
+        status: "success",
+        message: "Phase 3 accounting module access rows backfilled for eligible plans",
+        metadata: {
+          autoEnabledPlans: PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS,
+          moduleKeys: PHASE3_ACCOUNTING_MODULE_KEYS,
+          companyCount: Number(backfillResult.companyCount || 0),
+          moduleAccessInserted: Number(backfillResult.moduleAccessInserted || 0)
+        }
+      }
+    );
+  } catch (error) {
+    console.warn("Phase 3 accounting module backfill audit skipped:", error?.message || error);
+  }
+}
+
 async function ensureSaasModuleAccessFoundation() {
   const moduleInsertCount = await seedSaasModuleCatalog();
   const planInsertCount = await seedSaasPlans();
   const planModuleInsertCount = await seedSaasPlanModules();
   const backfillResult = await backfillCompanySaasAccess();
+  const phase3AccountingBackfillResult = await backfillPhase3AccountingModuleAccess();
+  await auditPhase3AccountingBackfillSafe(phase3AccountingBackfillResult);
 
   console.log(
     `SaaS module foundation ensured: ${moduleInsertCount} module(s), ${planInsertCount} plan(s), ${planModuleInsertCount} plan-module row(s) inserted; ` +
-      `${backfillResult.planAssignmentsInserted} company plan assignment(s), ${backfillResult.moduleAccessInserted} company module access row(s) backfilled across ${backfillResult.companyCount} compan${backfillResult.companyCount === 1 ? "y" : "ies"}`
+      `${backfillResult.planAssignmentsInserted} company plan assignment(s), ${backfillResult.moduleAccessInserted} company module access row(s) backfilled across ${backfillResult.companyCount} compan${backfillResult.companyCount === 1 ? "y" : "ies"}; ` +
+      `${phase3AccountingBackfillResult.moduleAccessInserted} Phase 3 accounting module access row(s) backfilled across ${phase3AccountingBackfillResult.companyCount} eligible compan${phase3AccountingBackfillResult.companyCount === 1 ? "y" : "ies"}`
   );
 }
 
