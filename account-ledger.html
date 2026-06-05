@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account Ledger</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>.filters{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px}.summary{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:14px 0}.card{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}@media(max-width:800px){.filters,.summary{grid-template-columns:1fr}}</style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="payment-accounts.html"><i class="fas fa-wallet"></i> Payment Accounts</a></li>
+      <li><a href="account-ledger.html" class="active"><i class="fas fa-book"></i> Account Ledger</a></li>
+      <li><a href="daily-closing.html"><i class="fas fa-lock"></i> Daily Closing</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Account Ledger</h1><p>Payment account debit, credit, and running balance</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <div class="filters">
+          <div class="input-box"><label>Account</label><select id="accountId"></select></div>
+          <div class="input-box"><label>From</label><input id="fromDate" type="date" /></div>
+          <div class="input-box"><label>To</label><input id="toDate" type="date" /></div>
+          <div class="input-box"><label>&nbsp;</label><button class="primary-btn" type="button" onclick="loadLedger()">Refresh</button></div>
+        </div>
+        <div class="summary"><div class="card"><h4>Opening Balance</h4><p id="openingBalance">Rs 0.00</p></div><div class="card"><h4>Closing Balance</h4><p id="closingBalance">Rs 0.00</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Debit</th><th>Credit</th><th>Running</th></tr></thead><tbody id="ledgerBody"></tbody></table></div>
+      </div></section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    async function loadAccounts(){const d=await fetchJson(`${API_BASE}/transaction/payment-accounts?${params()}`);accountId.innerHTML=(d.accounts||[]).map(a=>`<option value="${Number(a.id)}">${esc(a.account_name)} (${esc(a.account_type)})</option>`).join("");if(accountId.value)await loadLedger()}
+    function defaults(){const d=new Date();toDate.value=d.toISOString().slice(0,10);fromDate.value=new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10)}
+    async function loadLedger(){try{if(!accountId.value)throw new Error("Create a payment account first");const p=params();p.set("accountId",accountId.value);if(fromDate.value)p.set("fromDate",fromDate.value);if(toDate.value)p.set("toDate",toDate.value);const d=await fetchJson(`${API_BASE}/transaction/account-ledger?${p}`);openingBalance.textContent=money(d.openingBalance);closingBalance.textContent=money(d.closingBalance);ledgerBody.innerHTML=(d.rows||[]).map(r=>`<tr><td>${esc(String(r.entry_date||"").slice(0,10))}</td><td>${esc(r.voucher_no)}</td><td>${esc(r.transaction_type)}</td><td>${money(r.debit)}</td><td>${money(r.credit)}</td><td>${money(r.running_balance)}</td></tr>`).join("")||'<tr><td colspan="6">No ledger rows</td></tr>'}catch(e){showToast(e.message,"error")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";defaults();await loadAccounts()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("account-ledger");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

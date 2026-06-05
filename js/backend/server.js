@@ -48,6 +48,13 @@ const PROTECTED_PAGES = new Set([
   "expense-manager.html",
   "transaction.html",
   "transaction-reports.html",
+  "customer-ledger.html",
+  "branch-cash-book.html",
+  "transaction-summary-dashboard.html",
+  "transaction-reversal.html",
+  "payment-accounts.html",
+  "account-ledger.html",
+  "daily-closing.html",
   "profit-report.html",
   "reconciliation-dashboard.html",
   "lot-commercial-analytics.html",
@@ -98,6 +105,10 @@ const OPERATIONAL_MUTATION_PATHS = [
   "/branch-transfers",
   "/branch-audit",
   "/transaction-types",
+  "/transaction/reversal",
+  "/transaction/payment-accounts",
+  "/transaction/account-ledger",
+  "/transaction/daily-closing",
   "/transaction/parties",
   "/transaction/transactions",
   "/updatesticker/"
@@ -986,19 +997,27 @@ const TRANSACTION_TYPES = [
   "SALE_RETURN",
   "PURCHASE_INVOICE",
   "PURCHASE_RETURN",
+  "SALE_INVOICE_REVERSAL",
   "RETURN_REFUND_PAYABLE",
+  "RETURN_REFUND_PAYABLE_REVERSAL",
   "CASH_REFUND_PAID",
   "METAL_REFUND_GIVEN",
+  "EXPENSE_PAYMENT",
   "PAYMENT_RECEIVED",
+  "PAYMENT_RECEIVED_REVERSAL",
   "PAYMENT_GIVEN",
   "ADVANCE_RECEIVED",
   "ADVANCE_GIVEN",
   "CASH_ADJUSTMENT",
+  "CASH_ADJUSTMENT_REVERSAL",
   "METAL_RECEIVED",
   "METAL_GIVEN",
   "METAL_ADJUSTMENT",
   "METAL_SETTLEMENT_RECEIVED",
+  "METAL_SETTLEMENT_REVERSAL",
   "METAL_SETTLEMENT_GIVEN",
+  "EXPENSE_PAYMENT_REVERSAL",
+  "CASH_REFUND_REVERSAL",
   "KARIGAR_ISSUE",
   "KARIGAR_RECEIVE",
   "KARIGAR_LABOUR",
@@ -5338,6 +5357,288 @@ async function ensureActiveBarcodeUniqueIndexSafe() {
   }
 }
 
+async function ensureBranchCodeUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("branches"))) return;
+    if (await indexExists("branches", "uq_branches_company_normalized_code") ||
+      await indexExists("branches", "uq_branches_company_code")) {
+      console.log("Branch code unique index already exists; skipping.");
+      return;
+    }
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, UPPER(TRIM(branch_code)) AS normalized_branch_code, COUNT(*) AS duplicate_count
+      FROM branches
+      WHERE company_id IS NOT NULL
+        AND TRIM(COALESCE(branch_code, '')) <> ''
+      GROUP BY company_id, UPPER(TRIM(branch_code))
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Branch code unique index skipped: duplicate normalized branch codes exist.", duplicateRows);
+      return;
+    }
+
+    const normalizedColumnReady = await addGeneratedColumnIfMissingSafe(
+      "branches",
+      "normalized_branch_code",
+      "VARCHAR(50) GENERATED ALWAYS AS (UPPER(TRIM(COALESCE(branch_code, '')))) STORED"
+    );
+
+    if (normalizedColumnReady && await columnExists("branches", "normalized_branch_code")) {
+      await pool.query("ALTER TABLE branches ADD UNIQUE INDEX uq_branches_company_normalized_code (company_id, normalized_branch_code)");
+      console.log("Branch code unique index added: branches.uq_branches_company_normalized_code");
+      return;
+    }
+
+    await pool.query("ALTER TABLE branches ADD UNIQUE INDEX uq_branches_company_code (company_id, branch_code)");
+    console.log("Branch code unique index added: branches.uq_branches_company_code");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Branch code unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function ensureBranchTransferNumberUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("branch_transfers"))) return;
+    if (await indexExists("branch_transfers", "uq_branch_transfers_company_transfer_no")) {
+      console.log("Branch transfer number unique index already exists; skipping.");
+      return;
+    }
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, transfer_no, COUNT(*) AS duplicate_count
+      FROM branch_transfers
+      WHERE company_id IS NOT NULL
+        AND TRIM(COALESCE(transfer_no, '')) <> ''
+      GROUP BY company_id, transfer_no
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Branch transfer number unique index skipped: duplicate transfer numbers exist.", duplicateRows);
+      return;
+    }
+
+    await pool.query("ALTER TABLE branch_transfers ADD UNIQUE INDEX uq_branch_transfers_company_transfer_no (company_id, transfer_no)");
+    console.log("Branch transfer number unique index added: branch_transfers.uq_branch_transfers_company_transfer_no");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Branch transfer number unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function ensureBranchTransferOpenItemUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("branch_transfer_items"))) return;
+    if (await indexExists("branch_transfer_items", "uq_branch_transfer_items_open_barcode")) {
+      console.log("Branch transfer open item unique index already exists; skipping.");
+      return;
+    }
+
+    const activeTransferItemKeySql = `
+      CASE
+        WHEN TRIM(COALESCE(barcode, '')) = '' THEN NULL
+        WHEN UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT', 'DISPATCHED', 'PENDING_RECEIVE') THEN UPPER(TRIM(barcode))
+        ELSE NULL
+      END
+    `;
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, ${activeTransferItemKeySql} AS active_transfer_barcode_key, COUNT(*) AS duplicate_count
+      FROM branch_transfer_items
+      WHERE company_id IS NOT NULL
+        AND ${activeTransferItemKeySql} IS NOT NULL
+      GROUP BY company_id, ${activeTransferItemKeySql}
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Branch transfer open item unique index skipped: duplicate open transfer barcodes exist.", duplicateRows);
+      return;
+    }
+
+    const generatedColumnReady = await addGeneratedColumnIfMissingSafe(
+      "branch_transfer_items",
+      "active_transfer_barcode_key",
+      `VARCHAR(120) GENERATED ALWAYS AS (
+        CASE
+          WHEN TRIM(COALESCE(barcode, '')) = '' THEN NULL
+          WHEN UPPER(COALESCE(item_status, 'PENDING_DISPATCH')) IN ('PENDING_DISPATCH', 'IN_TRANSIT', 'DISPATCHED', 'PENDING_RECEIVE') THEN UPPER(TRIM(barcode))
+          ELSE NULL
+        END
+      ) STORED`
+    );
+
+    if (!generatedColumnReady || !(await columnExists("branch_transfer_items", "active_transfer_barcode_key"))) {
+      console.warn("Branch transfer open item unique index skipped: generated column is not supported by this database.");
+      return;
+    }
+
+    await pool.query("ALTER TABLE branch_transfer_items ADD UNIQUE INDEX uq_branch_transfer_items_open_barcode (company_id, active_transfer_barcode_key)");
+    console.log("Branch transfer open item unique index added: branch_transfer_items.uq_branch_transfer_items_open_barcode");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Branch transfer open item unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function ensureTransactionVoucherUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("transaction_master"))) return;
+    if (await indexExists("transaction_master", "uq_transaction_master_company_voucher")) {
+      console.log("Transaction voucher unique index already exists; skipping.");
+      return;
+    }
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, voucher_no, COUNT(*) AS duplicate_count
+      FROM transaction_master
+      WHERE company_id IS NOT NULL
+        AND TRIM(COALESCE(voucher_no, '')) <> ''
+      GROUP BY company_id, voucher_no
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Transaction voucher unique index skipped: duplicate voucher numbers exist.", duplicateRows);
+      return;
+    }
+
+    await pool.query("ALTER TABLE transaction_master ADD UNIQUE INDEX uq_transaction_master_company_voucher (company_id, voucher_no)");
+    console.log("Transaction voucher unique index added: transaction_master.uq_transaction_master_company_voucher");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Transaction voucher unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function ensureTransactionIdempotencyUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("transaction_master"))) return;
+    if (!(await columnExists("transaction_master", "idempotency_key"))) return;
+    if (await indexExists("transaction_master", "uq_transaction_master_company_idempotency")) {
+      console.log("Transaction idempotency unique index already exists; skipping.");
+      return;
+    }
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, idempotency_key, COUNT(*) AS duplicate_count
+      FROM transaction_master
+      WHERE company_id IS NOT NULL
+        AND TRIM(COALESCE(idempotency_key, '')) <> ''
+      GROUP BY company_id, idempotency_key
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Transaction idempotency unique index skipped: duplicate idempotency keys exist.", duplicateRows);
+      return;
+    }
+
+    const generatedColumnReady = await addGeneratedColumnIfMissingSafe(
+      "transaction_master",
+      "idempotency_unique_key",
+      "VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN TRIM(COALESCE(idempotency_key, '')) = '' THEN NULL ELSE TRIM(idempotency_key) END) STORED"
+    );
+
+    if (!generatedColumnReady || !(await columnExists("transaction_master", "idempotency_unique_key"))) {
+      console.warn("Transaction idempotency unique index skipped: generated column is not supported by this database.");
+      return;
+    }
+
+    await pool.query("ALTER TABLE transaction_master ADD UNIQUE INDEX uq_transaction_master_company_idempotency (company_id, idempotency_unique_key)");
+    console.log("Transaction idempotency unique index added: transaction_master.uq_transaction_master_company_idempotency");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Transaction idempotency unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function seedExpensePaymentTransactionTypeSafe() {
+  try {
+    if (!(await tableExists("transaction_types")) || !(await tableExists("companies"))) return;
+    await pool.query(
+      `
+      INSERT INTO transaction_types (company_id, type_name, status, created_by)
+      SELECT c.id, 'EXPENSE_PAYMENT', 'ACTIVE', NULL
+      FROM companies c
+      WHERE c.id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM transaction_types tt
+          WHERE tt.company_id = c.id
+            AND LOWER(TRIM(tt.type_name)) = 'expense_payment'
+        )
+      `
+    );
+  } catch (error) {
+    console.warn("Expense payment transaction type seed skipped safely:", error?.code || error?.message || error);
+  }
+}
+
+async function ensureExpenseIdempotencyUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("expenses"))) return;
+    if (!(await columnExists("expenses", "idempotency_key"))) return;
+    if (await indexExists("expenses", "uq_expenses_company_idempotency")) {
+      console.log("Expense idempotency unique index already exists; skipping.");
+      return;
+    }
+
+    const [duplicateRows] = await pool.query(
+      `
+      SELECT company_id, idempotency_key, COUNT(*) AS duplicate_count
+      FROM expenses
+      WHERE company_id IS NOT NULL
+        AND TRIM(COALESCE(idempotency_key, '')) <> ''
+      GROUP BY company_id, idempotency_key
+      HAVING COUNT(*) > 1
+      LIMIT 20
+      `
+    );
+
+    if (duplicateRows.length) {
+      console.warn("Expense idempotency unique index skipped: duplicate idempotency keys exist.", duplicateRows);
+      return;
+    }
+
+    const generatedColumnReady = await addGeneratedColumnIfMissingSafe(
+      "expenses",
+      "idempotency_unique_key",
+      "VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN TRIM(COALESCE(idempotency_key, '')) = '' THEN NULL ELSE TRIM(idempotency_key) END) STORED"
+    );
+
+    if (!generatedColumnReady || !(await columnExists("expenses", "idempotency_unique_key"))) {
+      console.warn("Expense idempotency unique index skipped: generated column is not supported by this database.");
+      return;
+    }
+
+    await pool.query("ALTER TABLE expenses ADD UNIQUE INDEX uq_expenses_company_idempotency (company_id, idempotency_unique_key)");
+    console.log("Expense idempotency unique index added: expenses.uq_expenses_company_idempotency");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Expense idempotency unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
 async function auditBarcodeUniquenessConflict(db, req, access, payload = {}) {
   await writeAuditLogSafe(pool, req, {
     companyId: payload.companyId ?? access?.companyScope ?? null,
@@ -5642,6 +5943,46 @@ function buildAnalyticsStockScope(access, branchScope, { alias = "s" } = {}) {
   }
   appendBranchScopeFilter(whereParts, params, branchScope, { alias });
   return { whereSql: whereParts.join(" AND "), params };
+}
+
+async function getBranchAttributionColumnFlags() {
+  const [
+    salesItemBranchId,
+    salesHistoryBranchId,
+    returnHistoryBranchId
+  ] = await Promise.all([
+    columnExists("sales_items", "branch_id"),
+    columnExists("sales_history", "branch_id"),
+    columnExists("return_history", "branch_id")
+  ]);
+
+  return {
+    salesItemBranchId,
+    salesHistoryBranchId,
+    returnHistoryBranchId
+  };
+}
+
+function buildSalesBranchAttributionSql(flags = {}, {
+  itemAlias = "si",
+  saleAlias = "sh",
+  stockAlias = "s"
+} = {}) {
+  const parts = [];
+  if (flags.salesItemBranchId) parts.push(`${itemAlias}.branch_id`);
+  if (flags.salesHistoryBranchId) parts.push(`${saleAlias}.branch_id`);
+  if (stockAlias) parts.push(`${stockAlias}.current_branch_id`);
+  return parts.length === 1 ? parts[0] : `COALESCE(${parts.join(", ")})`;
+}
+
+function buildReturnBranchAttributionSql(flags = {}, {
+  returnAlias = "rh",
+  stockAlias = "s"
+} = {}) {
+  const parts = [];
+  if (flags.returnHistoryBranchId) parts.push(`${returnAlias}.branch_id`);
+  if (stockAlias) parts.push(`${stockAlias}.current_branch_id`);
+  return parts.length === 1 ? parts[0] : `COALESCE(${parts.join(", ")})`;
 }
 
 async function getBranchForCompany(connection, companyId, branchId) {
@@ -8040,6 +8381,10 @@ async function addUniqueIndexIfMissing(tableName, indexName, definitionSql) {
   }
 }
 
+function isDuplicateKeyError(error) {
+  return error?.code === "ER_DUP_ENTRY" || Number(error?.errno || 0) === 1062;
+}
+
 const ERP_MODULE_CATALOG = [
   { key: "DASHBOARD", name: "Dashboard", category: "CORE", description: "Core ERP dashboard", sortOrder: 10 },
   { key: "SETTINGS", name: "Settings", category: "CORE", description: "Company settings and configuration", sortOrder: 20 },
@@ -8060,7 +8405,13 @@ const ERP_MODULE_CATALOG = [
   { key: "CUSTOMER_DUE", name: "Customer Due", category: "FINANCE", description: "Customer due ledger and reports", sortOrder: 295 },
   { key: "EXPENSE", name: "Expense", category: "FINANCE", description: "Expense management", sortOrder: 300 },
   { key: "TRANSACTION", name: "Transaction", category: "FINANCE", description: "Accounts transaction ledger", sortOrder: 310 },
-  { key: "PROFIT_REPORT", name: "Profit Report", category: "FINANCE", description: "Profit and loss reporting", sortOrder: 320 },
+  { key: "CUSTOMER_LEDGER", name: "Customer Ledger", category: "FINANCE", description: "Customer ledger and due reporting", sortOrder: 320 },
+  { key: "BRANCH_CASH_BOOK", name: "Branch Cash Book", category: "FINANCE", description: "Branch-wise cash book reporting", sortOrder: 330 },
+  { key: "TRANSACTION_REPORTS", name: "Transaction Reports", category: "FINANCE", description: "Transaction summary dashboards and reports", sortOrder: 340 },
+  { key: "TRANSACTION_REVERSAL", name: "Transaction Reversal", category: "FINANCE", description: "Controlled transaction reversal workflow", sortOrder: 342 },
+  { key: "PAYMENT_ACCOUNTS", name: "Payment Accounts", category: "FINANCE", description: "Cash, UPI, bank, and card account ledgers", sortOrder: 344 },
+  { key: "DAILY_CLOSING", name: "Daily Closing", category: "FINANCE", description: "Branch daily cash closing and reopening audit", sortOrder: 346 },
+  { key: "PROFIT_REPORT", name: "Profit Report", category: "FINANCE", description: "Profit and loss reporting", sortOrder: 350 },
   { key: "BRANCH", name: "Branch", category: "BRANCH", description: "Branch setup and branch context", sortOrder: 400 },
   { key: "BRANCH_TRANSFER", name: "Branch Transfer", category: "BRANCH", description: "Branch stock transfer workflows", sortOrder: 410 },
   { key: "BRANCH_RECEIVE", name: "Branch Receive", category: "BRANCH", description: "Branch receiving workflows", sortOrder: 420 },
@@ -8083,9 +8434,9 @@ const ERP_PLAN_CATALOG = [
 
 const ERP_PLAN_MODULES = {
   PRODUCTION_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
-  STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
+  STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING"],
   PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
-  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT"],
+  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING"],
   BRANCH_STORE: [
     "DASHBOARD",
     "SETTINGS",
@@ -8097,6 +8448,15 @@ const ERP_PLAN_MODULES = {
     "SALES",
     "RETURN",
     "DAILY_REPORT",
+    "CUSTOMER_DUE",
+    "EXPENSE",
+    "TRANSACTION",
+    "CUSTOMER_LEDGER",
+    "BRANCH_CASH_BOOK",
+    "TRANSACTION_REPORTS",
+    "TRANSACTION_REVERSAL",
+    "PAYMENT_ACCOUNTS",
+    "DAILY_CLOSING",
     "BRANCH",
     "BRANCH_TRANSFER",
     "BRANCH_RECEIVE",
@@ -8625,7 +8985,21 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "PROFIT_REPORT", pattern: /^\/lot-commercial-analytics(?:\.html)?$/i },
   { moduleKey: "PROFIT_REPORT", pattern: /^\/reports\/lot-commercial-profit(?:\/|$)/i },
   { moduleKey: "TRANSACTION", pattern: /^\/transaction(?:\.html|\/|$)/i },
-  { moduleKey: "TRANSACTION", pattern: /^\/transaction-reports(?:\.html)?$/i },
+  { moduleKey: "TRANSACTION_REPORTS", pattern: /^\/transaction-reports(?:\.html)?$/i },
+  { moduleKey: "TRANSACTION_REPORTS", pattern: /^\/transaction-summary-dashboard(?:\.html)?$/i },
+  { moduleKey: "TRANSACTION_REPORTS", pattern: /^\/transaction\/summary-dashboard(?:\/|$)?/i },
+  { moduleKey: "TRANSACTION_REVERSAL", pattern: /^\/transaction-reversal(?:\.html)?$/i },
+  { moduleKey: "TRANSACTION_REVERSAL", pattern: /^\/transaction\/reversal(?:\/|$)?/i },
+  { moduleKey: "PAYMENT_ACCOUNTS", pattern: /^\/payment-accounts(?:\.html)?$/i },
+  { moduleKey: "PAYMENT_ACCOUNTS", pattern: /^\/account-ledger(?:\.html)?$/i },
+  { moduleKey: "PAYMENT_ACCOUNTS", pattern: /^\/transaction\/payment-accounts(?:\/|$)?/i },
+  { moduleKey: "PAYMENT_ACCOUNTS", pattern: /^\/transaction\/account-ledger(?:\/|$)?/i },
+  { moduleKey: "DAILY_CLOSING", pattern: /^\/daily-closing(?:\.html)?$/i },
+  { moduleKey: "DAILY_CLOSING", pattern: /^\/transaction\/daily-closing(?:\/|$)?/i },
+  { moduleKey: "CUSTOMER_LEDGER", pattern: /^\/customer-ledger(?:\.html)?$/i },
+  { moduleKey: "CUSTOMER_LEDGER", pattern: /^\/transaction\/customer-ledger(?:\/|$)?/i },
+  { moduleKey: "BRANCH_CASH_BOOK", pattern: /^\/branch-cash-book(?:\.html)?$/i },
+  { moduleKey: "BRANCH_CASH_BOOK", pattern: /^\/transaction\/branch-cash-book(?:\/|$)?/i },
   { moduleKey: "CUSTOMER_DUE", pattern: /^\/transaction\/reports\/customer-due(?:\/|$)/i },
   { moduleKey: "AUDIT", pattern: /^\/barcode-lifecycle(?:\.html|\/|$)/i },
   { moduleKey: "AUDIT", pattern: /^\/reconciliation-dashboard(?:\.html)?$/i },
@@ -10249,11 +10623,16 @@ async function ensureSchema() {
       process_lot_no VARCHAR(120) DEFAULT '',
       karigar_id INT DEFAULT NULL,
       source_module VARCHAR(80) DEFAULT '',
+      idempotency_key VARCHAR(120) DEFAULT '',
       payment_mode VARCHAR(50) DEFAULT '',
       payment_status VARCHAR(50) DEFAULT '',
       remarks TEXT DEFAULT NULL,
       note TEXT DEFAULT NULL,
       reversal_of_transaction_id INT DEFAULT NULL,
+      reversal_transaction_id INT DEFAULT NULL,
+      reversed_at DATETIME DEFAULT NULL,
+      reversed_by INT DEFAULT NULL,
+      reversal_reason TEXT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       approved_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -10262,7 +10641,13 @@ async function ensureSchema() {
   `);
 
   await addColumnIfMissing("transaction_master", "reversal_of_transaction_id", "INT DEFAULT NULL");
+  await addColumnIfMissing("transaction_master", "reversal_transaction_id", "INT DEFAULT NULL");
+  await addColumnIfMissing("transaction_master", "reversed_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("transaction_master", "reversed_by", "INT DEFAULT NULL");
+  await addColumnIfMissing("transaction_master", "reversal_reason", "TEXT DEFAULT NULL");
+  await addColumnIfMissingSafe("transaction_master", "idempotency_key", "VARCHAR(120) DEFAULT ''");
   await addIndexIfMissing("transaction_master", "idx_transaction_reversal_of", "(company_id, reversal_of_transaction_id)");
+  await addIndexIfMissing("transaction_master", "idx_transaction_reversal_txn", "(company_id, reversal_transaction_id)");
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS transaction_types (
@@ -10344,11 +10729,71 @@ async function ensureSchema() {
       debit_amount DECIMAL(14,2) DEFAULT 0.00,
       credit_amount DECIMAL(14,2) DEFAULT 0.00,
       running_balance DECIMAL(14,2) DEFAULT 0.00,
+      account_id INT DEFAULT NULL,
       reference_type VARCHAR(60) DEFAULT '',
       reference_no VARCHAR(120) DEFAULT '',
       remarks TEXT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_accounts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      account_name VARCHAR(255) NOT NULL,
+      account_type VARCHAR(20) NOT NULL DEFAULT 'CASH',
+      opening_balance DECIMAL(14,2) DEFAULT 0.00,
+      active TINYINT(1) DEFAULT 1,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_payment_accounts_scope (company_id, branch_id, account_type, active)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS daily_cash_closing (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      closing_date DATE NOT NULL,
+      opening_balance DECIMAL(14,2) DEFAULT 0.00,
+      collections DECIMAL(14,2) DEFAULT 0.00,
+      expenses DECIMAL(14,2) DEFAULT 0.00,
+      refunds DECIMAL(14,2) DEFAULT 0.00,
+      adjustments DECIMAL(14,2) DEFAULT 0.00,
+      closing_balance DECIMAL(14,2) DEFAULT 0.00,
+      remarks TEXT DEFAULT NULL,
+      status VARCHAR(30) DEFAULT 'CLOSED',
+      closed_by INT DEFAULT NULL,
+      closed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reopened_by INT DEFAULT NULL,
+      reopened_at DATETIME DEFAULT NULL,
+      reopen_reason TEXT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_daily_cash_closing_scope (company_id, branch_id, closing_date),
+      INDEX idx_daily_cash_closing_status (company_id, closing_date, status)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS daily_cash_closing_audit (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      branch_id INT DEFAULT NULL,
+      closing_id INT DEFAULT NULL,
+      closing_date DATE NOT NULL,
+      action_type VARCHAR(40) NOT NULL,
+      before_json JSON DEFAULT NULL,
+      after_json JSON DEFAULT NULL,
+      remarks TEXT DEFAULT NULL,
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_daily_cash_closing_audit_scope (company_id, branch_id, closing_date)
     )
   `);
 
@@ -10770,6 +11215,9 @@ async function ensureSchema() {
       category VARCHAR(120) DEFAULT '',
       reason VARCHAR(255) DEFAULT '',
       note TEXT DEFAULT NULL,
+      idempotency_key VARCHAR(120) DEFAULT '',
+      transaction_id INT DEFAULT NULL,
+      branch_id INT DEFAULT NULL,
       created_by INT DEFAULT NULL,
       updated_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -11618,6 +12066,9 @@ async function ensureSchema() {
     await addColumnIfMissing("expenses", "category", "VARCHAR(120) DEFAULT ''");
     await addColumnIfMissing("expenses", "reason", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("expenses", "note", "TEXT DEFAULT NULL");
+    await addColumnIfMissingSafe("expenses", "idempotency_key", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissingSafe("expenses", "transaction_id", "INT DEFAULT NULL");
+    await addColumnIfMissingSafe("expenses", "branch_id", "INT DEFAULT NULL");
     await addColumnIfMissing("expenses", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("expenses", "updated_by", "INT DEFAULT NULL");
     await addColumnIfMissing("expenses", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -11897,16 +12348,19 @@ async function ensureSchema() {
   if (await tableExists("branches")) {
     await addIndexIfMissing("branches", "idx_branches_company_code", "(company_id, branch_code)");
     await addIndexIfMissing("branches", "idx_branches_company_status", "(company_id, status)");
+    await ensureBranchCodeUniqueIndexSafe();
   }
 
   if (await tableExists("branch_transfers")) {
     await addIndexIfMissing("branch_transfers", "idx_branch_transfers_scope_status", "(company_id, from_branch_id, to_branch_id, status)");
     await addIndexIfMissing("branch_transfers", "idx_branch_transfers_transfer_no", "(company_id, transfer_no)");
+    await ensureBranchTransferNumberUniqueIndexSafe();
   }
 
   if (await tableExists("branch_transfer_items")) {
     await addIndexIfMissing("branch_transfer_items", "idx_branch_transfer_items_transfer_barcode", "(company_id, transfer_id, barcode)");
     await addIndexIfMissing("branch_transfer_items", "idx_branch_transfer_items_barcode_status", "(company_id, barcode, item_status)");
+    await ensureBranchTransferOpenItemUniqueIndexSafe();
   }
 
   if (await tableExists("branch_receive_logs")) {
@@ -12063,12 +12517,22 @@ async function ensureSchema() {
   }
 
   if (await tableExists("transaction_master")) {
+    await addColumnIfMissingSafe("transaction_master", "idempotency_key", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_master", "reversal_transaction_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_master", "reversed_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("transaction_master", "reversed_by", "INT DEFAULT NULL");
+    await addColumnIfMissing("transaction_master", "reversal_reason", "TEXT DEFAULT NULL");
     await addIndexIfMissing("transaction_master", "idx_txn_company_id", "(company_id, id)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_party", "(company_id, party_id)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_status", "(company_id, status)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_invoice", "(company_id, invoice_no)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_date", "(company_id, voucher_date)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_source_voucher", "(company_id, source_module, voucher_no)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_idempotency", "(company_id, idempotency_key)");
+    await addIndexIfMissing("transaction_master", "idx_txn_reversal_txn", "(company_id, reversal_transaction_id)");
     await addIndexIfMissing("transaction_master", "idx_txn_created", "(created_at)");
+    await ensureTransactionVoucherUniqueIndexSafe();
+    await ensureTransactionIdempotencyUniqueIndexSafe();
   }
 
   if (await tableExists("transaction_types")) {
@@ -12080,6 +12544,7 @@ async function ensureSchema() {
     await addColumnIfMissing("transaction_types", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     await addIndexIfMissing("transaction_types", "idx_transaction_types_company_status", "(company_id, status)");
     await addUniqueIndexIfMissing("transaction_types", "uq_transaction_types_company_name", "(company_id, type_name)");
+    await seedExpensePaymentTransactionTypeSafe();
   }
 
   if (await tableExists("transaction_lines")) {
@@ -12128,9 +12593,30 @@ async function ensureSchema() {
   }
 
   if (await tableExists("cash_ledger")) {
+    await addColumnIfMissing("cash_ledger", "account_id", "INT DEFAULT NULL");
     await addIndexIfMissing("cash_ledger", "idx_cash_company_party", "(company_id, party_id)");
     await addIndexIfMissing("cash_ledger", "idx_cash_transaction", "(transaction_id)");
     await addIndexIfMissing("cash_ledger", "idx_cash_company_date", "(company_id, entry_date)");
+    await addIndexIfMissing("cash_ledger", "idx_cash_account_date", "(company_id, account_id, entry_date)");
+  }
+
+  if (await tableExists("payment_accounts")) {
+    await addColumnIfMissing("payment_accounts", "company_id", "INT NOT NULL");
+    await addColumnIfMissing("payment_accounts", "branch_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("payment_accounts", "account_name", "VARCHAR(255) NOT NULL");
+    await addColumnIfMissing("payment_accounts", "account_type", "VARCHAR(20) NOT NULL DEFAULT 'CASH'");
+    await addColumnIfMissing("payment_accounts", "opening_balance", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("payment_accounts", "active", "TINYINT(1) DEFAULT 1");
+    await addColumnIfMissing("payment_accounts", "created_by", "INT DEFAULT NULL");
+    await addIndexIfMissing("payment_accounts", "idx_payment_accounts_scope", "(company_id, branch_id, account_type, active)");
+  }
+
+  if (await tableExists("daily_cash_closing")) {
+    await addIndexIfMissing("daily_cash_closing", "idx_daily_cash_closing_status", "(company_id, closing_date, status)");
+  }
+
+  if (await tableExists("daily_cash_closing_audit")) {
+    await addIndexIfMissing("daily_cash_closing_audit", "idx_daily_cash_closing_audit_scope", "(company_id, branch_id, closing_date)");
   }
 
   if (await tableExists("metal_ledger")) {
@@ -12237,12 +12723,183 @@ async function recalcPartyBalanceSummary(connection, companyId, partyId, lastTra
   );
 }
 
+const PAYMENT_ACCOUNT_TYPES = new Set(["CASH", "UPI", "BANK", "CARD"]);
+
+function normalizePaymentAccountType(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  return PAYMENT_ACCOUNT_TYPES.has(clean) ? clean : "CASH";
+}
+
+function inferPaymentAccountType(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  if (clean.includes("UPI") || clean.includes("GPAY") || clean.includes("PHONEPE") || clean.includes("PAYTM")) return "UPI";
+  if (clean.includes("CARD") || clean.includes("POS") || clean.includes("DEBIT") || clean.includes("CREDIT")) return "CARD";
+  if (clean.includes("BANK") || clean.includes("NEFT") || clean.includes("RTGS") || clean.includes("IMPS") || clean.includes("TRANSFER")) return "BANK";
+  return "CASH";
+}
+
+async function findOrCreateDefaultPaymentAccount(connection, {
+  companyId,
+  branchId = null,
+  accountType = "CASH",
+  createdBy = null
+} = {}) {
+  const cleanCompanyId = Number(companyId || 0);
+  if (!cleanCompanyId) return null;
+
+  const cleanBranchId = branchId === null || branchId === undefined || branchId === "" ? null : Number(branchId);
+  const cleanAccountType = normalizePaymentAccountType(accountType);
+  const accountName = `${cleanAccountType}${cleanBranchId ? ` Branch ${cleanBranchId}` : " Main"}`;
+  const [rows] = await connection.query(
+    `
+    SELECT id
+    FROM payment_accounts
+    WHERE company_id = ?
+      AND account_type = ?
+      AND COALESCE(branch_id, 0) = COALESCE(?, 0)
+      AND active = 1
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [cleanCompanyId, cleanAccountType, cleanBranchId]
+  );
+  if (rows.length) return Number(rows[0].id);
+
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO payment_accounts
+    (company_id, branch_id, account_name, account_type, opening_balance, active, created_by)
+    VALUES (?, ?, ?, ?, 0, 1, ?)
+    `,
+    [cleanCompanyId, cleanBranchId, accountName, cleanAccountType, createdBy]
+  );
+  return Number(insertResult.insertId || 0) || null;
+}
+
+async function resolvePaymentAccountId(connection, payload = {}) {
+  const explicitAccountId = Number(payload.accountId || payload.account_id || 0);
+  const companyId = Number(payload.companyId || 0);
+  if (!companyId) return null;
+
+  if (explicitAccountId > 0) {
+    const [rows] = await connection.query(
+      `
+      SELECT id, branch_id
+      FROM payment_accounts
+      WHERE id = ?
+        AND company_id = ?
+        AND active = 1
+      LIMIT 1
+      `,
+      [explicitAccountId, companyId]
+    );
+    if (!rows.length) {
+      const error = new Error("Selected payment account is not active or does not belong to this company");
+      error.status = 400;
+      throw error;
+    }
+    const requestedBranchId = payload.branchId === null || payload.branchId === undefined || payload.branchId === "" ? null : Number(payload.branchId);
+    const accountBranchId = rows[0].branch_id === null || rows[0].branch_id === undefined ? null : Number(rows[0].branch_id);
+    if (requestedBranchId !== null && accountBranchId !== null && requestedBranchId !== accountBranchId) {
+      const error = new Error("Selected payment account belongs to another branch");
+      error.status = 403;
+      throw error;
+    }
+    return explicitAccountId;
+  }
+
+  const referenceType = String(payload.referenceType || "").trim().toUpperCase();
+  const shouldAutoAccount = ["PAYMENT_RECEIVED", "EXPENSE_PAYMENT", "CASH_REFUND_PAID", "CASH_ADJUSTMENT"].includes(referenceType)
+    || referenceType.endsWith("_REVERSAL");
+  if (!shouldAutoAccount) return null;
+
+  return findOrCreateDefaultPaymentAccount(connection, {
+    companyId,
+    branchId: payload.branchId ?? null,
+    accountType: inferPaymentAccountType(payload.paymentMode || payload.accountType || payload.entryType),
+    createdBy: payload.createdBy ?? null
+  });
+}
+
+async function assertPaymentAccountBranchAccess(connection, access, accountId) {
+  const cleanAccountId = Number(accountId || 0);
+  if (!cleanAccountId) {
+    const error = new Error("Payment account is required");
+    error.status = 400;
+    throw error;
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT *
+    FROM payment_accounts
+    WHERE id = ?
+      AND company_id = ?
+    LIMIT 1
+    `,
+    [cleanAccountId, access.companyScope]
+  );
+  const account = rows[0] || null;
+  if (!account) {
+    const error = new Error("Payment account not found");
+    error.status = 404;
+    throw error;
+  }
+
+  if (access.isBranchLocked) {
+    if (!account.branch_id || Number(account.branch_id) !== Number(access.userBranchId)) {
+      const error = new Error("You cannot access payment accounts outside your branch");
+      error.status = 403;
+      throw error;
+    }
+  }
+
+  return account;
+}
+
+async function assertDailyClosingOpen(connection, {
+  companyId,
+  branchId = null,
+  entryDate = null
+} = {}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanDate = String(entryDate || getTodayDateOnly()).trim();
+  if (!cleanCompanyId || !cleanDate) return;
+
+  const cleanBranchId = branchId === null || branchId === undefined || branchId === "" ? null : Number(branchId);
+  const [rows] = await connection.query(
+    `
+    SELECT id
+    FROM daily_cash_closing
+    WHERE company_id = ?
+      AND COALESCE(branch_id, 0) = COALESCE(?, 0)
+      AND closing_date = ?
+      AND status = 'CLOSED'
+    LIMIT 1
+    `,
+    [cleanCompanyId, cleanBranchId, cleanDate]
+  );
+  if (rows.length) {
+    const error = new Error("This branch day is closed. Reopen the daily closing before posting cash movement.");
+    error.status = 409;
+    throw error;
+  }
+}
+
 async function createCashLedgerEntry(connection, payload) {
   const companyId = Number(payload.companyId);
   const partyId = Number(payload.partyId);
   const transactionId = Number(payload.transactionId);
   const debitAmount = toNumber(payload.debitAmount);
   const creditAmount = toNumber(payload.creditAmount);
+  const entryDate = String(payload.entryDate || getTodayDateOnly()).trim();
+  const accountId = await resolvePaymentAccountId(connection, payload);
+
+  await assertDailyClosingOpen(connection, {
+    companyId,
+    branchId: payload.branchId ?? null,
+    entryDate
+  });
 
   const [balanceRows] = await connection.query(
     `
@@ -12263,20 +12920,21 @@ async function createCashLedgerEntry(connection, payload) {
     INSERT INTO cash_ledger
     (
       company_id, party_id, transaction_id, entry_date, entry_type,
-      debit_amount, credit_amount, running_balance,
+      debit_amount, credit_amount, running_balance, account_id,
       reference_type, reference_no, remarks, created_by
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       companyId,
       partyId,
       transactionId,
-      String(payload.entryDate || getTodayDateOnly()).trim(),
+      entryDate,
       normalizeCashEntryType(payload.entryType),
       debitAmount,
       creditAmount,
       runningBalance,
+      accountId,
       String(payload.referenceType || "").trim(),
       String(payload.referenceNo || "").trim(),
       String(payload.remarks || "").trim(),
@@ -12427,6 +13085,268 @@ async function findOrCreateBillingParty(connection, payload) {
     party_type: "CUSTOMER",
     mobile,
     gst_no: gstNo
+  };
+}
+
+async function findOrCreateExpenseParty(connection, payload) {
+  const companyId = Number(payload.companyId);
+  const createdBy = payload.createdBy ?? null;
+  const partyName = "Company Expense";
+
+  const [existingRows] = await connection.query(
+    `
+    SELECT *
+    FROM party_master
+    WHERE company_id = ?
+      AND LOWER(TRIM(party_name)) = LOWER(TRIM(?))
+      AND party_type = 'INTERNAL'
+    ORDER BY id ASC
+    LIMIT 1
+    `,
+    [companyId, partyName]
+  );
+
+  if (existingRows.length) {
+    const party = existingRows[0];
+    await ensurePartyBalanceSummaryRow(connection, companyId, party.id);
+    return party;
+  }
+
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO party_master
+    (
+      company_id, party_code, party_name, display_name, party_type, status,
+      remarks, created_by
+    )
+    VALUES (?, ?, ?, ?, 'INTERNAL', 'ACTIVE', ?, ?)
+    `,
+    [
+      companyId,
+      `EXP-${Date.now()}`,
+      partyName,
+      partyName,
+      "Auto-created for expense ledger posting",
+      createdBy
+    ]
+  );
+
+  await ensurePartyBalanceSummaryRow(connection, companyId, insertResult.insertId);
+
+  return {
+    id: insertResult.insertId,
+    company_id: companyId,
+    party_name: partyName,
+    display_name: partyName,
+    party_type: "INTERNAL"
+  };
+}
+
+async function getExistingTransactionForRetry(connection, companyId, { idempotencyKey = "", voucherNo = "", sourceModule = "" } = {}) {
+  const cleanIdempotencyKey = String(idempotencyKey || "").trim();
+  const cleanVoucherNo = String(voucherNo || "").trim();
+  const cleanSourceModule = String(sourceModule || "").trim();
+
+  if (cleanIdempotencyKey) {
+    const [rows] = await connection.query(
+      `
+      SELECT id, voucher_no
+      FROM transaction_master
+      WHERE company_id = ?
+        AND idempotency_key = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [companyId, cleanIdempotencyKey]
+    );
+    if (rows.length) return rows[0];
+  }
+
+  if (cleanVoucherNo && cleanSourceModule) {
+    const [rows] = await connection.query(
+      `
+      SELECT id, voucher_no
+      FROM transaction_master
+      WHERE company_id = ?
+        AND voucher_no = ?
+        AND source_module = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [companyId, cleanVoucherNo, cleanSourceModule]
+    );
+    if (rows.length) return rows[0];
+  }
+
+  if (cleanVoucherNo) {
+    const [rows] = await connection.query(
+      `
+      SELECT id, voucher_no
+      FROM transaction_master
+      WHERE company_id = ?
+        AND voucher_no = ?
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [companyId, cleanVoucherNo]
+    );
+    if (rows.length) return rows[0];
+  }
+
+  return null;
+}
+
+function buildDuplicateTransactionResponse(existingTransaction, { idempotent = true } = {}) {
+  return {
+    success: true,
+    duplicate: true,
+    idempotent,
+    message: "Transaction already exists; returning existing transaction",
+    transactionId: existingTransaction?.id ?? null,
+    voucherNo: existingTransaction?.voucher_no || ""
+  };
+}
+
+async function postExpenseToTransactionFoundation(connection, payload) {
+  const companyId = Number(payload.companyId);
+  const expenseId = Number(payload.expenseId);
+  const createdBy = payload.createdBy ?? null;
+  const amount = toNumber(payload.amount);
+  const expenseDate = String(payload.expenseDate || getTodayDateOnly()).trim();
+  const expenseTime = String(payload.expenseTime || "").trim();
+  const person = String(payload.person || "").trim();
+  const category = String(payload.category || "").trim();
+  const reason = String(payload.reason || "").trim();
+  const note = String(payload.note || "").trim();
+  const branchId = payload.branchId ?? null;
+  const voucherNo = `EXP-${expenseId}`;
+  const idempotencyKey = `EXPENSE-${companyId}-${expenseId}`;
+
+  const existing = await getExistingTransactionForRetry(connection, companyId, {
+    idempotencyKey,
+    voucherNo,
+    sourceModule: "expense-manager"
+  });
+  if (existing?.id) return existing;
+
+  const party = await findOrCreateExpenseParty(connection, { companyId, createdBy });
+  const remarks = reason || note || `Expense paid to ${person || "expense"}`;
+
+  const [txnInsert] = await connection.query(
+    `
+    INSERT INTO transaction_master
+    (
+      company_id, voucher_no, voucher_date, voucher_time, transaction_type,
+      party_id, party_type, status, reference_no, source_module, idempotency_key,
+      payment_mode, payment_status, remarks, note, created_by
+    )
+    VALUES (?, ?, ?, ?, 'EXPENSE_PAYMENT', ?, 'INTERNAL', 'POSTED', ?, 'expense-manager', ?, 'CASH', 'PAID', ?, ?, ?)
+    `,
+    [
+      companyId,
+      voucherNo,
+      expenseDate || null,
+      expenseTime || null,
+      party.id,
+      `EXPENSE-${expenseId}`,
+      idempotencyKey,
+      remarks,
+      `${category}${person ? ` | ${person}` : ""}${note ? ` | ${note}` : ""}`.slice(0, 1000),
+      createdBy
+    ]
+  );
+
+  const transactionId = Number(txnInsert.insertId || 0);
+
+  await connection.query(
+    `
+    INSERT INTO transaction_lines
+    (
+      transaction_id, line_no, item_name, qty, line_amount, remarks
+    )
+    VALUES (?, 1, ?, 1, ?, ?)
+    `,
+    [
+      transactionId,
+      category || "Expense",
+      amount,
+      `${person || "Expense"}${reason ? ` - ${reason}` : ""}`
+    ]
+  );
+
+  await createCashLedgerEntry(connection, {
+    companyId,
+    partyId: party.id,
+    transactionId,
+    entryDate: expenseDate,
+    entryType: "CREDIT",
+    debitAmount: 0,
+    creditAmount: amount,
+    referenceType: "EXPENSE_PAYMENT",
+    referenceNo: voucherNo,
+    remarks,
+    paymentMode: payload.paymentMode || "CASH",
+    accountId: payload.accountId ?? payload.paymentAccountId ?? null,
+    branchId,
+    createdBy
+  });
+
+  await recalcPartyBalanceSummary(connection, companyId, party.id, transactionId);
+
+  if (await columnExists("invoice_transaction_link", "branch_id")) {
+    await connection.query(
+      `
+      INSERT INTO invoice_transaction_link
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'EXPENSE_PAYMENT', ?, ?)
+      `,
+      [
+        companyId,
+        `EXPENSE-${expenseId}`,
+        transactionId,
+        branchId,
+        "Expense ledger posting",
+        createdBy
+      ]
+    );
+  }
+
+  return {
+    id: transactionId,
+    voucher_no: voucherNo
+  };
+}
+
+async function getExpenseByIdempotencyKey(connection, companyId, idempotencyKey) {
+  const cleanKey = String(idempotencyKey || "").trim();
+  if (!cleanKey) return null;
+
+  const [rows] = await connection.query(
+    `
+    SELECT
+      e.*,
+      DATE_FORMAT(e.expense_date, '%Y-%m-%d') AS date,
+      TIME_FORMAT(e.expense_time, '%H:%i') AS time
+    FROM expenses e
+    WHERE e.company_id = ?
+      AND e.idempotency_key = ?
+    ORDER BY e.id DESC
+    LIMIT 1
+    `,
+    [companyId, cleanKey]
+  );
+
+  return rows[0] || null;
+}
+
+function buildExpenseRetryResponse(expenseRow) {
+  return {
+    success: true,
+    duplicate: true,
+    idempotent: true,
+    message: "Expense already exists; returning existing expense",
+    expense: normalizeExpenseRow(expenseRow || {}),
+    transactionId: expenseRow?.transaction_id ?? null
   };
 }
 
@@ -13020,11 +13940,14 @@ async function postBillingToTransactionFoundation(connection, payload) {
       entryType: "CREDIT",
       debitAmount: 0,
       creditAmount: paidAmount,
-      referenceType: "PAYMENT_RECEIVED",
-      referenceNo: paymentVoucherNo,
-      remarks: "Billing payment received posted",
-      createdBy
-    });
+    referenceType: "PAYMENT_RECEIVED",
+    referenceNo: paymentVoucherNo,
+    remarks: "Billing payment received posted",
+    paymentMode,
+    accountId: payload.accountId ?? payload.paymentAccountId ?? null,
+    branchId,
+    createdBy
+  });
 
     lastTransactionId = paymentTransactionId;
   }
@@ -13136,6 +14059,8 @@ async function postBillingToTransactionFoundation(connection, payload) {
         referenceType: "METAL_SETTLEMENT_RECEIVED",
         referenceNo: metalVoucherNo,
         remarks: "Billing metal settlement adjusted against receivable",
+        paymentMode: "METAL",
+        branchId,
         createdBy
       });
     }
@@ -13347,6 +14272,13 @@ app.get("/ready", async (req, res) => {
       port: startupStatus.port,
       error: getErrorDetail(error)
     });
+  }
+
+  if (await tableExists("expenses")) {
+    await addIndexIfMissingSafe("expenses", "idx_expenses_company_transaction", "(company_id, transaction_id)");
+    await addIndexIfMissingSafe("expenses", "idx_expenses_company_branch", "(company_id, branch_id)");
+    await addIndexIfMissingSafe("expenses", "idx_expenses_company_idempotency", "(company_id, idempotency_key)");
+    await ensureExpenseIdempotencyUniqueIndexSafe();
   }
 });
 
@@ -14947,6 +15879,7 @@ app.get("/expenses", authMiddleware, async (req, res) => {
 
 app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
+  let expenseIdempotencyLookup = null;
 
   try {
     const access = await resolveBranchAccessContext(req, {
@@ -14956,6 +15889,9 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
     if (!access.ok) {
       return sendAccessError(res, access);
     }
+    if (access.isSuperAdmin) {
+      return sendSuperAdminReadOnlyError(res);
+    }
 
     const person = String(req.body.person || "").trim();
     const expenseDate = String(req.body.date || req.body.expenseDate || "").trim();
@@ -14964,6 +15900,13 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
     const category = String(req.body.category || "").trim();
     const reason = String(req.body.reason || "").trim();
     const note = String(req.body.note || "").trim();
+    const idempotencyKey = String(
+      req.body.idempotency_key ||
+      req.body.idempotencyKey ||
+      req.body.request_id ||
+      req.body.requestId ||
+      ""
+    ).trim().slice(0, 120);
 
     if (!person || !expenseDate || amount <= 0 || !category) {
       return res.status(400).json({
@@ -14973,6 +15916,33 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
     }
 
     connection = await pool.getConnection();
+    await connection.beginTransaction();
+    expenseIdempotencyLookup = {
+      companyId: access.companyScope,
+      idempotencyKey
+    };
+
+    const hasExpenseBranchColumn = await columnExists("expenses", "branch_id");
+    const hasExpenseTransactionColumn = await columnExists("expenses", "transaction_id");
+    const hasExpenseIdempotencyColumn = await columnExists("expenses", "idempotency_key");
+    if (hasExpenseIdempotencyColumn && idempotencyKey) {
+      const existingExpense = await getExpenseByIdempotencyKey(connection, access.companyScope, idempotencyKey);
+      if (existingExpense?.id) {
+        await connection.commit();
+        return res.json(buildExpenseRetryResponse(existingExpense));
+      }
+    }
+
+    let expenseBranchId = null;
+    if (hasExpenseBranchColumn) {
+      const requestedBranchId = getRequestedBranchScopeValue(req);
+      expenseBranchId = access.isBranchLocked ? access.userBranchId : requestedBranchId;
+      if (expenseBranchId) {
+        const activeBranch = await requireActiveBranchForCompany(connection, access.companyScope, expenseBranchId);
+        expenseBranchId = activeBranch.id;
+      }
+    }
+
     const [insertResult] = await connection.query(
       `
       INSERT INTO expenses
@@ -14985,12 +15955,14 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
         category,
         reason,
         note,
+        ${hasExpenseIdempotencyColumn ? "idempotency_key," : ""}
+        ${hasExpenseBranchColumn ? "branch_id," : ""}
         created_by,
         updated_by,
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${hasExpenseIdempotencyColumn ? "?," : ""} ${hasExpenseBranchColumn ? "?," : ""} ?, ?, NOW(), NOW())
       `,
       [
         access.companyScope,
@@ -15001,10 +15973,56 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
         category,
         reason,
         note,
+        ...(hasExpenseIdempotencyColumn ? [idempotencyKey] : []),
+        ...(hasExpenseBranchColumn ? [expenseBranchId] : []),
         access.actingUserId ?? getRequestedUserId(req),
         access.actingUserId ?? getRequestedUserId(req)
       ]
     );
+
+    const postedTransaction = await postExpenseToTransactionFoundation(connection, {
+      companyId: access.companyScope,
+      expenseId: insertResult.insertId,
+      createdBy: access.actingUserId ?? getRequestedUserId(req),
+      person,
+      expenseDate,
+      expenseTime,
+      amount,
+      category,
+      reason,
+      note,
+      branchId: expenseBranchId
+    });
+
+    if (postedTransaction?.id && hasExpenseTransactionColumn) {
+      await connection.query(
+        `
+        UPDATE expenses
+        SET transaction_id = ?,
+            updated_at = NOW()
+        WHERE id = ? AND company_id = ?
+        `,
+        [postedTransaction.id, insertResult.insertId, access.companyScope]
+      );
+    }
+
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: access.actingUserId ?? getRequestedUserId(req) ?? null,
+      actionType: "EXPENSE_TRANSACTION_POSTED",
+      entityType: "EXPENSE",
+      entityId: String(insertResult.insertId),
+      moduleName: "expense-manager",
+      status: "success",
+      message: "Expense posted to transaction cash ledger",
+      afterData: {
+        expenseId: insertResult.insertId,
+        transactionId: postedTransaction?.id ?? null,
+        amount,
+        category,
+        branchId: expenseBranchId
+      }
+    });
 
     const [rows] = await connection.query(
       `
@@ -15019,12 +16037,29 @@ app.post("/expenses", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNT
       [insertResult.insertId]
     );
 
+    await connection.commit();
+
     return res.json({
       success: true,
-      message: "Expense saved successfully",
+      message: "Expense saved and posted to ledger successfully",
       expense: normalizeExpenseRow(rows[0] || {})
     });
   } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+    if (isDuplicateKeyError(error) && expenseIdempotencyLookup?.companyId && expenseIdempotencyLookup?.idempotencyKey) {
+      try {
+        const existingExpense = await getExpenseByIdempotencyKey(pool, expenseIdempotencyLookup.companyId, expenseIdempotencyLookup.idempotencyKey);
+        if (existingExpense?.id) {
+          return res.json(buildExpenseRetryResponse(existingExpense));
+        }
+      } catch (lookupError) {
+        console.error("Duplicate expense lookup after key error failed:", lookupError);
+      }
+    }
     console.error("Expense save error:", error);
     return res.status(500).json({
       success: false,
@@ -15074,10 +16109,11 @@ app.put("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCO
     }
 
     connection = await pool.getConnection();
+    const hasExpenseTransactionColumn = await columnExists("expenses", "transaction_id");
 
     const [existingRows] = await connection.query(
       `
-      SELECT id
+      SELECT id${hasExpenseTransactionColumn ? ", transaction_id" : ""}
       FROM expenses
       WHERE id = ? AND company_id = ?
       LIMIT 1
@@ -15089,6 +16125,13 @@ app.put("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCO
       return res.status(404).json({
         success: false,
         message: "Expense not found"
+      });
+    }
+
+    if (hasExpenseTransactionColumn && Number(existingRows[0]?.transaction_id || 0) > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "This expense is already posted to the transaction ledger. Edit is blocked until a reversal workflow is available."
       });
     }
 
@@ -15167,6 +16210,31 @@ app.delete("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "A
       return res.status(400).json({
         success: false,
         message: "Expense id missing"
+      });
+    }
+
+    const hasExpenseTransactionColumn = await columnExists("expenses", "transaction_id");
+    const [existingRows] = await pool.query(
+      `
+      SELECT id${hasExpenseTransactionColumn ? ", transaction_id" : ""}
+      FROM expenses
+      WHERE id = ? AND company_id = ?
+      LIMIT 1
+      `,
+      [expenseId, access.companyScope]
+    );
+
+    if (!existingRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found"
+      });
+    }
+
+    if (hasExpenseTransactionColumn && Number(existingRows[0]?.transaction_id || 0) > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "This expense is already posted to the transaction ledger. Delete is blocked until a reversal workflow is available."
       });
     }
 
@@ -21631,6 +22699,9 @@ app.post("/returns/refund-payables/:id/cash-refund", authMiddleware, checkRole([
       referenceType: "CASH_REFUND_PAID",
       referenceNo: voucherNo,
       remarks: remarks || `Cash refund paid for ${payable.invoice_number || payable.barcode || payableId}`,
+      paymentMode,
+      accountId: req.body.accountId ?? req.body.account_id ?? req.body.paymentAccountId ?? null,
+      branchId: returnBranchId,
       createdBy: access.actingUserId
     });
 
@@ -26561,6 +27632,9 @@ app.post("/sales-history/update-payment", authMiddleware, checkRole(["SUPERADMIN
       referenceType: "PAYMENT_RECEIVED",
       referenceNo: paymentVoucherNo,
       remarks: note || "Sales history payment received",
+      paymentMode,
+      accountId: req.body.accountId ?? req.body.account_id ?? req.body.paymentAccountId ?? null,
+      branchId: req.body.branchId ?? req.body.branch_id ?? saleRow.branch_id ?? null,
       createdBy
     });
 
@@ -30830,23 +31904,42 @@ app.get("/branch-analytics/overview", authMiddleware, async (req, res) => {
       stockScope.params
     );
 
+    const branchAttributionFlags = await getBranchAttributionColumnFlags();
+    const salesBranchExpr = buildSalesBranchAttributionSql(branchAttributionFlags, {
+      itemAlias: "si",
+      saleAlias: "sh",
+      stockAlias: "s"
+    });
+    const salesWhereParts = [];
+    const salesParams = [];
+    if (access.companyScope !== null) {
+      salesWhereParts.push("si.company_id = ?");
+      salesParams.push(access.companyScope);
+    } else {
+      salesWhereParts.push("1 = 1");
+    }
+    if (branchScope.isBranchFiltered) {
+      salesWhereParts.push(`${salesBranchExpr} = ?`);
+      salesParams.push(branchScope.branchId);
+    }
+    salesWhereParts.push("COALESCE(si.is_deleted, 0) = 0");
+
     const [salesRows] = await pool.query(
       `
       SELECT
-        s.current_branch_id,
+        ${salesBranchExpr} AS branch_id,
         COUNT(si.id) AS sold_qty,
         COALESCE(SUM(COALESCE(NULLIF(si.customer_line_amount, 0), NULLIF(si.company_line_amount, 0), sh.total_amount, 0)), 0) AS sales_amount
       FROM sales_items si
       LEFT JOIN sales_history sh ON sh.id = si.sale_id AND sh.company_id = si.company_id
       LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
-      WHERE ${stockScope.whereSql}
-        AND COALESCE(si.is_deleted, 0) = 0
-      GROUP BY s.current_branch_id
+      WHERE ${salesWhereParts.join(" AND ")}
+      GROUP BY ${salesBranchExpr}
       `,
-      stockScope.params
+      salesParams
     );
 
-    const salesByBranch = new Map(salesRows.map((row) => [Number(row.current_branch_id || 0), row]));
+    const salesByBranch = new Map(salesRows.map((row) => [Number(row.branch_id || 0), row]));
     const summariesByBranch = new Map(stockRows.map((row) => [Number(row.current_branch_id || 0), row]));
     const branchSummaries = branchRows.map((branch) => {
       const stock = summariesByBranch.get(Number(branch.id)) || {};
@@ -30910,8 +32003,22 @@ app.get("/branch-analytics/branch-summary", authMiddleware, async (req, res) => 
       stockScope.params
     );
 
-    const salesWhere = [stockScope.whereSql, "COALESCE(si.is_deleted, 0) = 0"];
-    const salesParams = [...stockScope.params];
+    const branchAttributionFlags = await getBranchAttributionColumnFlags();
+    const salesBranchExpr = buildSalesBranchAttributionSql(branchAttributionFlags, {
+      itemAlias: "si",
+      saleAlias: "sh",
+      stockAlias: "s"
+    });
+    const salesWhere = ["COALESCE(si.is_deleted, 0) = 0"];
+    const salesParams = [];
+    if (access.companyScope !== null) {
+      salesWhere.push("si.company_id = ?");
+      salesParams.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      salesWhere.push(`${salesBranchExpr} = ?`);
+      salesParams.push(branchScope.branchId);
+    }
     appendDateRangeFilter(salesWhere, salesParams, "si.created_at", dateRange);
     const [salesSummary] = await pool.query(
       `
@@ -31300,9 +32407,23 @@ app.get("/branch-analytics/movement-ledger", authMiddleware, async (req, res) =>
     addFilteredRows(transferRows.filter((row) => normalizeMovementType(row.item_status) === "RECEIVED").map((row) => ({ ...row, branch_id: row.to_branch_id, movement_type: "RECEIVED", movement_at: row.received_at || row.created_at, source_table: "branch_transfer_items" })));
     addFilteredRows(transferRows.filter((row) => normalizeMovementType(row.item_status) === "SHORTAGE").map((row) => ({ ...row, branch_id: row.from_branch_id, movement_type: "SHORTAGE", movement_at: row.received_at || row.created_at, source_table: "branch_transfer_items" })));
 
+    const branchAttributionFlags = await getBranchAttributionColumnFlags();
+    const salesBranchExpr = buildSalesBranchAttributionSql(branchAttributionFlags, {
+      itemAlias: "si",
+      saleAlias: "sh",
+      stockAlias: "s"
+    });
+    const returnBranchExpr = buildReturnBranchAttributionSql(branchAttributionFlags, {
+      returnAlias: "rh",
+      stockAlias: "s"
+    });
+
     const soldWhereParts = [scopeSql.replace("company_id", "si.company_id"), "COALESCE(si.is_deleted, 0) = 0"];
-    const soldParams = [...scopeParams, ...branchStockParams];
-    if (branchScope.isBranchFiltered) soldWhereParts.push("s.current_branch_id = ?");
+    const soldParams = [...scopeParams];
+    if (branchScope.isBranchFiltered) {
+      soldWhereParts.push(`${salesBranchExpr} = ?`);
+      soldParams.push(branchScope.branchId);
+    }
     appendLedgerQueryFilters(soldWhereParts, soldParams, {
       barcodeColumn: "si.barcode",
       dateColumn: "si.created_at",
@@ -31311,8 +32432,9 @@ app.get("/branch-analytics/movement-ledger", authMiddleware, async (req, res) =>
 
     const [soldRows] = await pool.query(
       `
-      SELECT si.id AS source_id, si.company_id, si.barcode, s.current_branch_id AS branch_id, 'SOLD' AS movement_type, si.created_at AS movement_at, si.product_name, si.weight, si.invoice_number, 'sales_items' AS source_table
+      SELECT si.id AS source_id, si.company_id, si.barcode, ${salesBranchExpr} AS branch_id, 'SOLD' AS movement_type, si.created_at AS movement_at, si.product_name, si.weight, si.invoice_number, 'sales_items' AS source_table
       FROM sales_items si
+      LEFT JOIN sales_history sh ON sh.id = si.sale_id AND sh.company_id = si.company_id
       LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
       WHERE ${soldWhereParts.join(" AND ")}
       ORDER BY si.id DESC
@@ -31323,8 +32445,11 @@ app.get("/branch-analytics/movement-ledger", authMiddleware, async (req, res) =>
     addFilteredRows(soldRows);
 
     const returnWhereParts = [scopeSql.replace("company_id", "rh.company_id")];
-    const returnParams = [...scopeParams, ...branchStockParams];
-    if (branchScope.isBranchFiltered) returnWhereParts.push("s.current_branch_id = ?");
+    const returnParams = [...scopeParams];
+    if (branchScope.isBranchFiltered) {
+      returnWhereParts.push(`${returnBranchExpr} = ?`);
+      returnParams.push(branchScope.branchId);
+    }
     appendLedgerQueryFilters(returnWhereParts, returnParams, {
       barcodeColumn: "rh.barcode",
       dateColumn: "COALESCE(rh.return_date, rh.created_at)"
@@ -31335,7 +32460,7 @@ app.get("/branch-analytics/movement-ledger", authMiddleware, async (req, res) =>
 
     const [returnRows] = await pool.query(
       `
-      SELECT rh.id AS source_id, rh.company_id, rh.barcode, s.current_branch_id AS branch_id, CASE WHEN UPPER(COALESCE(rh.return_type, '')) = 'DAMAGED_RETURN' THEN 'DAMAGED' ELSE 'RETURNED' END AS movement_type, COALESCE(rh.return_date, rh.created_at) AS movement_at, rh.product_name, rh.weight, rh.invoice_number, 'return_history' AS source_table
+      SELECT rh.id AS source_id, rh.company_id, rh.barcode, ${returnBranchExpr} AS branch_id, CASE WHEN UPPER(COALESCE(rh.return_type, '')) = 'DAMAGED_RETURN' THEN 'DAMAGED' ELSE 'RETURNED' END AS movement_type, COALESCE(rh.return_date, rh.created_at) AS movement_at, rh.product_name, rh.weight, rh.invoice_number, 'return_history' AS source_table
       FROM return_history rh
       LEFT JOIN stock s ON s.company_id = rh.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
       WHERE ${returnWhereParts.join(" AND ")}
@@ -31400,13 +32525,32 @@ app.get("/branch-analytics/reconciliation", authMiddleware, async (req, res) => 
         ? [branchScope.branchId, branchScope.branchId, ...transferParams]
         : transferParams
     );
-    const salesWhere = [stockScope.whereSql, "COALESCE(si.is_deleted, 0) = 0"];
-    const salesParams = [...stockScope.params];
+    const branchAttributionFlags = await getBranchAttributionColumnFlags();
+    const salesBranchExpr = buildSalesBranchAttributionSql(branchAttributionFlags, {
+      itemAlias: "si",
+      saleAlias: "sh",
+      stockAlias: "s"
+    });
+    const returnBranchExpr = buildReturnBranchAttributionSql(branchAttributionFlags, {
+      returnAlias: "rh",
+      stockAlias: "s"
+    });
+    const salesWhere = ["COALESCE(si.is_deleted, 0) = 0"];
+    const salesParams = [];
+    if (access.companyScope !== null) {
+      salesWhere.push("si.company_id = ?");
+      salesParams.push(access.companyScope);
+    }
+    if (branchScope.isBranchFiltered) {
+      salesWhere.push(`${salesBranchExpr} = ?`);
+      salesParams.push(branchScope.branchId);
+    }
     appendDateRangeFilter(salesWhere, salesParams, "si.created_at", dateRange);
     const [salesRows] = await pool.query(
       `
       SELECT COUNT(si.id) AS sold, COALESCE(SUM(si.weight), 0) AS sold_weight
       FROM sales_items si
+      LEFT JOIN sales_history sh ON sh.id = si.sale_id AND sh.company_id = si.company_id
       LEFT JOIN stock s ON s.company_id = si.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(si.barcode))
       WHERE ${salesWhere.join(" AND ")}
       `,
@@ -31421,14 +32565,27 @@ app.get("/branch-analytics/reconciliation", authMiddleware, async (req, res) => 
       `,
       stockScope.params
     );
+    const returnWhere = [];
+    const returnParams = [];
+    if (access.companyScope !== null) {
+      returnWhere.push("rh.company_id = ?");
+      returnParams.push(access.companyScope);
+    } else {
+      returnWhere.push("1 = 1");
+    }
+    if (branchScope.isBranchFiltered) {
+      returnWhere.push(`${returnBranchExpr} = ?`);
+      returnParams.push(branchScope.branchId);
+    }
+    appendDateRangeFilter(returnWhere, returnParams, "COALESCE(rh.return_date, rh.created_at)", dateRange);
     const [returnRows] = await pool.query(
       `
       SELECT COUNT(rh.id) AS returned
       FROM return_history rh
       LEFT JOIN stock s ON s.company_id = rh.company_id AND UPPER(TRIM(s.barcode)) = UPPER(TRIM(rh.barcode))
-      WHERE ${stockScope.whereSql.replaceAll("s.", "s.")}
+      WHERE ${returnWhere.join(" AND ")}
       `,
-      stockScope.params
+      returnParams
     );
     const closingStock = Number(closingRows[0]?.closing_stock || 0);
     const inward = Number(transferRows[0]?.inward_transfer || 0);
@@ -32574,34 +33731,51 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
       });
     }
 
-    const transferNo = await generateTransferNumberForCompany(connection, access.companyScope);
-    const [insertResult] = await connection.query(
-      `
-      INSERT INTO branch_transfers
-      (
-        company_id,
-        transfer_no,
-        from_branch_id,
-        to_branch_id,
-        status,
-        challan_no,
-        notes,
-        created_by,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, 'CREATED', ?, ?, ?, NOW(), NOW())
-      `,
-      [
-        access.companyScope,
-        transferNo,
-        fromBranchId,
-        toBranchId,
-        challanNo || null,
-        notes || null,
-        access.actingUserId ?? null
-      ]
-    );
+    let insertResult = null;
+    let lastDuplicateError = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const transferNo = await generateTransferNumberForCompany(connection, access.companyScope);
+      try {
+        const [result] = await connection.query(
+          `
+          INSERT INTO branch_transfers
+          (
+            company_id,
+            transfer_no,
+            from_branch_id,
+            to_branch_id,
+            status,
+            challan_no,
+            notes,
+            created_by,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, 'CREATED', ?, ?, ?, NOW(), NOW())
+          `,
+          [
+            access.companyScope,
+            transferNo,
+            fromBranchId,
+            toBranchId,
+            challanNo || null,
+            notes || null,
+            access.actingUserId ?? null
+          ]
+        );
+        insertResult = result;
+        break;
+      } catch (insertError) {
+        if (!isDuplicateKeyError(insertError)) {
+          throw insertError;
+        }
+        lastDuplicateError = insertError;
+      }
+    }
+
+    if (!insertResult?.insertId) {
+      throw lastDuplicateError || new Error("Transfer number allocation failed");
+    }
 
     const transfer = await getTransferForAccess(connection, access, insertResult.insertId);
     await writeBranchTransferAuditSafe(connection, req, access, {
@@ -37089,6 +38263,7 @@ app.get("/transaction/parties", authMiddleware, async (req, res) => {
 
 app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ACCOUNTS"]), async (req, res) => {
   let connection;
+  let duplicateLookup = null;
 
   try {
     const access = await resolveAccessContext(req, {
@@ -37116,6 +38291,19 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
     const processLotNo = String(req.body.process_lot_no || req.body.processLotNo || "").trim();
     const karigarId = req.body.karigar_id ?? req.body.karigarId ?? null;
     const sourceModule = String(req.body.source_module || req.body.sourceModule || "transaction_phase1").trim();
+    const idempotencyKey = String(
+      req.body.idempotency_key ||
+      req.body.idempotencyKey ||
+      req.body.request_id ||
+      req.body.requestId ||
+      ""
+    ).trim().slice(0, 120);
+    duplicateLookup = {
+      companyId: finalCompanyId,
+      idempotencyKey,
+      voucherNo,
+      sourceModule
+    };
     const paymentMode = String(req.body.payment_mode || req.body.paymentMode || "").trim();
     const paymentStatus = String(req.body.payment_status || req.body.paymentStatus || "").trim();
     const remarks = String(req.body.remarks || "").trim();
@@ -37158,6 +38346,30 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
     }
 
     const finalPartyType = normalizePartyType(req.body.party_type || req.body.partyType || party.party_type);
+    const existingTransaction = await getExistingTransactionForRetry(connection, finalCompanyId, {
+      idempotencyKey,
+      voucherNo,
+      sourceModule
+    });
+    if (existingTransaction?.id) {
+      await connection.commit();
+      await writeAuditLogSafe(pool, req, {
+        companyId: finalCompanyId,
+        userId: finalUserId ?? null,
+        actionType: "TRANSACTION_DUPLICATE_RETRY",
+        entityType: "TRANSACTION",
+        entityId: String(existingTransaction.id),
+        moduleName: "transaction",
+        status: "success",
+        message: "Duplicate manual transaction retry returned existing transaction",
+        metadata: {
+          voucherNo,
+          sourceModule,
+          hasIdempotencyKey: Boolean(idempotencyKey)
+        }
+      });
+      return res.json(buildDuplicateTransactionResponse(existingTransaction));
+    }
 
     const [insertResult] = await connection.query(
       `
@@ -37165,10 +38377,10 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
       (
         company_id, voucher_no, voucher_date, voucher_time, transaction_type,
         party_id, party_type, status, reference_no, invoice_no,
-        purchase_no, lot_no, process_lot_no, karigar_id, source_module,
+        purchase_no, lot_no, process_lot_no, karigar_id, source_module, idempotency_key,
         payment_mode, payment_status, remarks, note, created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         finalCompanyId,
@@ -37186,6 +38398,7 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
         processLotNo,
         karigarId || null,
         sourceModule,
+        idempotencyKey,
         paymentMode,
         paymentStatus,
         remarks,
@@ -37307,6 +38520,9 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
         referenceType: transactionType,
         referenceNo: voucherNo,
         remarks,
+        paymentMode,
+        accountId: req.body.accountId ?? req.body.account_id ?? req.body.paymentAccountId ?? null,
+        branchId: req.body.branchId ?? req.body.branch_id ?? null,
         createdBy: finalUserId
       });
     }
@@ -37402,6 +38618,31 @@ app.post("/transaction/transactions", authMiddleware, checkRole(["SUPERADMIN", "
     });
   } catch (error) {
     if (connection) await connection.rollback();
+    if (isDuplicateKeyError(error) && duplicateLookup?.companyId) {
+      try {
+        const existingTransaction = await getExistingTransactionForRetry(pool, duplicateLookup.companyId, duplicateLookup);
+        if (existingTransaction?.id) {
+          await writeAuditLogSafe(pool, req, {
+            companyId: duplicateLookup.companyId,
+            userId: getRequestedUserId(req) ?? null,
+            actionType: "TRANSACTION_DUPLICATE_KEY_RETRY",
+            entityType: "TRANSACTION",
+            entityId: String(existingTransaction.id),
+            moduleName: "transaction",
+            status: "success",
+            message: "Duplicate-key manual transaction retry returned existing transaction",
+            metadata: {
+              voucherNo: duplicateLookup.voucherNo,
+              sourceModule: duplicateLookup.sourceModule,
+              hasIdempotencyKey: Boolean(duplicateLookup.idempotencyKey)
+            }
+          });
+          return res.json(buildDuplicateTransactionResponse(existingTransaction));
+        }
+      } catch (lookupError) {
+        console.error("Duplicate transaction lookup after key error failed:", lookupError);
+      }
+    }
     console.error("Create transaction error:", error);
     return res.status(500).json({
       success: false,
@@ -37747,6 +38988,1686 @@ app.get("/transaction/metal-ledger", authMiddleware, async (req, res) => {
       message: "Metal ledger fetch failed",
       error: getErrorDetail(error)
     });
+  }
+});
+
+const CUSTOMER_LEDGER_TRANSACTION_TYPES = [
+  "SALE_INVOICE",
+  "SALE_INVOICE_REVERSAL",
+  "PAYMENT_RECEIVED_REVERSAL",
+  "METAL_SETTLEMENT_REVERSAL",
+  "PAYMENT_RECEIVED",
+  "SALE_RETURN",
+  "RETURN_REFUND_PAYABLE",
+  "RETURN_REFUND_PAYABLE_REVERSAL",
+  "CASH_REFUND_PAID",
+  "CASH_REFUND_REVERSAL",
+  "METAL_SETTLEMENT_RECEIVED"
+];
+
+function sqlInList(values = []) {
+  return values.map(() => "?").join(", ");
+}
+
+function getCustomerLedgerDebitCredit(row = {}) {
+  const type = String(row.transaction_type || "").trim().toUpperCase();
+  const cashDebit = toNumber(row.cash_debit);
+  const cashCredit = toNumber(row.cash_credit);
+  const lineAmount = toNumber(row.line_amount);
+  const settlementAmount = toNumber(row.settlement_amount);
+
+  switch (type) {
+    case "SALE_INVOICE":
+    case "PAYMENT_RECEIVED_REVERSAL":
+    case "METAL_SETTLEMENT_REVERSAL":
+    case "RETURN_REFUND_PAYABLE_REVERSAL":
+      return { debit: Math.max(Math.abs(settlementAmount), lineAmount, cashDebit), credit: 0 };
+    case "SALE_INVOICE_REVERSAL":
+    case "PAYMENT_RECEIVED":
+    case "METAL_SETTLEMENT_RECEIVED":
+      return { debit: 0, credit: Math.max(settlementAmount, cashCredit) };
+    case "RETURN_REFUND_PAYABLE":
+    case "SALE_RETURN":
+      return { debit: 0, credit: Math.max(lineAmount, cashCredit) };
+    case "CASH_REFUND_PAID":
+      return { debit: cashDebit, credit: 0 };
+    case "CASH_REFUND_REVERSAL":
+      return { debit: 0, credit: cashCredit };
+    default:
+      return { debit: cashDebit, credit: cashCredit };
+  }
+}
+
+function getCustomerLedgerDueEffect(row = {}) {
+  const { debit, credit } = getCustomerLedgerDebitCredit(row);
+  return debit - credit;
+}
+
+async function getPaymentAccountBalanceMap(connection, companyId, accountIds = []) {
+  const cleanCompanyId = Number(companyId || 0);
+  const ids = accountIds.map((id) => Number(id || 0)).filter((id) => id > 0);
+  if (!cleanCompanyId || !ids.length) return new Map();
+
+  const [rows] = await connection.query(
+    `
+    SELECT
+      pa.id,
+      pa.opening_balance,
+      COALESCE(SUM(cl.credit_amount), 0) AS ledger_credit,
+      COALESCE(SUM(cl.debit_amount), 0) AS ledger_debit,
+      COUNT(cl.id) AS transaction_count
+    FROM payment_accounts pa
+    LEFT JOIN cash_ledger cl ON cl.company_id = pa.company_id AND cl.account_id = pa.id
+    WHERE pa.company_id = ?
+      AND pa.id IN (${sqlInList(ids)})
+    GROUP BY pa.id, pa.opening_balance
+    `,
+    [cleanCompanyId, ...ids]
+  );
+
+  return new Map(rows.map((row) => [
+    Number(row.id),
+    {
+      current_balance: toNumber(row.opening_balance) + toNumber(row.ledger_credit) - toNumber(row.ledger_debit),
+      transaction_count: Number(row.transaction_count || 0)
+    }
+  ]));
+}
+
+function assertTransactionBranchScope(access, branchScope, branchId) {
+  const cleanBranchId = branchId === null || branchId === undefined || branchId === "" ? null : Number(branchId);
+  if (access?.isBranchLocked && Number(cleanBranchId || 0) !== Number(access.userBranchId || 0)) {
+    const error = new Error("You cannot access another branch transaction");
+    error.status = 403;
+    throw error;
+  }
+  if (branchScope?.isBranchFiltered && Number(cleanBranchId || 0) !== Number(branchScope.branchId || 0)) {
+    const error = new Error("Transaction is outside the selected branch");
+    error.status = 403;
+    throw error;
+  }
+}
+
+app.get("/transaction/payment-accounts", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const whereParts = ["pa.company_id = ?"];
+    const params = [access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(pa.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT pa.*, b.branch_name, b.branch_code
+      FROM payment_accounts pa
+      LEFT JOIN branches b ON b.id = pa.branch_id AND b.company_id = pa.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY pa.active DESC, pa.account_type ASC, pa.account_name ASC
+      `,
+      params
+    );
+    const balances = await getPaymentAccountBalanceMap(pool, access.companyScope, rows.map((row) => row.id));
+    return res.json({
+      success: true,
+      accounts: rows.map((row) => ({
+        ...row,
+        opening_balance: toNumber(row.opening_balance),
+        active: Number(row.active || 0) === 1,
+        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "All Branches"),
+        ...(balances.get(Number(row.id)) || { current_balance: toNumber(row.opening_balance), transaction_count: 0 })
+      })),
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Payment accounts fetch error:", error);
+    return res.status(500).json({ success: false, message: "Payment accounts fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/transaction/payment-accounts", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const accountName = String(req.body.accountName || req.body.account_name || "").trim();
+    const accountType = normalizePaymentAccountType(req.body.accountType || req.body.account_type || "CASH");
+    const openingBalance = toNumber(req.body.openingBalance ?? req.body.opening_balance ?? 0);
+    const active = parseBooleanLike(req.body.active ?? true) ? 1 : 0;
+    if (!accountName) return res.status(400).json({ success: false, message: "Account name is required" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO payment_accounts
+      (company_id, branch_id, account_name, account_type, opening_balance, active, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [access.companyScope, branchScope.isBranchFiltered ? branchScope.branchId : null, accountName, accountType, openingBalance, active, access.actingUserId]
+    );
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: access.actingUserId ?? null,
+      actionType: "PAYMENT_ACCOUNT_CREATED",
+      entityType: "PAYMENT_ACCOUNT",
+      entityId: String(insertResult.insertId),
+      moduleName: "payment-accounts",
+      status: "success",
+      message: "Payment account created"
+    });
+    await connection.commit();
+    return res.json({ success: true, id: insertResult.insertId });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Payment account create error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Payment account create failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.put("/transaction/payment-accounts/:id", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    const accountId = Number(req.params.id || 0);
+    const accountName = String(req.body.accountName || req.body.account_name || "").trim();
+    const accountType = normalizePaymentAccountType(req.body.accountType || req.body.account_type || "CASH");
+    const openingBalance = toNumber(req.body.openingBalance ?? req.body.opening_balance ?? 0);
+    const active = parseBooleanLike(req.body.active ?? true) ? 1 : 0;
+    if (!accountId || !accountName) return res.status(400).json({ success: false, message: "Account id and name are required" });
+    await assertPaymentAccountBranchAccess(pool, access, accountId);
+
+    const [result] = await pool.query(
+      `
+      UPDATE payment_accounts
+      SET account_name = ?,
+          account_type = ?,
+          opening_balance = ?,
+          active = ?
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [accountName, accountType, openingBalance, active, accountId, access.companyScope]
+    );
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: "Payment account not found" });
+    return res.json({ success: true, id: accountId });
+  } catch (error) {
+    console.error("Payment account update error:", error);
+    return res.status(500).json({ success: false, message: "Payment account update failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/account-ledger", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const accountId = Number(req.query.accountId || req.query.account_id || 0);
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+    if (!accountId) return res.status(400).json({ success: false, message: "accountId is required" });
+
+    const account = await assertPaymentAccountBranchAccess(pool, access, accountId);
+
+    let openingBalance = toNumber(account.opening_balance);
+    if (fromDate) {
+      const [openingRows] = await pool.query(
+        `
+        SELECT COALESCE(SUM(credit_amount), 0) AS credits, COALESCE(SUM(debit_amount), 0) AS debits
+        FROM cash_ledger
+        WHERE company_id = ?
+          AND account_id = ?
+          AND entry_date < ?
+        `,
+        [access.companyScope, accountId, fromDate]
+      );
+      openingBalance += toNumber(openingRows[0]?.credits) - toNumber(openingRows[0]?.debits);
+    }
+
+    const whereParts = ["cl.company_id = ?", "cl.account_id = ?"];
+    const params = [access.companyScope, accountId];
+    if (fromDate) {
+      whereParts.push("cl.entry_date >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("cl.entry_date <= ?");
+      params.push(toDate);
+    }
+    const [rows] = await pool.query(
+      `
+      SELECT
+        cl.id,
+        cl.entry_date,
+        cl.debit_amount,
+        cl.credit_amount,
+        cl.reference_type,
+        cl.reference_no,
+        cl.remarks,
+        tm.voucher_no,
+        tm.transaction_type,
+        tm.invoice_no
+      FROM cash_ledger cl
+      INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY cl.entry_date ASC, cl.id ASC
+      `,
+      params
+    );
+
+    let runningBalance = openingBalance;
+    const ledgerRows = rows.map((row) => {
+      const debit = toNumber(row.debit_amount);
+      const credit = toNumber(row.credit_amount);
+      runningBalance += credit - debit;
+      return { ...row, debit, credit, running_balance: runningBalance };
+    });
+
+    return res.json({ success: true, account, openingBalance, closingBalance: runningBalance, rows: ledgerRows });
+  } catch (error) {
+    console.error("Account ledger error:", error);
+    return res.status(500).json({ success: false, message: "Account ledger fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/reversal/search", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const search = String(req.query.search || req.query.q || "").trim().toLowerCase();
+    const whereParts = ["tm.company_id = ?", `tm.transaction_type IN (${sqlInList(Array.from(REVERSIBLE_TRANSACTION_TYPES))})`];
+    const params = [access.companyScope, ...Array.from(REVERSIBLE_TRANSACTION_TYPES)];
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+    }
+    if (search) {
+      whereParts.push("(LOWER(tm.voucher_no) LIKE ? OR LOWER(tm.invoice_no) LIKE ? OR LOWER(tm.reference_no) LIKE ? OR CAST(tm.id AS CHAR) = ?)");
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, search);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        tm.id,
+        tm.voucher_no,
+        tm.voucher_date,
+        tm.transaction_type,
+        tm.invoice_no,
+        tm.reference_no,
+        tm.status,
+        tm.payment_status,
+        tm.reversal_transaction_id,
+        pm.party_name
+      FROM transaction_master tm
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+      ${getTransactionBranchJoinSql("tm")}
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY tm.id DESC
+      LIMIT 30
+      `,
+      params
+    );
+    return res.json({ success: true, rows });
+  } catch (error) {
+    console.error("Reversal search error:", error);
+    return res.status(500).json({ success: false, message: "Reversal search failed", error: getErrorDetail(error) });
+  }
+});
+
+const REVERSIBLE_TRANSACTION_TYPES = new Set([
+  "PAYMENT_RECEIVED",
+  "EXPENSE_PAYMENT",
+  "CASH_ADJUSTMENT",
+  "METAL_SETTLEMENT_RECEIVED",
+  "RETURN_REFUND_PAYABLE",
+  "CASH_REFUND_PAID"
+]);
+
+const REVERSAL_TRANSACTION_TYPE_BY_ORIGINAL = {
+  PAYMENT_RECEIVED: "PAYMENT_RECEIVED_REVERSAL",
+  EXPENSE_PAYMENT: "EXPENSE_PAYMENT_REVERSAL",
+  CASH_ADJUSTMENT: "CASH_ADJUSTMENT_REVERSAL",
+  METAL_SETTLEMENT_RECEIVED: "METAL_SETTLEMENT_REVERSAL",
+  RETURN_REFUND_PAYABLE: "RETURN_REFUND_PAYABLE_REVERSAL",
+  CASH_REFUND_PAID: "CASH_REFUND_REVERSAL"
+};
+
+function getTransactionBranchJoinSql(alias = "tm") {
+  return `
+    LEFT JOIN (
+      SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+      FROM invoice_transaction_link
+      GROUP BY company_id, transaction_id
+    ) itlb ON itlb.company_id = ${alias}.company_id AND itlb.transaction_id = ${alias}.id
+  `;
+}
+
+async function getTransactionForReversal(connection, companyId, transactionId) {
+  const [rows] = await connection.query(
+    `
+    SELECT
+      tm.*,
+      COALESCE(itlb.branch_id, NULL) AS branch_id,
+      pm.party_name,
+      b.branch_name,
+      b.branch_code
+    FROM transaction_master tm
+    LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+    ${getTransactionBranchJoinSql("tm")}
+    LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+    WHERE tm.company_id = ?
+      AND tm.id = ?
+    LIMIT 1
+    `,
+    [companyId, transactionId]
+  );
+  return rows[0] || null;
+}
+
+async function buildTransactionReversalPreview(connection, companyId, transactionId) {
+  const transaction = await getTransactionForReversal(connection, companyId, transactionId);
+  if (!transaction) {
+    const error = new Error("Transaction not found");
+    error.status = 404;
+    throw error;
+  }
+
+  const originalType = String(transaction.transaction_type || "").trim().toUpperCase();
+  const reversalType = REVERSAL_TRANSACTION_TYPE_BY_ORIGINAL[originalType] || "";
+  const [existingRows] = await connection.query(
+    `
+    SELECT id, voucher_no, transaction_type
+    FROM transaction_master
+    WHERE company_id = ?
+      AND (reversal_of_transaction_id = ? OR id = ?)
+      AND id <> ?
+    LIMIT 1
+    `,
+    [companyId, transactionId, Number(transaction.reversal_transaction_id || 0), transactionId]
+  );
+  const blockedReasons = [];
+  if (!REVERSIBLE_TRANSACTION_TYPES.has(originalType)) blockedReasons.push("Transaction type is not supported for Phase 3 reversal");
+  if (String(transaction.status || "").trim().toUpperCase() === "REVERSED" || Number(transaction.reversal_transaction_id || 0) > 0 || existingRows.length) {
+    blockedReasons.push("Transaction has already been reversed");
+  }
+  if (Number(transaction.reversal_of_transaction_id || 0) > 0) blockedReasons.push("Reversal transactions cannot be reversed from this workflow");
+
+  const [cashRows] = await connection.query(
+    `
+    SELECT cl.*, pa.account_name, pa.account_type
+    FROM cash_ledger cl
+    LEFT JOIN payment_accounts pa ON pa.id = cl.account_id AND pa.company_id = cl.company_id
+    WHERE cl.company_id = ?
+      AND cl.transaction_id = ?
+    ORDER BY cl.id ASC
+    `,
+    [companyId, transactionId]
+  );
+  const [metalRows] = await connection.query(
+    `
+    SELECT *
+    FROM metal_ledger
+    WHERE company_id = ?
+      AND transaction_id = ?
+    ORDER BY id ASC
+    `,
+    [companyId, transactionId]
+  );
+  const [lineRows] = await connection.query(
+    `
+    SELECT *
+    FROM transaction_lines
+    WHERE transaction_id = ?
+    ORDER BY line_no ASC, id ASC
+    `,
+    [transactionId]
+  );
+
+  return {
+    transaction,
+    reversalType,
+    canReverse: blockedReasons.length === 0,
+    blockedReasons,
+    cashPreview: cashRows.map((row) => ({
+      original_debit: toNumber(row.debit_amount),
+      original_credit: toNumber(row.credit_amount),
+      reversal_debit: toNumber(row.credit_amount),
+      reversal_credit: toNumber(row.debit_amount),
+      account_id: row.account_id ?? null,
+      account_name: row.account_name || "",
+      account_type: row.account_type || ""
+    })),
+    metalPreview: metalRows.map((row) => ({
+      metal_type: row.metal_type,
+      original_gross_in: toNumber(row.gross_in),
+      original_gross_out: toNumber(row.gross_out),
+      reversal_gross_in: toNumber(row.gross_out),
+      reversal_gross_out: toNumber(row.gross_in),
+      original_fine_in: toNumber(row.fine_in),
+      original_fine_out: toNumber(row.fine_out),
+      reversal_fine_in: toNumber(row.fine_out),
+      reversal_fine_out: toNumber(row.fine_in)
+    })),
+    linePreview: lineRows.map((row) => ({
+      item_name: row.item_name,
+      line_amount: toNumber(row.line_amount),
+      barcode: row.barcode || ""
+    }))
+  };
+}
+
+async function copyInvoiceLinksForReversal(connection, companyId, originalTransactionId, reversalTransactionId, reversalType, createdBy) {
+  const [linkRows] = await connection.query(
+    `
+    SELECT invoice_no, branch_id
+    FROM invoice_transaction_link
+    WHERE company_id = ?
+      AND transaction_id = ?
+    `,
+    [companyId, originalTransactionId]
+  );
+  for (const link of linkRows) {
+    await connection.query(
+      `
+      INSERT INTO invoice_transaction_link
+      (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        companyId,
+        link.invoice_no || "",
+        reversalTransactionId,
+        link.branch_id ?? null,
+        reversalType,
+        `Reversal of transaction #${originalTransactionId}`,
+        createdBy
+      ]
+    );
+  }
+}
+
+app.get("/transaction/reversal/preview", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const transactionId = Number(req.query.transactionId || req.query.transaction_id || 0);
+    if (!transactionId) return res.status(400).json({ success: false, message: "transactionId is required" });
+
+    const preview = await buildTransactionReversalPreview(pool, access.companyScope, transactionId);
+    assertTransactionBranchScope(access, branchScope, preview.transaction?.branch_id ?? null);
+    return res.json({ success: true, ...preview });
+  } catch (error) {
+    console.error("Transaction reversal preview error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Reversal preview failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/transaction/reversal", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const transactionId = Number(req.body.transactionId || req.body.transaction_id || 0);
+    const reason = String(req.body.reason || req.body.reversalReason || req.body.reversal_reason || "").trim();
+    if (!transactionId) return res.status(400).json({ success: false, message: "transactionId is required" });
+    if (!reason) return res.status(400).json({ success: false, message: "Reversal reason is required" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const preview = await buildTransactionReversalPreview(connection, access.companyScope, transactionId);
+    assertTransactionBranchScope(access, branchScope, preview.transaction?.branch_id ?? null);
+    if (!preview.canReverse) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: "Transaction cannot be reversed", blockedReasons: preview.blockedReasons, preview });
+    }
+
+    const original = preview.transaction;
+    const reversalType = preview.reversalType;
+    const voucherNo = `REV-${original.voucher_no || original.id}-${Date.now()}`.slice(0, 100);
+    const createdBy = access.actingUserId ?? getRequestedUserId(req);
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO transaction_master
+      (
+        company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+        status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+        remarks, note, reversal_of_transaction_id, created_by
+      )
+      VALUES (?, ?, CURDATE(), ?, ?, ?, 'POSTED', ?, ?, 'transaction-reversal', ?, 'REVERSED', ?, ?, ?, ?)
+      `,
+      [
+        access.companyScope,
+        voucherNo,
+        reversalType,
+        original.party_id,
+        original.party_type || "CUSTOMER",
+        original.voucher_no || String(original.id),
+        original.invoice_no || "",
+        original.payment_mode || "",
+        `Reversal of ${original.transaction_type} #${original.id}`,
+        reason,
+        original.id,
+        createdBy
+      ]
+    );
+    const reversalTransactionId = Number(insertResult.insertId || 0);
+
+    const [lineRows] = await connection.query("SELECT * FROM transaction_lines WHERE transaction_id = ? ORDER BY line_no ASC, id ASC", [transactionId]);
+    for (let index = 0; index < lineRows.length; index += 1) {
+      const line = lineRows[index];
+      await connection.query(
+        `
+        INSERT INTO transaction_lines
+        (
+          transaction_id, line_no, item_name, item_id, barcode, lot_no,
+          metal_type, purity, gross_weight, actual_weight, billable_weight,
+          lamination_gain_weight, net_weight, fine_weight, qty, rate_per_gram,
+          metal_value, making_charge, hallmark_charge, labour_charge,
+          other_charge, discount_amount, gst_amount, line_amount, remarks
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          reversalTransactionId,
+          Number(line.line_no || index + 1),
+          line.item_name || "",
+          line.item_id ?? null,
+          line.barcode || "",
+          line.lot_no || "",
+          line.metal_type || "",
+          toNumber(line.purity),
+          toNumber(line.gross_weight),
+          toNumber(line.actual_weight),
+          toNumber(line.billable_weight),
+          toNumber(line.lamination_gain_weight),
+          toNumber(line.net_weight),
+          toNumber(line.fine_weight),
+          toNumber(line.qty),
+          toNumber(line.rate_per_gram),
+          toNumber(line.metal_value),
+          toNumber(line.making_charge),
+          toNumber(line.hallmark_charge),
+          toNumber(line.labour_charge),
+          toNumber(line.other_charge),
+          toNumber(line.discount_amount),
+          toNumber(line.gst_amount),
+          0,
+          `Reversal line for transaction #${transactionId}`
+        ]
+      );
+    }
+
+    const [settlementRows] = await connection.query(
+      `
+      SELECT *
+      FROM transaction_settlements
+      WHERE company_id = ?
+        AND transaction_id = ?
+      ORDER BY id ASC
+      `,
+      [access.companyScope, transactionId]
+    );
+    for (const settlement of settlementRows) {
+      await connection.query(
+        `
+        INSERT INTO transaction_settlements
+        (
+          company_id, transaction_id, settlement_type, against_transaction_id,
+          against_invoice_no, against_voucher_no, cash_amount, metal_type,
+          gross_weight, fine_weight, purity, rate_basis, settlement_date,
+          remarks, created_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?)
+        `,
+        [
+          access.companyScope,
+          reversalTransactionId,
+          settlement.settlement_type || "CASH",
+          settlement.against_transaction_id ?? null,
+          settlement.against_invoice_no || "",
+          settlement.against_voucher_no || "",
+          -toNumber(settlement.cash_amount),
+          settlement.metal_type || "",
+          -toNumber(settlement.gross_weight),
+          -toNumber(settlement.fine_weight),
+          toNumber(settlement.purity),
+          toNumber(settlement.rate_basis),
+          `Reversal of settlement #${settlement.id}: ${reason}`,
+          createdBy
+        ]
+      );
+    }
+
+    await copyInvoiceLinksForReversal(connection, access.companyScope, transactionId, reversalTransactionId, reversalType, createdBy);
+
+    const [cashRows] = await connection.query("SELECT * FROM cash_ledger WHERE company_id = ? AND transaction_id = ? ORDER BY id ASC", [access.companyScope, transactionId]);
+    for (const cashRow of cashRows) {
+      const reversalDebit = toNumber(cashRow.credit_amount);
+      const reversalCredit = toNumber(cashRow.debit_amount);
+      if (reversalDebit > 0 || reversalCredit > 0) {
+        await createCashLedgerEntry(connection, {
+          companyId: access.companyScope,
+          partyId: original.party_id,
+          transactionId: reversalTransactionId,
+          entryDate: getTodayDateOnly(),
+          entryType: reversalDebit > 0 ? "DEBIT" : "CREDIT",
+          debitAmount: reversalDebit,
+          creditAmount: reversalCredit,
+          referenceType: reversalType,
+          referenceNo: voucherNo,
+          remarks: `Reversal of cash ledger #${cashRow.id}: ${reason}`,
+          accountId: cashRow.account_id ?? null,
+          branchId: original.branch_id ?? null,
+          paymentMode: original.payment_mode || "",
+          createdBy
+        });
+      }
+    }
+
+    const [metalRows] = await connection.query("SELECT * FROM metal_ledger WHERE company_id = ? AND transaction_id = ? ORDER BY id ASC", [access.companyScope, transactionId]);
+    for (const metalRow of metalRows) {
+      await createMetalLedgerEntry(connection, {
+        companyId: access.companyScope,
+        partyId: original.party_id,
+        transactionId: reversalTransactionId,
+        entryDate: getTodayDateOnly(),
+        metalType: metalRow.metal_type,
+        entryType: toNumber(metalRow.gross_out) > 0 || toNumber(metalRow.fine_out) > 0 ? "IN" : "OUT",
+        purity: toNumber(metalRow.purity),
+        grossIn: toNumber(metalRow.gross_out),
+        grossOut: toNumber(metalRow.gross_in),
+        fineIn: toNumber(metalRow.fine_out),
+        fineOut: toNumber(metalRow.fine_in),
+        referenceType: reversalType,
+        referenceNo: voucherNo,
+        lotNo: metalRow.lot_no || "",
+        remarks: `Reversal of metal ledger #${metalRow.id}: ${reason}`,
+        createdBy
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE transaction_master
+      SET status = 'REVERSED',
+          payment_status = 'REVERSED',
+          reversal_transaction_id = ?,
+          reversed_at = NOW(),
+          reversed_by = ?,
+          reversal_reason = ?
+      WHERE company_id = ?
+        AND id = ?
+        AND COALESCE(reversal_transaction_id, 0) = 0
+      `,
+      [reversalTransactionId, createdBy, reason, access.companyScope, transactionId]
+    );
+
+    await recalcPartyBalanceSummary(connection, access.companyScope, original.party_id, reversalTransactionId);
+    await writeAuditLogSafe(connection, req, {
+      companyId: access.companyScope,
+      userId: createdBy ?? null,
+      actionType: "TRANSACTION_REVERSED",
+      entityType: "TRANSACTION",
+      entityId: String(transactionId),
+      moduleName: "transaction-reversal",
+      status: "success",
+      message: "Transaction reversed with compensating transaction",
+      metadata: { reversalTransactionId, reversalType, reason }
+    });
+
+    await connection.commit();
+    return res.json({ success: true, transactionId, reversalTransactionId, reversalType, voucherNo });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Transaction reversal error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Transaction reversal failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+const CASH_BOOK_TRANSACTION_TYPES = [
+  "PAYMENT_RECEIVED",
+  "PAYMENT_RECEIVED_REVERSAL",
+  "CASH_REFUND_PAID",
+  "CASH_REFUND_REVERSAL",
+  "EXPENSE_PAYMENT",
+  "EXPENSE_PAYMENT_REVERSAL",
+  "CASH_ADJUSTMENT",
+  "CASH_ADJUSTMENT_REVERSAL",
+  "METAL_SETTLEMENT_RECEIVED",
+  "METAL_SETTLEMENT_REVERSAL"
+];
+
+function getCashBookMovement(row = {}) {
+  const type = String(row.transaction_type || "").trim().toUpperCase();
+  const debit = toNumber(row.debit_amount ?? row.cash_debit);
+  const credit = toNumber(row.credit_amount ?? row.cash_credit);
+  const movement = { collections: 0, expenses: 0, refunds: 0, adjustments: 0, cashIn: 0, cashOut: 0 };
+
+  if (type === "PAYMENT_RECEIVED" || type === "METAL_SETTLEMENT_RECEIVED") movement.collections = credit;
+  if (type === "PAYMENT_RECEIVED_REVERSAL" || type === "METAL_SETTLEMENT_REVERSAL") movement.collections = -debit;
+  if (type === "EXPENSE_PAYMENT") movement.expenses = credit;
+  if (type === "EXPENSE_PAYMENT_REVERSAL") movement.expenses = -debit;
+  if (type === "CASH_REFUND_PAID") movement.refunds = debit;
+  if (type === "CASH_REFUND_REVERSAL") movement.refunds = -credit;
+  if (type === "CASH_ADJUSTMENT") movement.adjustments = credit - debit;
+  if (type === "CASH_ADJUSTMENT_REVERSAL") movement.adjustments = credit - debit;
+
+  const net = movement.collections - movement.expenses - movement.refunds + movement.adjustments;
+  movement.cashIn = net >= 0 ? net : 0;
+  movement.cashOut = net < 0 ? Math.abs(net) : 0;
+  return movement;
+}
+
+async function computeDailyClosingSummary(connection, access, branchScope, closingDate) {
+  const cleanDate = String(closingDate || getTodayDateOnly()).trim();
+  const branchJoinSql = getTransactionBranchJoinSql("tm");
+  const openingWhere = [
+    "cl.company_id = ?",
+    `tm.transaction_type IN (${sqlInList(CASH_BOOK_TRANSACTION_TYPES)})`,
+    "cl.entry_date < ?"
+  ];
+  const openingParams = [access.companyScope, ...CASH_BOOK_TRANSACTION_TYPES, cleanDate];
+  const dayWhere = [
+    "cl.company_id = ?",
+    `tm.transaction_type IN (${sqlInList(CASH_BOOK_TRANSACTION_TYPES)})`,
+    "cl.entry_date = ?"
+  ];
+  const dayParams = [access.companyScope, ...CASH_BOOK_TRANSACTION_TYPES, cleanDate];
+
+  if (branchScope.isBranchFiltered) {
+    openingWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+    openingParams.push(branchScope.branchId);
+    dayWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+    dayParams.push(branchScope.branchId);
+  }
+
+  const [openingRows] = await connection.query(
+    `
+    SELECT tm.transaction_type, cl.debit_amount, cl.credit_amount, COALESCE(pa.account_type, 'LEGACY') AS account_type
+    FROM cash_ledger cl
+    INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+    ${branchJoinSql}
+    LEFT JOIN payment_accounts pa ON pa.id = cl.account_id AND pa.company_id = cl.company_id
+    WHERE ${openingWhere.join(" AND ")}
+    `,
+    openingParams
+  );
+  const [dayRows] = await connection.query(
+    `
+    SELECT tm.transaction_type, cl.debit_amount, cl.credit_amount, COALESCE(pa.account_type, 'LEGACY') AS account_type
+    FROM cash_ledger cl
+    INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+    ${branchJoinSql}
+    LEFT JOIN payment_accounts pa ON pa.id = cl.account_id AND pa.company_id = cl.company_id
+    WHERE ${dayWhere.join(" AND ")}
+    ORDER BY cl.id ASC
+    `,
+    dayParams
+  );
+
+  const openingBalance = openingRows.reduce((total, row) => {
+    const movement = getCashBookMovement(row);
+    return total + movement.collections - movement.expenses - movement.refunds + movement.adjustments;
+  }, 0);
+  const summary = {
+    closingDate: cleanDate,
+    branchId: branchScope.isBranchFiltered ? branchScope.branchId : null,
+    openingBalance,
+    collections: 0,
+    expenses: 0,
+    refunds: 0,
+    adjustments: 0,
+    closingBalance: openingBalance,
+    accountTypeTotals: {
+      CASH: 0,
+      UPI: 0,
+      BANK: 0,
+      CARD: 0,
+      LEGACY: 0
+    }
+  };
+
+  dayRows.forEach((row) => {
+    const movement = getCashBookMovement(row);
+    summary.collections += movement.collections;
+    summary.expenses += movement.expenses;
+    summary.refunds += movement.refunds;
+    summary.adjustments += movement.adjustments;
+    const rawAccountType = String(row.account_type || "LEGACY").trim().toUpperCase();
+    const accountType = PAYMENT_ACCOUNT_TYPES.has(rawAccountType) ? rawAccountType : "LEGACY";
+    summary.accountTypeTotals[accountType] = toNumber(summary.accountTypeTotals[accountType]) + movement.collections - movement.expenses - movement.refunds + movement.adjustments;
+  });
+  summary.closingBalance = summary.openingBalance + summary.collections - summary.expenses - summary.refunds + summary.adjustments;
+  return summary;
+}
+
+app.get("/transaction/daily-closing/summary", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const closingDate = String(req.query.date || req.query.closingDate || req.query.closing_date || getTodayDateOnly()).trim();
+    const summary = await computeDailyClosingSummary(pool, access, branchScope, closingDate);
+    const [closingRows] = await pool.query(
+      `
+      SELECT *
+      FROM daily_cash_closing
+      WHERE company_id = ?
+        AND COALESCE(branch_id, 0) = COALESCE(?, 0)
+        AND closing_date = ?
+      LIMIT 1
+      `,
+      [access.companyScope, summary.branchId, closingDate]
+    );
+    return res.json({ success: true, summary, closing: closingRows[0] || null, branchScope: getBranchScopeResponse(branchScope) });
+  } catch (error) {
+    console.error("Daily closing summary error:", error);
+    return res.status(500).json({ success: false, message: "Daily closing summary failed", error: getErrorDetail(error) });
+  }
+});
+
+app.post("/transaction/daily-closing/close", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
+    const remarks = String(req.body.remarks || "").trim();
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const summary = await computeDailyClosingSummary(connection, access, branchScope, closingDate);
+    const [existingRows] = await connection.query(
+      `
+      SELECT *
+      FROM daily_cash_closing
+      WHERE company_id = ?
+        AND COALESCE(branch_id, 0) = COALESCE(?, 0)
+        AND closing_date = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [access.companyScope, summary.branchId, closingDate]
+    );
+    if (existingRows[0]?.status === "CLOSED") {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: "This day is already closed" });
+    }
+
+    let closingId = existingRows[0]?.id || null;
+    if (closingId) {
+      await connection.query(
+        `
+        UPDATE daily_cash_closing
+        SET opening_balance = ?,
+            collections = ?,
+            expenses = ?,
+            refunds = ?,
+            adjustments = ?,
+            closing_balance = ?,
+            remarks = ?,
+            status = 'CLOSED',
+            closed_by = ?,
+            closed_at = NOW(),
+            reopened_by = NULL,
+            reopened_at = NULL,
+            reopen_reason = NULL
+        WHERE id = ?
+          AND company_id = ?
+        `,
+        [summary.openingBalance, summary.collections, summary.expenses, summary.refunds, summary.adjustments, summary.closingBalance, remarks, access.actingUserId, closingId, access.companyScope]
+      );
+    } else {
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO daily_cash_closing
+        (company_id, branch_id, closing_date, opening_balance, collections, expenses, refunds, adjustments, closing_balance, remarks, status, closed_by, closed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, NOW())
+        `,
+        [access.companyScope, summary.branchId, closingDate, summary.openingBalance, summary.collections, summary.expenses, summary.refunds, summary.adjustments, summary.closingBalance, remarks, access.actingUserId]
+      );
+      closingId = insertResult.insertId;
+    }
+
+    await connection.query(
+      `
+      INSERT INTO daily_cash_closing_audit
+      (company_id, branch_id, closing_id, closing_date, action_type, before_json, after_json, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'CLOSE', ?, ?, ?, ?)
+      `,
+      [access.companyScope, summary.branchId, closingId, closingDate, safeJsonStringify(existingRows[0] || null), safeJsonStringify(summary), remarks, access.actingUserId]
+    );
+    await connection.commit();
+    return res.json({ success: true, id: closingId, summary });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Daily closing close error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Daily close failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/transaction/daily-closing/reopen", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
+    const reason = String(req.body.reason || req.body.reopenReason || req.body.reopen_reason || "").trim();
+    if (!reason) return res.status(400).json({ success: false, message: "Reopen reason is required" });
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      `
+      SELECT *
+      FROM daily_cash_closing
+      WHERE company_id = ?
+        AND COALESCE(branch_id, 0) = COALESCE(?, 0)
+        AND closing_date = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [access.companyScope, branchScope.isBranchFiltered ? branchScope.branchId : null, closingDate]
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Closing record not found" });
+    }
+    const closing = rows[0];
+    await connection.query(
+      `
+      UPDATE daily_cash_closing
+      SET status = 'REOPENED',
+          reopened_by = ?,
+          reopened_at = NOW(),
+          reopen_reason = ?
+      WHERE id = ?
+        AND company_id = ?
+      `,
+      [access.actingUserId, reason, closing.id, access.companyScope]
+    );
+    await connection.query(
+      `
+      INSERT INTO daily_cash_closing_audit
+      (company_id, branch_id, closing_id, closing_date, action_type, before_json, after_json, remarks, created_by)
+      VALUES (?, ?, ?, ?, 'REOPEN', ?, ?, ?, ?)
+      `,
+      [access.companyScope, closing.branch_id ?? null, closing.id, closingDate, safeJsonStringify(closing), safeJsonStringify({ status: "REOPENED", reason }), reason, access.actingUserId]
+    );
+    await connection.commit();
+    return res.json({ success: true, id: closing.id });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Daily closing reopen error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Daily reopening failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.get("/transaction/customer-ledger", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({ success: false, message: branchScope.message || "Branch access denied" });
+    }
+
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+    const partyId = Number(req.query.partyId || req.query.party_id || req.query.customerId || req.query.customer_id || 0);
+    const search = String(req.query.search || req.query.customerSearch || req.query.partySearch || "").trim().toLowerCase();
+    const requestedPartyType = normalizePartyType(req.query.partyType || req.query.party_type || "");
+    const includeAllPartyTypes = parseBooleanLike(req.query.includeAllPartyTypes || req.query.include_all_party_types);
+    const canOverridePartyType = Boolean(access.isSuperAdmin || access.role === "OWNER" || access.role === "ACCOUNTS");
+    const partyTypeFilter = includeAllPartyTypes && canOverridePartyType
+      ? ""
+      : requestedPartyType && canOverridePartyType
+        ? requestedPartyType
+        : "CUSTOMER";
+    const ledgerTypes = CUSTOMER_LEDGER_TRANSACTION_TYPES;
+    const params = [access.companyScope];
+    const whereParts = [
+      "tm.company_id = ?",
+      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`
+    ];
+    params.push(...ledgerTypes);
+
+    if (fromDate) {
+      whereParts.push("tm.voucher_date >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("tm.voucher_date <= ?");
+      params.push(toDate);
+    }
+    if (partyId) {
+      whereParts.push("tm.party_id = ?");
+      params.push(partyId);
+    }
+    if (search) {
+      whereParts.push("(LOWER(pm.party_name) LIKE ? OR LOWER(pm.party_code) LIKE ? OR LOWER(pm.mobile) LIKE ? OR LOWER(tm.invoice_no) LIKE ?)");
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+    }
+    if (partyTypeFilter) {
+      whereParts.push("UPPER(COALESCE(pm.party_type, tm.party_type, '')) = ?");
+      params.push(partyTypeFilter);
+    }
+
+    const baseWhereParts = [
+      "tm.company_id = ?",
+      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`
+    ];
+    const baseParams = [access.companyScope, ...ledgerTypes];
+    if (partyId) {
+      baseWhereParts.push("tm.party_id = ?");
+      baseParams.push(partyId);
+    }
+    if (search) {
+      baseWhereParts.push("(LOWER(pm.party_name) LIKE ? OR LOWER(pm.party_code) LIKE ? OR LOWER(pm.mobile) LIKE ? OR LOWER(tm.invoice_no) LIKE ?)");
+      baseParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (branchScope.isBranchFiltered) {
+      baseWhereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      baseParams.push(branchScope.branchId);
+    }
+    if (partyTypeFilter) {
+      baseWhereParts.push("UPPER(COALESCE(pm.party_type, tm.party_type, '')) = ?");
+      baseParams.push(partyTypeFilter);
+    }
+
+    const [rawRows] = await pool.query(
+      `
+      SELECT
+        tm.id AS transaction_id,
+        tm.voucher_date,
+        tm.voucher_no,
+        tm.transaction_type,
+        tm.invoice_no,
+        tm.reference_no,
+        tm.party_id,
+        pm.party_name,
+        pm.party_type,
+        COALESCE(itlb.branch_id, NULL) AS branch_id,
+        b.branch_name,
+        b.branch_code,
+        COALESCE(clt.cash_debit, 0) AS cash_debit,
+        COALESCE(clt.cash_credit, 0) AS cash_credit,
+        COALESCE(tlt.line_amount, 0) AS line_amount,
+        COALESCE(tst.settlement_amount, 0) AS settlement_amount
+      FROM transaction_master tm
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+        FROM cash_ledger
+        GROUP BY company_id, transaction_id
+      ) clt ON clt.transaction_id = tm.id AND clt.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT transaction_id, SUM(line_amount) AS line_amount
+        FROM transaction_lines
+        GROUP BY transaction_id
+      ) tlt ON tlt.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, SUM(cash_amount) AS settlement_amount
+        FROM transaction_settlements
+        GROUP BY company_id, transaction_id
+      ) tst ON tst.transaction_id = tm.id AND tst.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+        FROM invoice_transaction_link
+        GROUP BY company_id, transaction_id
+      ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+      LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY tm.voucher_date ASC, tm.id ASC
+      `,
+      params
+    );
+
+    let openingBalance = 0;
+    const rows = [];
+    if (fromDate) {
+      const [openingRows] = await pool.query(
+        `
+        SELECT
+          tm.transaction_type,
+          COALESCE(clt.cash_debit, 0) AS cash_debit,
+          COALESCE(clt.cash_credit, 0) AS cash_credit,
+          COALESCE(tlt.line_amount, 0) AS line_amount,
+          COALESCE(tst.settlement_amount, 0) AS settlement_amount
+        FROM transaction_master tm
+        LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+        LEFT JOIN (
+          SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+          FROM cash_ledger
+          GROUP BY company_id, transaction_id
+        ) clt ON clt.transaction_id = tm.id AND clt.company_id = tm.company_id
+        LEFT JOIN (
+          SELECT transaction_id, SUM(line_amount) AS line_amount
+          FROM transaction_lines
+          GROUP BY transaction_id
+        ) tlt ON tlt.transaction_id = tm.id
+        LEFT JOIN (
+          SELECT company_id, transaction_id, SUM(cash_amount) AS settlement_amount
+          FROM transaction_settlements
+          GROUP BY company_id, transaction_id
+        ) tst ON tst.transaction_id = tm.id AND tst.company_id = tm.company_id
+        LEFT JOIN (
+          SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+          FROM invoice_transaction_link
+          GROUP BY company_id, transaction_id
+        ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+        WHERE ${baseWhereParts.join(" AND ")} AND tm.voucher_date < ?
+        `,
+        [...baseParams, fromDate]
+      );
+      openingBalance = openingRows.reduce((sum, row) => sum + getCustomerLedgerDueEffect(row), 0);
+      rows.push({
+        transaction_id: null,
+        voucher_date: fromDate,
+        voucher_no: "OPENING",
+        transaction_type: "OPENING_BALANCE",
+        invoice_no: "",
+        reference_no: "",
+        party_id: partyId || null,
+        party_name: "",
+        party_type: partyTypeFilter || "",
+        branch_id: branchScope.isBranchFiltered ? branchScope.branchId : null,
+        branch_name: "",
+        branch_code: "",
+        debit: openingBalance > 0 ? openingBalance : 0,
+        credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
+        running_balance: openingBalance,
+        branch_label: branchScope.isBranchFiltered ? `Branch #${branchScope.branchId}` : "Opening"
+      });
+    }
+
+    let runningBalance = openingBalance;
+    rawRows.forEach((row) => {
+      const { debit, credit } = getCustomerLedgerDebitCredit(row);
+      runningBalance += debit - credit;
+      rows.push({
+        ...row,
+        debit,
+        credit,
+        running_balance: runningBalance,
+        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned")
+      });
+    });
+
+    const summary = rows.reduce((acc, row) => {
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      if (type === "SALE_INVOICE") acc.totalSales += row.debit;
+      if (type === "PAYMENT_RECEIVED") acc.totalPayments += row.credit;
+      if (type === "SALE_RETURN" || type === "RETURN_REFUND_PAYABLE") acc.totalRefunds += row.credit;
+      if (type === "CASH_REFUND_PAID") acc.totalRefunds += row.debit;
+      if (type === "METAL_SETTLEMENT_RECEIVED") acc.totalMetalSettlements += row.credit;
+      return acc;
+    }, {
+      totalSales: 0,
+      totalPayments: 0,
+      totalRefunds: 0,
+      totalMetalSettlements: 0,
+      currentDue: 0
+    });
+    summary.currentDue = runningBalance;
+
+    return res.json({ success: true, summary: { ...summary, openingBalance }, rows, branchScope: getBranchScopeResponse(branchScope) });
+  } catch (error) {
+    console.error("Customer ledger error:", error);
+    return res.status(500).json({ success: false, message: "Customer ledger fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/branch-cash-book", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({ success: false, message: branchScope.message || "Branch access denied" });
+    }
+
+    const fromDate = String(req.query.fromDate || req.query.from_date || getTodayDateOnly()).trim();
+    const toDate = String(req.query.toDate || req.query.to_date || fromDate).trim();
+    const scopedTypes = CASH_BOOK_TRANSACTION_TYPES;
+    const params = [access.companyScope, ...scopedTypes];
+    const whereParts = [`cl.company_id = ?`, `tm.transaction_type IN (${sqlInList(scopedTypes)})`];
+    if (fromDate) {
+      whereParts.push("cl.entry_date >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("cl.entry_date <= ?");
+      params.push(toDate);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+    }
+
+    const branchJoinSql = `
+      LEFT JOIN (
+        SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+        FROM invoice_transaction_link
+        GROUP BY company_id, transaction_id
+      ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+    `;
+
+    const [rawRows] = await pool.query(
+      `
+      SELECT
+        cl.id AS ledger_id,
+        cl.entry_date,
+        tm.voucher_no,
+        tm.transaction_type,
+        tm.invoice_no,
+        tm.reference_no,
+        cl.debit_amount,
+        cl.credit_amount,
+        COALESCE(itlb.branch_id, NULL) AS branch_id,
+        b.branch_name,
+        b.branch_code
+      FROM cash_ledger cl
+      INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+      ${branchJoinSql}
+      LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY cl.entry_date ASC, cl.id ASC
+      `,
+      params
+    );
+
+    const openingParams = [access.companyScope, ...scopedTypes];
+    const openingWhere = [`cl.company_id = ?`, `tm.transaction_type IN (${sqlInList(scopedTypes)})`];
+    if (fromDate) {
+      openingWhere.push("cl.entry_date < ?");
+      openingParams.push(fromDate);
+    }
+    if (branchScope.isBranchFiltered) {
+      openingWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+      openingParams.push(branchScope.branchId);
+    }
+    const [openingRows] = await pool.query(
+      `
+      SELECT COALESCE(SUM(
+        CASE
+          WHEN tm.transaction_type IN ('PAYMENT_RECEIVED', 'METAL_SETTLEMENT_RECEIVED') THEN cl.credit_amount
+          WHEN tm.transaction_type IN ('PAYMENT_RECEIVED_REVERSAL', 'METAL_SETTLEMENT_REVERSAL') THEN -cl.debit_amount
+          WHEN tm.transaction_type = 'EXPENSE_PAYMENT' THEN -cl.credit_amount
+          WHEN tm.transaction_type = 'EXPENSE_PAYMENT_REVERSAL' THEN cl.debit_amount
+          WHEN tm.transaction_type = 'CASH_REFUND_PAID' THEN -cl.debit_amount
+          WHEN tm.transaction_type = 'CASH_REFUND_REVERSAL' THEN cl.credit_amount
+          WHEN tm.transaction_type IN ('CASH_ADJUSTMENT', 'CASH_ADJUSTMENT_REVERSAL') THEN cl.credit_amount - cl.debit_amount
+          ELSE 0
+        END
+      ), 0) AS opening_cash
+      FROM cash_ledger cl
+      INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+      ${branchJoinSql}
+      WHERE ${openingWhere.join(" AND ")}
+      `,
+      openingParams
+    );
+
+    let runningCash = toNumber(openingRows[0]?.opening_cash);
+    const summary = { openingCash: runningCash, cashReceived: 0, cashPaid: 0, expenses: 0, refunds: 0, closingCash: runningCash };
+    const rows = rawRows.map((row) => {
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      const debit = toNumber(row.debit_amount);
+      const credit = toNumber(row.credit_amount);
+      const movement = getCashBookMovement(row);
+      const cashIn = movement.cashIn;
+      const cashOut = movement.cashOut;
+      runningCash += cashIn - cashOut;
+      summary.cashReceived += cashIn;
+      summary.cashPaid += cashOut;
+      summary.expenses += movement.expenses;
+      summary.refunds += movement.refunds;
+      return {
+        ...row,
+        cash_in: cashIn,
+        cash_out: cashOut,
+        running_cash: runningCash,
+        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned")
+      };
+    });
+    summary.closingCash = runningCash;
+
+    return res.json({ success: true, summary, rows, branchScope: getBranchScopeResponse(branchScope) });
+  } catch (error) {
+    console.error("Branch cash book error:", error);
+    return res.status(500).json({ success: false, message: "Branch cash book fetch failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/summary-dashboard", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({ success: false, message: branchScope.message || "Branch access denied" });
+    }
+
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+    const ledgerTypes = [...CUSTOMER_LEDGER_TRANSACTION_TYPES, "EXPENSE_PAYMENT", "EXPENSE_PAYMENT_REVERSAL", "CASH_ADJUSTMENT", "CASH_ADJUSTMENT_REVERSAL"];
+    const params = [access.companyScope, ...ledgerTypes];
+    const whereParts = ["tm.company_id = ?"];
+    whereParts.push(`tm.transaction_type IN (${sqlInList(ledgerTypes)})`);
+    const openingWhereParts = ["tm.company_id = ?", `tm.transaction_type IN (${sqlInList(ledgerTypes)})`];
+    const openingParams = [access.companyScope, ...ledgerTypes];
+    if (fromDate) {
+      whereParts.push("tm.voucher_date >= ?");
+      params.push(fromDate);
+    }
+    if (toDate) {
+      whereParts.push("tm.voucher_date <= ?");
+      params.push(toDate);
+    }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+      openingWhereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      openingParams.push(branchScope.branchId);
+    }
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        tm.id,
+        tm.voucher_date,
+        tm.transaction_type,
+        COALESCE(itlb.branch_id, NULL) AS branch_id,
+        b.branch_name,
+        b.branch_code,
+        COALESCE(clt.cash_debit, 0) AS cash_debit,
+        COALESCE(clt.cash_credit, 0) AS cash_credit,
+        COALESCE(tlt.line_amount, 0) AS line_amount,
+        COALESCE(tst.settlement_amount, 0) AS settlement_amount
+      FROM transaction_master tm
+      LEFT JOIN (
+        SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+        FROM cash_ledger
+        GROUP BY company_id, transaction_id
+      ) clt ON clt.transaction_id = tm.id AND clt.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT transaction_id, SUM(line_amount) AS line_amount
+        FROM transaction_lines
+        GROUP BY transaction_id
+      ) tlt ON tlt.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, SUM(cash_amount) AS settlement_amount
+        FROM transaction_settlements
+        GROUP BY company_id, transaction_id
+      ) tst ON tst.transaction_id = tm.id AND tst.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+        FROM invoice_transaction_link
+        GROUP BY company_id, transaction_id
+      ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+      LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY tm.voucher_date ASC, tm.id ASC
+      `,
+      params
+    );
+
+    let openingDue = 0;
+    if (fromDate) {
+      const [openingRows] = await pool.query(
+        `
+        SELECT
+          tm.transaction_type,
+          COALESCE(clt.cash_debit, 0) AS cash_debit,
+          COALESCE(clt.cash_credit, 0) AS cash_credit,
+          COALESCE(tlt.line_amount, 0) AS line_amount,
+          COALESCE(tst.settlement_amount, 0) AS settlement_amount
+        FROM transaction_master tm
+        LEFT JOIN (
+          SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+          FROM cash_ledger
+          GROUP BY company_id, transaction_id
+        ) clt ON clt.transaction_id = tm.id AND clt.company_id = tm.company_id
+        LEFT JOIN (
+          SELECT transaction_id, SUM(line_amount) AS line_amount
+          FROM transaction_lines
+          GROUP BY transaction_id
+        ) tlt ON tlt.transaction_id = tm.id
+        LEFT JOIN (
+          SELECT company_id, transaction_id, SUM(cash_amount) AS settlement_amount
+          FROM transaction_settlements
+          GROUP BY company_id, transaction_id
+        ) tst ON tst.transaction_id = tm.id AND tst.company_id = tm.company_id
+        LEFT JOIN (
+          SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+          FROM invoice_transaction_link
+          GROUP BY company_id, transaction_id
+        ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+        WHERE ${openingWhereParts.join(" AND ")} AND tm.voucher_date < ?
+        `,
+        [...openingParams, fromDate]
+      );
+      openingDue = openingRows.reduce((total, row) => {
+        const type = String(row.transaction_type || "").trim().toUpperCase();
+        return type === "EXPENSE_PAYMENT" || type === "EXPENSE_PAYMENT_REVERSAL" || type === "CASH_ADJUSTMENT" || type === "CASH_ADJUSTMENT_REVERSAL"
+          ? total
+          : total + getCustomerLedgerDueEffect(row);
+      }, 0);
+    }
+
+    const metalWhereParts = whereParts.filter((part) => !part.startsWith("tm.transaction_type IN"));
+    metalWhereParts.push("tm.transaction_type = 'METAL_SETTLEMENT_RECEIVED'");
+    const metalParams = params.filter((_, index) => index === 0 || index > ledgerTypes.length);
+    const [metalRows] = await pool.query(
+      `
+      SELECT COALESCE(SUM(ml.gross_in), 0) AS total_metal_received
+      FROM metal_ledger ml
+      INNER JOIN transaction_master tm ON tm.id = ml.transaction_id AND tm.company_id = ml.company_id
+      LEFT JOIN (
+        SELECT company_id, transaction_id, MAX(branch_id) AS branch_id
+        FROM invoice_transaction_link
+        GROUP BY company_id, transaction_id
+      ) itlb ON itlb.company_id = tm.company_id AND itlb.transaction_id = tm.id
+      WHERE ${metalWhereParts.join(" AND ")}
+      `,
+      metalParams
+    );
+
+    const summary = {
+      totalSales: 0,
+      totalCollections: 0,
+      totalDue: 0,
+      totalExpenses: 0,
+      totalRefunds: 0,
+      totalMetalReceived: toNumber(metalRows[0]?.total_metal_received),
+      cashBalance: 0,
+      upiBalance: 0,
+      bankBalance: 0,
+      cardBalance: 0,
+      unassignedLegacyCashBalance: 0,
+      dailyClosingStatus: "OPEN",
+      branchesClosedToday: 0,
+      branchesPending: 0,
+      netCashFlow: 0
+    };
+    const trendsByDate = new Map();
+    const branchCollections = new Map();
+
+    rows.forEach((row) => {
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      const debit = toNumber(row.cash_debit);
+      const credit = toNumber(row.cash_credit);
+      const { debit: dueDebit, credit: dueCredit } = getCustomerLedgerDebitCredit(row);
+      const dueEffect = dueDebit - dueCredit;
+      const dateKey = String(row.voucher_date || "").slice(0, 10) || "Unknown";
+      const trend = trendsByDate.get(dateKey) || { date: dateKey, collections: 0, expenses: 0, due: 0 };
+
+      if (type === "SALE_INVOICE") {
+        summary.totalSales += dueDebit;
+      }
+      if (type === "PAYMENT_RECEIVED") {
+        summary.totalCollections += credit;
+        trend.collections += credit;
+        const branchKey = String(row.branch_id || "unassigned");
+        const branch = branchCollections.get(branchKey) || {
+          branch_id: row.branch_id ?? null,
+          branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned"),
+          collections: 0
+        };
+        branch.collections += credit;
+        branchCollections.set(branchKey, branch);
+      }
+      if (type === "PAYMENT_RECEIVED_REVERSAL" || type === "METAL_SETTLEMENT_REVERSAL") {
+        summary.totalCollections -= debit;
+      }
+      if (type === "EXPENSE_PAYMENT") {
+        summary.totalExpenses += credit;
+        trend.expenses += credit;
+      }
+      if (type === "EXPENSE_PAYMENT_REVERSAL") {
+        summary.totalExpenses -= debit;
+        trend.expenses -= debit;
+      }
+      if (type === "CASH_REFUND_PAID") summary.totalRefunds += debit;
+      if (type === "CASH_REFUND_REVERSAL") summary.totalRefunds -= credit;
+      if (type === "SALE_RETURN" || type === "RETURN_REFUND_PAYABLE") summary.totalRefunds += dueCredit;
+      if (type === "RETURN_REFUND_PAYABLE_REVERSAL") summary.totalRefunds -= dueDebit;
+      if (type !== "EXPENSE_PAYMENT" && type !== "EXPENSE_PAYMENT_REVERSAL" && type !== "CASH_ADJUSTMENT" && type !== "CASH_ADJUSTMENT_REVERSAL") trend.due += dueEffect;
+      trendsByDate.set(dateKey, trend);
+    });
+
+    summary.totalDue = rows.reduce((total, row) => {
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      return type === "EXPENSE_PAYMENT" || type === "EXPENSE_PAYMENT_REVERSAL" || type === "CASH_ADJUSTMENT" || type === "CASH_ADJUSTMENT_REVERSAL" ? total : total + getCustomerLedgerDueEffect(row);
+    }, openingDue);
+    summary.netCashFlow = summary.totalCollections - summary.totalExpenses - summary.totalRefunds;
+
+    const accountWhereParts = ["pa.company_id = ?", "pa.active = 1"];
+    const accountParams = [access.companyScope];
+    if (branchScope.isBranchFiltered) {
+      accountWhereParts.push("COALESCE(pa.branch_id, 0) = ?");
+      accountParams.push(branchScope.branchId);
+    }
+    const [accountBalanceRows] = await pool.query(
+      `
+      SELECT
+        pa.account_type,
+        COALESCE(SUM(pa.opening_balance), 0) + COALESCE(SUM(account_totals.credits), 0) - COALESCE(SUM(account_totals.debits), 0) AS balance
+      FROM payment_accounts pa
+      LEFT JOIN (
+        SELECT account_id, SUM(credit_amount) AS credits, SUM(debit_amount) AS debits
+        FROM cash_ledger
+        WHERE company_id = ?
+        GROUP BY account_id
+      ) account_totals ON account_totals.account_id = pa.id
+      WHERE ${accountWhereParts.join(" AND ")}
+      GROUP BY pa.account_type
+      `,
+      [access.companyScope, ...accountParams]
+    );
+    accountBalanceRows.forEach((row) => {
+      const key = `${String(row.account_type || "").trim().toLowerCase()}Balance`;
+      if (Object.prototype.hasOwnProperty.call(summary, key)) summary[key] = toNumber(row.balance);
+    });
+    const legacyWhereParts = ["cl.company_id = ?", "cl.account_id IS NULL"];
+    const legacyParams = [access.companyScope];
+    let legacyBranchJoinSql = "";
+    if (branchScope.isBranchFiltered) {
+      legacyBranchJoinSql = `
+        INNER JOIN transaction_master tm_legacy ON tm_legacy.id = cl.transaction_id AND tm_legacy.company_id = cl.company_id
+        ${getTransactionBranchJoinSql("tm_legacy")}
+      `;
+      legacyWhereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      legacyParams.push(branchScope.branchId);
+    }
+    const [legacyBalanceRows] = await pool.query(
+      `
+      SELECT COALESCE(SUM(cl.credit_amount), 0) - COALESCE(SUM(cl.debit_amount), 0) AS balance
+      FROM cash_ledger cl
+      ${legacyBranchJoinSql}
+      WHERE ${legacyWhereParts.join(" AND ")}
+      `,
+      legacyParams
+    );
+    summary.unassignedLegacyCashBalance = toNumber(legacyBalanceRows[0]?.balance);
+
+    const today = getTodayDateOnly();
+    const [branchCountRows] = await pool.query("SELECT COUNT(*) AS total FROM branches WHERE company_id = ?", [access.companyScope]);
+    const [closedRows] = await pool.query(
+      `
+      SELECT COUNT(*) AS total
+      FROM daily_cash_closing
+      WHERE company_id = ?
+        AND closing_date = ?
+        AND status = 'CLOSED'
+      `,
+      [access.companyScope, today]
+    );
+    summary.branchesClosedToday = Number(closedRows[0]?.total || 0);
+    summary.branchesPending = Math.max(Number(branchCountRows[0]?.total || 0) - summary.branchesClosedToday, 0);
+    summary.dailyClosingStatus = summary.branchesPending > 0 ? "PENDING" : "CLOSED";
+
+    return res.json({
+      success: true,
+      summary,
+      collectionTrend: Array.from(trendsByDate.values()).map((row) => ({ date: row.date, amount: row.collections })),
+      expenseTrend: Array.from(trendsByDate.values()).map((row) => ({ date: row.date, amount: row.expenses })),
+      dueTrend: Array.from(trendsByDate.values()).map((row) => ({ date: row.date, amount: row.due })),
+      branchCollections: Array.from(branchCollections.values()),
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Transaction summary dashboard error:", error);
+    return res.status(500).json({ success: false, message: "Transaction summary dashboard fetch failed", error: getErrorDetail(error) });
   }
 });
 

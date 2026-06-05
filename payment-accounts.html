@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Accounts</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>.grid{display:grid;grid-template-columns:360px 1fr;gap:14px}.panel{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}@media(max-width:850px){.grid{grid-template-columns:1fr}}</style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="transaction-reversal.html"><i class="fas fa-rotate-left"></i> Transaction Reversal</a></li>
+      <li><a href="payment-accounts.html" class="active"><i class="fas fa-wallet"></i> Payment Accounts</a></li>
+      <li><a href="account-ledger.html"><i class="fas fa-book"></i> Account Ledger</a></li>
+      <li><a href="daily-closing.html"><i class="fas fa-lock"></i> Daily Closing</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Payment Accounts</h1><p>Cash, UPI, bank, and card balances</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box"><div class="grid">
+        <div class="panel">
+          <h3 id="formTitle">Create Account</h3>
+          <input type="hidden" id="accountId" />
+          <div class="input-box"><label>Branch</label><select id="branchId"><option value="">All Branches</option></select></div>
+          <div class="input-box"><label>Name</label><input id="accountName" /></div>
+          <div class="input-box"><label>Type</label><select id="accountType"><option>CASH</option><option>UPI</option><option>BANK</option><option>CARD</option></select></div>
+          <div class="input-box"><label>Opening Balance</label><input id="openingBalance" type="number" step="0.01" value="0" /></div>
+          <label><input id="active" type="checkbox" checked /> Active</label>
+          <button class="primary-btn" type="button" onclick="saveAccount()">Save</button>
+          <button type="button" onclick="resetForm()">New</button>
+        </div>
+        <div class="panel">
+          <h3>Accounts</h3>
+          <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Branch</th><th>Opening</th><th>Current</th><th>Txns</th><th></th></tr></thead><tbody id="accountsBody"></tbody></table></div>
+        </div>
+      </div></div></section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;let accounts=[];
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());if(branchId.value)p.set("branchId",branchId.value);return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    async function fetchJson(url,opt){const r=await fetch(url,{cache:"no-store",credentials:"include",headers:{"Content-Type":"application/json"},...(opt||{})});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    async function loadBranches(){try{const p=new URLSearchParams(params());p.delete("branchId");const d=await fetchJson(`${API_BASE}/branches?${p}`);branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("")}catch(e){branchId.closest(".input-box").style.display="none"}}
+    async function loadAccounts(){try{const d=await fetchJson(`${API_BASE}/transaction/payment-accounts?${params()}`);accounts=d.accounts||[];accountsBody.innerHTML=accounts.map(a=>`<tr><td>${esc(a.account_name)}</td><td>${esc(a.account_type)}</td><td>${esc(a.branch_label)}</td><td>${money(a.opening_balance)}</td><td>${money(a.current_balance)}</td><td>${Number(a.transaction_count||0)}</td><td><button type="button" onclick="editAccount(${Number(a.id)})">Edit</button></td></tr>`).join("")||'<tr><td colspan="7">No accounts</td></tr>'}catch(e){showToast(e.message,"error")}}
+    function editAccount(id){const a=accounts.find(x=>Number(x.id)===Number(id));if(!a)return;accountId.value=a.id;accountName.value=a.account_name;accountType.value=a.account_type;openingBalance.value=Number(a.opening_balance||0);active.checked=!!a.active;formTitle.textContent="Edit Account"}
+    function resetForm(){accountId.value="";accountName.value="";accountType.value="CASH";openingBalance.value=0;active.checked=true;formTitle.textContent="Create Account"}
+    async function saveAccount(){try{const body={accountName:accountName.value.trim(),accountType:accountType.value,openingBalance:Number(openingBalance.value||0),active:active.checked,branchId:branchId.value||null};if(!body.accountName)throw new Error("Account name is required");const id=accountId.value;await fetchJson(`${API_BASE}/transaction/payment-accounts${id?`/${id}`:""}?${params()}`,{method:id?"PUT":"POST",body:JSON.stringify(body)});showToast("Account saved","success");resetForm();await loadAccounts()}catch(e){showToast(e.message,"error")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";await loadBranches();await loadAccounts()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("payment-accounts");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Branch Cash Book</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .filter-grid,.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .summary-grid{margin:16px 0}.summary-card{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}
+    .summary-card h4{margin:0 0 6px;font-size:12px;color:#64748b;text-transform:uppercase}.summary-card p{margin:0;font-size:20px;font-weight:800;color:#0f172a}
+    @media(max-width:900px){.filter-grid,.summary-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.filter-grid,.summary-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a></li>
+      <li><a href="transaction.html"><i class="fas fa-arrow-right-arrow-left"></i> Transaction</a></li>
+      <li><a href="customer-ledger.html"><i class="fas fa-book"></i> Customer Ledger</a></li>
+      <li><a href="branch-cash-book.html" class="active"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
+      <li><a href="transaction-summary-dashboard.html"><i class="fas fa-chart-line"></i> Transaction Summary</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Branch Cash Book</h1><p>Daily branch-wise cash tracking</p></div></div><div class="top-right"><button type="button" onclick="window.print()">Print</button><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <h2>Branch Cash Book</h2>
+        <div class="filter-grid">
+          <div class="input-box"><label>Branch</label><select id="branchId"><option value="">All Branches</option></select></div>
+          <div class="input-box"><label>From</label><input type="date" id="fromDate" /></div>
+          <div class="input-box"><label>To</label><input type="date" id="toDate" /></div>
+          <div class="input-box"><label>&nbsp;</label><button type="button" class="primary-btn" onclick="loadCashBook()">Load Cash Book</button></div>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-card"><h4>Opening Cash</h4><p id="openingCash">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Cash Received</h4><p id="cashReceived">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Cash Paid</h4><p id="cashPaid">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Expenses</h4><p id="expensesTotal">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Refunds</h4><p id="refundsTotal">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Closing Cash</h4><p id="closingCash">Rs 0.00</p></div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Branch</th><th>Voucher</th><th>Type</th><th>Cash In</th><th>Cash Out</th><th>Running Cash</th></tr></thead><tbody id="cashBookBody"><tr><td colspan="7">No cash book data loaded</td></tr></tbody></table></div>
+      </div></section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    function type(v){return String(v||"").replace(/_/g," ").toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())}
+    async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    async function loadBranches(){try{const d=await fetchJson(`${API_BASE}/branches?${params()}`);branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("")}catch(e){branchId.closest(".input-box").style.display="none"}}
+    function defaults(){const d=new Date();const today=d.toISOString().slice(0,10);fromDate.value=today;toDate.value=today}
+    async function loadCashBook(){try{const p=params();["branchId","fromDate","toDate"].forEach(id=>{const v=document.getElementById(id).value;if(v)p.set(id,v)});const d=await fetchJson(`${API_BASE}/transaction/branch-cash-book?${p}`);const s=d.summary||{};openingCash.textContent=money(s.openingCash);cashReceived.textContent=money(s.cashReceived);cashPaid.textContent=money(s.cashPaid);expensesTotal.textContent=money(s.expenses);refundsTotal.textContent=money(s.refunds);closingCash.textContent=money(s.closingCash);const rows=d.rows||[];cashBookBody.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.entry_date||"")}</td><td>${esc(r.branch_label||"")}</td><td>${esc(r.voucher_no||"")}</td><td>${esc(type(r.transaction_type))}</td><td>${money(r.cash_in)}</td><td>${money(r.cash_out)}</td><td>${money(r.running_cash)}</td></tr>`).join(""):'<tr><td colspan="7">No cash book data available</td></tr>'}catch(e){console.log(e);showToast(e.message||"Cash book load failed","error")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";defaults();await loadBranches();await loadCashBook()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("branch-cash-book");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

@@ -833,7 +833,7 @@
                 </div>
 
                 <div class="btn-row" style="margin-top: 12px;">
-                  <button type="button" class="primary-btn" onclick="saveTransaction()">Submit Transaction</button>
+                  <button type="button" class="primary-btn" id="txnSaveBtn" onclick="saveTransaction()">Submit Transaction</button>
                   <button type="button" class="secondary-btn" onclick="clearTransactionForm()">Clear</button>
                 </div>
               </div>
@@ -1010,6 +1010,8 @@
       { value: "METAL_GIVEN", label: "Metal Given" },
       { value: "ADVANCE_RECEIVED", label: "Advance Received" },
       { value: "ADVANCE_GIVEN", label: "Advance Given" },
+      { value: "SALE_INVOICE_REVERSAL", label: "Sale Invoice Reversal" },
+      { value: "EXPENSE_PAYMENT", label: "Expense Payment" },
       { value: "KARIGAR_ISSUE", label: "Karigar Issue" },
       { value: "KARIGAR_RECEIVE", label: "Karigar Receive" }
     ];
@@ -1037,6 +1039,8 @@
       KARIGAR_RECEIVE: "Karigar Receive",
       KARIGAR_LABOUR: "Karigar Labour",
       SALE_INVOICE: "Sale Invoice",
+      SALE_INVOICE_REVERSAL: "Sale Invoice Reversal",
+      EXPENSE_PAYMENT: "Expense Payment",
       METAL_SETTLEMENT_RECEIVED: "Metal Settlement Received",
       PURCHASE_INVOICE: "Purchase Invoice"
     };
@@ -1060,6 +1064,7 @@
     let recentReferenceData = [];
     let txnCurrentPage = 1;
     let txnHasNextPage = false;
+    let txnSaveInProgress = false;
     let transactionTypeOptions = [...DEFAULT_TRANSACTION_TYPE_OPTIONS];
 
     function escapeHtml(value) {
@@ -2103,6 +2108,7 @@
     }
 
     async function saveTransaction() {
+      if (txnSaveInProgress) return;
       const party = getSelectedParty();
       const type = document.getElementById("txnType").value;
       const partyType = document.getElementById("txnPartyType").value;
@@ -2189,12 +2195,21 @@
         }
       }
 
+      txnSaveInProgress = true;
+      const saveBtn = document.getElementById("txnSaveBtn");
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+      }
+      const requestId = `TXN-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const params = buildProtectedParams(true);
       const payload = {
         actingUserId: getCurrentUserId(),
         userId: getCurrentUserId(),
         companyId: getCurrentCompanyId(),
         company_id: getCurrentCompanyId(),
+        idempotency_key: requestId,
+        request_id: requestId,
         party_id: Number(party.id),
         party_type: partyType || party.party_type,
         transaction_type: type,
@@ -2270,6 +2285,12 @@
       } catch (error) {
         console.log("Transaction save error:", error);
         showToast("Transaction save failed", "error");
+      } finally {
+        txnSaveInProgress = false;
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Submit Transaction";
+        }
       }
     }
 

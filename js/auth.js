@@ -23,6 +23,9 @@ const ERP_PAGE_PERMISSION_MAP = {
   "expense-manager": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   transaction: ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "customer-ledger": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "branch-cash-book": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "transaction-summary-dashboard": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "profit-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "lot-commercial-analytics": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "barcode-lifecycle": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
@@ -66,6 +69,9 @@ const ERP_MENU_PAGE_BY_HREF = {
   "expense-manager.html": "expense-manager",
   "transaction.html": "transaction",
   "transaction-reports.html": "transaction-reports",
+  "customer-ledger.html": "customer-ledger",
+  "branch-cash-book.html": "branch-cash-book",
+  "transaction-summary-dashboard.html": "transaction-summary-dashboard",
   "profit-report.html": "profit-report",
   "lot-commercial-analytics.html": "lot-commercial-analytics",
   "barcode-lifecycle.html": "barcode-lifecycle",
@@ -96,7 +102,7 @@ const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
 const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "company-package-enforcement", "enforcement-qa-dashboard"]);
-const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "transaction-reports", "customer-ledger", "branch-cash-book", "transaction-summary-dashboard", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
 const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "sales-dashboard",
   "stock",
@@ -107,6 +113,8 @@ const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "daily-report",
   "transaction",
   "transaction-reports",
+  "customer-ledger",
+  "branch-cash-book",
   "profit-report",
   "branch-receive",
   "branch-transfer-history"
@@ -147,7 +155,10 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", pageKey: "sales-history", href: "sales-history.html", label: "Sales History", icon: "fas fa-clock-rotate-left", moduleKey: "SALES" },
   { mode: "sales", pageKey: "daily-report", href: "daily-report.html", label: "Daily Report", icon: "fas fa-chart-line", moduleKey: "DAILY_REPORT" },
   { mode: "sales", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left", moduleKey: "TRANSACTION" },
-  { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION" },
+  { mode: "sales", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION_REPORTS" },
+  { mode: "sales", pageKey: "customer-ledger", href: "customer-ledger.html", label: "Customer Ledger", icon: "fas fa-book", moduleKey: "CUSTOMER_LEDGER" },
+  { mode: "sales", pageKey: "branch-cash-book", href: "branch-cash-book.html", label: "Branch Cash Book", icon: "fas fa-cash-register", moduleKey: "BRANCH_CASH_BOOK" },
+  { mode: "sales", pageKey: "transaction-summary-dashboard", href: "transaction-summary-dashboard.html", label: "Transaction Summary", icon: "fas fa-chart-line", moduleKey: "TRANSACTION_REPORTS" },
   { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "lot-commercial-analytics", href: "lot-commercial-analytics.html", label: "Lot Commercial Analytics", icon: "fas fa-chart-line", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline", moduleKey: "AUDIT" },

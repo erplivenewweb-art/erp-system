@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Customer Ledger</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .filter-grid, .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .summary-grid { margin:16px 0; }
+    .summary-card { border:1px solid #e2e8f0; border-radius:8px; background:#fff; padding:14px; }
+    .summary-card h4 { margin:0 0 6px; font-size:12px; color:#64748b; text-transform:uppercase; }
+    .summary-card p { margin:0; font-size:20px; font-weight:800; color:#0f172a; }
+    @media (max-width: 900px) { .filter-grid, .summary-grid { grid-template-columns:1fr 1fr; } }
+    @media (max-width: 620px) { .filter-grid, .summary-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div>
+        <ul class="menu">
+          <li><a href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a></li>
+          <li><a href="transaction.html"><i class="fas fa-arrow-right-arrow-left"></i> Transaction</a></li>
+          <li><a href="transaction-reports.html"><i class="fas fa-file-lines"></i> Transaction Reports</a></li>
+          <li><a href="customer-ledger.html" class="active"><i class="fas fa-book"></i> Customer Ledger</a></li>
+          <li><a href="branch-cash-book.html"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
+          <li><a href="transaction-summary-dashboard.html"><i class="fas fa-chart-line"></i> Transaction Summary</a></li>
+        </ul>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left">
+          <button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+          <div class="title"><h1 id="pageCompanyTitle">Customer Ledger</h1><p>Customer receivable ledger</p></div>
+        </div>
+        <div class="top-right"><button type="button" onclick="window.print()">Print</button><div class="profile-box" id="profileBox"></div></div>
+      </div>
+      <section class="page active">
+        <div class="section-box">
+          <h2>Customer Ledger</h2>
+          <div class="filter-grid">
+            <div class="input-box"><label>Customer / Party</label><select id="partyId"><option value="">All Customers</option></select></div>
+            <div class="input-box"><label>Search</label><input id="searchText" placeholder="Name, mobile, invoice" /></div>
+            <div class="input-box"><label>From</label><input type="date" id="fromDate" /></div>
+            <div class="input-box"><label>To</label><input type="date" id="toDate" /></div>
+            <div class="input-box"><label>Branch</label><select id="branchId"><option value="">All Branches</option></select></div>
+            <div class="input-box"><label>&nbsp;</label><button type="button" class="primary-btn" onclick="loadLedger()">Load Ledger</button></div>
+          </div>
+          <div class="summary-grid">
+            <div class="summary-card"><h4>Total Sales</h4><p id="totalSales">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Total Payments</h4><p id="totalPayments">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Total Refunds</h4><p id="totalRefunds">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Metal Settlements</h4><p id="totalMetalSettlements">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Current Due</h4><p id="currentDue">Rs 0.00</p></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Debit</th><th>Credit</th><th>Running Balance</th><th>Reference Invoice</th><th>Branch</th></tr></thead>
+              <tbody id="ledgerBody"><tr><td colspan="8">No ledger data loaded</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const API_BASE = window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null;}catch(_){return null;}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null;}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null;}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com";}
+    function params(includeCompany=true){const p=new URLSearchParams(); if(uid())p.set("actingUserId",uid()); if((includeCompany||isSuperAdmin())&&cid())p.set("companyId",cid()); return p;}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`;}
+    function fmtType(v){return String(v||"").replace(/_/g," ").toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());}
+    function setDefaults(){const d=new Date(); const to=d.toISOString().slice(0,10); const from=new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10); fromDate.value=from; toDate.value=to;}
+    async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"}); const d=await r.json(); if(!r.ok||!d.success)throw new Error(d.message||"Request failed"); return d;}
+    async function loadParties(){try{const d=await fetchJson(`${API_BASE}/transaction/parties?${params(true)}`); partyId.innerHTML='<option value="">All Customers</option>'+(d.parties||[]).filter(p=>["CUSTOMER","CUSTOMER_SUPPLIER"].includes(String(p.party_type||"").toUpperCase())).map(p=>`<option value="${Number(p.id)}">${esc(p.party_name)}</option>`).join("");}catch(e){console.log(e);}}
+    async function loadBranches(){try{const d=await fetchJson(`${API_BASE}/branches?${params(true)}`); branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("");}catch(e){branchId.closest(".input-box").style.display="none";}}
+    async function loadLedger(){try{const p=params(true); ["partyId","branchId","fromDate","toDate"].forEach(id=>{const v=document.getElementById(id).value;if(v)p.set(id,v);}); if(searchText.value.trim())p.set("search",searchText.value.trim()); const d=await fetchJson(`${API_BASE}/transaction/customer-ledger?${p}`); const s=d.summary||{}; totalSales.textContent=money(s.totalSales); totalPayments.textContent=money(s.totalPayments); totalRefunds.textContent=money(s.totalRefunds); totalMetalSettlements.textContent=money(s.totalMetalSettlements); currentDue.textContent=money(s.currentDue); const rows=d.rows||[]; ledgerBody.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.voucher_date||"")}</td><td>${esc(r.voucher_no||"")}</td><td>${esc(fmtType(r.transaction_type))}</td><td>${money(r.debit)}</td><td>${money(r.credit)}</td><td>${money(r.running_balance)}</td><td>${esc(r.invoice_no||r.reference_no||"")}</td><td>${esc(r.branch_label||"")}</td></tr>`).join(""):'<tr><td colspan="8">No ledger data available</td></tr>';}catch(e){console.log(e);showToast(e.message||"Ledger load failed","error");}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed");}
+    window.addEventListener("load",async()=>{document.getElementById("profileBox").textContent=user()?.name||user()?.email||"User"; setDefaults(); await Promise.all([loadParties(),loadBranches()]); await loadLedger();});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("customer-ledger");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

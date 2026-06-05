@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transaction Summary Dashboard</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .filter-grid,.summary-grid,.report-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .summary-grid{margin:16px 0}.report-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .summary-card,.panel-box{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}
+    .summary-card h4{margin:0 0 6px;font-size:12px;color:#64748b;text-transform:uppercase}.summary-card p{margin:0;font-size:20px;font-weight:800;color:#0f172a}
+    @media(max-width:900px){.filter-grid,.summary-grid,.report-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.filter-grid,.summary-grid,.report-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a></li>
+      <li><a href="transaction.html"><i class="fas fa-arrow-right-arrow-left"></i> Transaction</a></li>
+      <li><a href="transaction-reports.html"><i class="fas fa-file-lines"></i> Transaction Reports</a></li>
+      <li><a href="customer-ledger.html"><i class="fas fa-book"></i> Customer Ledger</a></li>
+      <li><a href="branch-cash-book.html"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
+      <li><a href="transaction-summary-dashboard.html" class="active"><i class="fas fa-chart-line"></i> Transaction Summary</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Transaction Summary</h1><p>Accounting summary dashboard</p></div></div><div class="top-right"><button type="button" onclick="window.print()">Print</button><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <h2>Transaction Summary Dashboard</h2>
+        <div class="filter-grid">
+          <div class="input-box"><label>Branch</label><select id="branchId"><option value="">All Branches</option></select></div>
+          <div class="input-box"><label>From</label><input type="date" id="fromDate" /></div>
+          <div class="input-box"><label>To</label><input type="date" id="toDate" /></div>
+          <div class="input-box"><label>&nbsp;</label><button type="button" class="primary-btn" onclick="loadSummary()">Refresh</button></div>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-card"><h4>Total Sales</h4><p id="totalSales">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Total Collections</h4><p id="totalCollections">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Total Due</h4><p id="totalDue">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Total Expenses</h4><p id="totalExpenses">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Total Refunds</h4><p id="totalRefunds">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Metal Received</h4><p id="totalMetalReceived">0.000 gm</p></div>
+          <div class="summary-card"><h4>Net Cash Flow</h4><p id="netCashFlow">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Cash Balance</h4><p id="cashBalance">Rs 0.00</p></div>
+          <div class="summary-card"><h4>UPI Balance</h4><p id="upiBalance">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Bank Balance</h4><p id="bankBalance">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Card Balance</h4><p id="cardBalance">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Unassigned Legacy Cash</h4><p id="unassignedLegacyCashBalance">Rs 0.00</p></div>
+          <div class="summary-card"><h4>Closing Status</h4><p id="dailyClosingStatus">OPEN</p></div>
+          <div class="summary-card"><h4>Closed Today</h4><p id="branchesClosedToday">0</p></div>
+          <div class="summary-card"><h4>Pending Branches</h4><p id="branchesPending">0</p></div>
+        </div>
+        <div class="report-grid">
+          <div class="panel-box"><h3>Collection Trend</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody id="collectionTrendBody"></tbody></table></div></div>
+          <div class="panel-box"><h3>Expense Trend</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody id="expenseTrendBody"></tbody></table></div></div>
+          <div class="panel-box"><h3>Due Trend</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody id="dueTrendBody"></tbody></table></div></div>
+          <div class="panel-box"><h3>Branch-wise Collections</h3><div class="table-wrap"><table><thead><tr><th>Branch</th><th>Collections</th></tr></thead><tbody id="branchCollectionsBody"></tbody></table></div></div>
+        </div>
+      </div></section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}; function weight(v){return `${Number(v||0).toFixed(3)} gm`}
+    async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    async function loadBranches(){try{const d=await fetchJson(`${API_BASE}/branches?${params()}`);branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("")}catch(e){branchId.closest(".input-box").style.display="none"}}
+    function defaults(){const d=new Date();toDate.value=d.toISOString().slice(0,10);fromDate.value=new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10)}
+    function rows(id,data,labelKey="date",amountKey="amount",emptyCols=2){document.getElementById(id).innerHTML=(data||[]).length?(data||[]).map(r=>`<tr><td>${esc(r[labelKey]||"")}</td><td>${money(r[amountKey])}</td></tr>`).join(""):`<tr><td colspan="${emptyCols}">No data</td></tr>`}
+    async function loadSummary(){try{const p=params();["branchId","fromDate","toDate"].forEach(id=>{const v=document.getElementById(id).value;if(v)p.set(id,v)});const d=await fetchJson(`${API_BASE}/transaction/summary-dashboard?${p}`);const s=d.summary||{};totalSales.textContent=money(s.totalSales);totalCollections.textContent=money(s.totalCollections);totalDue.textContent=money(s.totalDue);totalExpenses.textContent=money(s.totalExpenses);totalRefunds.textContent=money(s.totalRefunds);totalMetalReceived.textContent=weight(s.totalMetalReceived);netCashFlow.textContent=money(s.netCashFlow);cashBalance.textContent=money(s.cashBalance);upiBalance.textContent=money(s.upiBalance);bankBalance.textContent=money(s.bankBalance);cardBalance.textContent=money(s.cardBalance);unassignedLegacyCashBalance.textContent=money(s.unassignedLegacyCashBalance);dailyClosingStatus.textContent=s.dailyClosingStatus||"OPEN";branchesClosedToday.textContent=Number(s.branchesClosedToday||0);branchesPending.textContent=Number(s.branchesPending||0);rows("collectionTrendBody",d.collectionTrend);rows("expenseTrendBody",d.expenseTrend);rows("dueTrendBody",d.dueTrend);branchCollectionsBody.innerHTML=(d.branchCollections||[]).length?(d.branchCollections||[]).map(r=>`<tr><td>${esc(r.branch_label||"")}</td><td>${money(r.collections)}</td></tr>`).join(""):'<tr><td colspan="2">No data</td></tr>'}catch(e){console.log(e);showToast(e.message||"Summary load failed","error")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";defaults();await loadBranches();await loadSummary()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("transaction-summary-dashboard");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

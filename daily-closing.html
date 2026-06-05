@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Closing</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>.filters,.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}.card h4{margin:0 0 6px;color:#64748b}.card p{margin:0;font-size:20px;font-weight:800}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}@media(max-width:850px){.filters,.cards{grid-template-columns:1fr 1fr}}@media(max-width:560px){.filters,.cards{grid-template-columns:1fr}}</style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="branch-cash-book.html"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
+      <li><a href="daily-closing.html" class="active"><i class="fas fa-lock"></i> Daily Closing</a></li>
+      <li><a href="transaction-summary-dashboard.html"><i class="fas fa-chart-line"></i> Transaction Summary</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Daily Closing</h1><p>Branch cash close and reopening audit</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <div class="filters">
+          <div class="input-box"><label>Branch</label><select id="branchId"><option value="">All Branches</option></select></div>
+          <div class="input-box"><label>Date</label><input id="closingDate" type="date" /></div>
+          <div class="input-box"><label>&nbsp;</label><button class="primary-btn" type="button" onclick="loadSummary()">Refresh</button></div>
+          <div class="input-box"><label>Status</label><input id="statusText" readonly /></div>
+        </div>
+        <div class="cards">
+          <div class="card"><h4>Opening Balance</h4><p id="openingBalance">Rs 0.00</p></div>
+          <div class="card"><h4>Collections</h4><p id="collections">Rs 0.00</p></div>
+          <div class="card"><h4>Expenses</h4><p id="expenses">Rs 0.00</p></div>
+          <div class="card"><h4>Refunds</h4><p id="refunds">Rs 0.00</p></div>
+          <div class="card"><h4>Adjustments</h4><p id="adjustments">Rs 0.00</p></div>
+          <div class="card"><h4>Closing Balance</h4><p id="closingBalance">Rs 0.00</p></div>
+          <div class="card"><h4>Cash Net</h4><p id="cashNet">Rs 0.00</p></div>
+          <div class="card"><h4>UPI Net</h4><p id="upiNet">Rs 0.00</p></div>
+          <div class="card"><h4>Bank Net</h4><p id="bankNet">Rs 0.00</p></div>
+          <div class="card"><h4>Card Net</h4><p id="cardNet">Rs 0.00</p></div>
+          <div class="card"><h4>Legacy Net</h4><p id="legacyNet">Rs 0.00</p></div>
+        </div>
+        <div class="input-box"><label>Remarks / Reopen Reason</label><textarea id="remarks" rows="3"></textarea></div>
+        <div class="actions"><button class="primary-btn" type="button" onclick="closeDay()">Daily Close</button><button type="button" onclick="reopenDay()">Reopen Day</button></div>
+      </div></section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());if(branchId.value)p.set("branchId",branchId.value);return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    async function fetchJson(url,opt){const r=await fetch(url,{cache:"no-store",credentials:"include",headers:{"Content-Type":"application/json"},...(opt||{})});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    async function loadBranches(){try{const p=new URLSearchParams(params());p.delete("branchId");const d=await fetchJson(`${API_BASE}/branches?${p}`);branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("")}catch(e){branchId.closest(".input-box").style.display="none"}}
+    async function loadSummary(){try{const p=params();p.set("date",closingDate.value);const d=await fetchJson(`${API_BASE}/transaction/daily-closing/summary?${p}`);const s=d.summary||{};const t=s.accountTypeTotals||{};openingBalance.textContent=money(s.openingBalance);collections.textContent=money(s.collections);expenses.textContent=money(s.expenses);refunds.textContent=money(s.refunds);adjustments.textContent=money(s.adjustments);closingBalance.textContent=money(s.closingBalance);cashNet.textContent=money(t.CASH);upiNet.textContent=money(t.UPI);bankNet.textContent=money(t.BANK);cardNet.textContent=money(t.CARD);legacyNet.textContent=money(t.LEGACY);statusText.value=d.closing?.status||"OPEN"}catch(e){showToast(e.message,"error")}}
+    async function closeDay(){try{const p=params();const body={date:closingDate.value,remarks:remarks.value.trim(),branchId:branchId.value||null};await fetchJson(`${API_BASE}/transaction/daily-closing/close?${p}`,{method:"POST",body:JSON.stringify(body)});showToast("Day closed","success");await loadSummary()}catch(e){showToast(e.message,"error")}}
+    async function reopenDay(){try{if(!remarks.value.trim())throw new Error("Reopen reason is required");const p=params();const body={date:closingDate.value,reason:remarks.value.trim(),branchId:branchId.value||null};await fetchJson(`${API_BASE}/transaction/daily-closing/reopen?${p}`,{method:"POST",body:JSON.stringify(body)});showToast("Day reopened","success");await loadSummary()}catch(e){showToast(e.message,"error")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";closingDate.value=new Date().toISOString().slice(0,10);await loadBranches();await loadSummary()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("daily-closing");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>
