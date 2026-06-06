@@ -692,7 +692,7 @@
 
               <div class="input-box">
                 <label>Quantity</label>
-                <input type="number" min="1" step="1" id="billQuantity" placeholder="Quantity" oninput="syncManualEntryPreview()" />
+                <input type="number" min="1" step="1" id="billQuantity" placeholder="Qty" oninput="syncManualEntryPreview()" />
               </div>
 
               <div class="input-box">
@@ -1198,14 +1198,10 @@
     }
 
     function syncManualEntryPreview() {
-      const qty = Math.max(1, Math.floor(num(document.getElementById("billQuantity")?.value || 1)));
       const rate = num(document.getElementById("billRatePerGram")?.value || 0);
 
       const rateEl = document.getElementById("billManualRatePreview");
 
-      if (document.getElementById("billQuantity")) {
-        document.getElementById("billQuantity").value = qty;
-      }
       if (rateEl) rateEl.value = formatEditableNumber(rate);
     }
 
@@ -1494,7 +1490,8 @@
     function addBillingItem() {
       const itemName = document.getElementById("billItemName").value.trim();
       const sku = document.getElementById("billSku").value.trim();
-      const quantity = Math.max(1, Math.floor(num(document.getElementById("billQuantity").value || 1)));
+      const quantityValue = document.getElementById("billQuantity").value;
+      const quantity = Math.floor(num(quantityValue));
       const weight = num(document.getElementById("billWeight").value);
       const purity = num(document.getElementById("billPurity").value);
       const size = document.getElementById("billSize").value.trim();
@@ -1502,6 +1499,11 @@
 
       if (!itemName || !weight) {
       showToast("Please enter the item name and weight.", "error");
+        return;
+      }
+
+      if (!quantityValue || quantity < 1) {
+        showToast("Please enter a quantity of 1 or more.", "error");
         return;
       }
 
