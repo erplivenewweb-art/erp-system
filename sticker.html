@@ -1602,15 +1602,22 @@
         data = getStickerFormData();
       }
 
+      const hasStickerWeight = String(data.weight ?? "").trim() !== "";
       const stickerWeightValue = Number(data.weight || 0);
-      if (!data.productName || !data.purity || !data.sku || !data.size || !data.weight || stickerWeightValue <= 0) {
+      if (hasStickerWeight && stickerWeightValue < 0) {
+        showToast("Weight cannot be negative", "error");
+        logStickerDebug("addStickerItem failed", { reason: "NEGATIVE_WEIGHT", lot: data.lot, weight: data.weight });
+        return;
+      }
+
+      if (!data.productName || !data.purity || !data.sku || !data.size || !hasStickerWeight) {
         const missingFields = [];
         if (!data.serial) missingFields.push("Serial");
         if (!data.productName) missingFields.push("Product");
         if (!data.purity) missingFields.push("Purity");
         if (!data.sku) missingFields.push("SKU");
         if (!data.size) missingFields.push("Size");
-        if (!data.weight || stickerWeightValue <= 0) missingFields.push("Weight greater than 0");
+        if (!hasStickerWeight) missingFields.push("Weight");
         showToast(`Missing required fields: ${missingFields.join(", ")}.`, "error");
         logStickerDebug("addStickerItem failed", { reason: "MISSING_REQUIRED_FIELDS", missingFields, lot: data.lot });
         return;

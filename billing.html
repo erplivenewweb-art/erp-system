@@ -881,11 +881,17 @@
       declaration: "",
       upi_id: "",
       upi_name: "",
+      logo_url: "",
+      logo_data_url: "",
+      customer_note: "",
+      thank_you_message: "",
+      signature_label: "",
       business_state: "Odisha",
       default_bill_type: "GST",
       default_tax_type: "CGST_SGST",
       default_rate_per_gram: "",
-      default_mc_rate: ""
+      default_mc_rate: "",
+      signature_image_data_url: ""
     };
 
     function getLoggedInUser() {
@@ -2414,9 +2420,12 @@
       const logoSource = escapePrintHtml(company.logo_url || company.logo_data_url || "");
       const customerNote = escapePrintHtml(company.customer_note || "");
       const thankYouMessage = escapePrintHtml(company.thank_you_message || "");
+      const declaration = escapePrintHtml(company.declaration || "");
       const customerNoteHtml = customerNote ? customerNote.replace(/\n/g, "<br>") : "";
       const thankYouHtml = thankYouMessage ? thankYouMessage.replace(/\n/g, "<br>") : "";
+      const declarationHtml = declaration ? declaration.replace(/\n/g, "<br>") : "";
       const signatureLabel = escapePrintHtml(company.signature_label || "");
+      const signatureImageSource = escapePrintHtml(company.signature_image_data_url || "");
       const contact = escapePrintHtml(
         company.contact ||
         company.contact_no ||
@@ -2427,6 +2436,10 @@
       );
 
       const items = Array.isArray(record.items) ? record.items : [];
+      const totalGrossWeight = items.reduce((sum, item) => sum + num(item.weight || 0), 0);
+      const totalFineWeight = items.reduce((sum, item) => sum + num(item.pureWeight || 0), 0);
+      const purityWeightTotal = items.reduce((sum, item) => sum + (num(item.purity || 0) * num(item.weight || 0)), 0);
+      const avgPurity = totalGrossWeight > 0 ? purityWeightTotal / totalGrossWeight : 0;
       const metalTotal = items.reduce((sum, item) => sum + num(item.metalValue || 0), 0);
       const makingCharge = items.reduce((sum, item) => sum + num(item.makingChargeAmount || 0), 0);
       const gstTotal = num(record.cgst) + num(record.sgst) + num(record.igst);
@@ -2487,7 +2500,7 @@
       color: var(--ink);
       font-family: "Georgia", "Times New Roman", serif;
     }
-    body { padding: 28px; }
+    body { padding: 16px; }
     .invoice-sheet {
       width: 210mm;
       min-height: 297mm;
@@ -2495,9 +2508,9 @@
       margin: 0 auto;
       background: linear-gradient(180deg, #fffefb 0%, #fffaf2 100%);
       border: 1px solid var(--line);
-      border-radius: 24px;
+      border-radius: 14px;
       box-shadow: var(--shadow);
-      padding: 22mm 18mm 18mm;
+      padding: 12mm 12mm 10mm;
       position: relative;
       overflow: hidden;
     }
@@ -2514,81 +2527,81 @@
     .brand-head {
       display: flex;
       align-items: flex-start;
-      gap: 14px;
+      gap: 10px;
     }
     .brand-copy {
       flex: 1;
       min-width: 0;
     }
     .invoice-logo {
-      width: 66px;
-      height: 66px;
+      width: 48px;
+      height: 48px;
       object-fit: contain;
-      border-radius: 16px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.92);
-      padding: 6px;
+      border-radius: 0;
+      border: 0;
+      background: transparent;
+      padding: 0;
       flex-shrink: 0;
     }
     .top-band {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 24px;
-      padding-bottom: 18px;
+      gap: 14px;
+      padding-bottom: 9px;
       border-bottom: 1px solid var(--line);
     }
     .brand { max-width: 62%; }
     .brand-mark {
       display: inline-block;
-      padding: 6px 14px;
+      padding: 4px 10px;
       border: 1px solid var(--line);
       border-radius: 999px;
       background: linear-gradient(180deg, #fffaf0 0%, #fff4d8 100%);
       color: var(--gold-deep);
-      font-size: 11px;
-      letter-spacing: 0.22em;
+      font-size: 9px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      margin-bottom: 14px;
+      margin-bottom: 7px;
     }
     .shop-name {
       margin: 0;
-      font-size: 34px;
+      font-size: 25px;
       line-height: 1.1;
       font-weight: 700;
       letter-spacing: 0.04em;
       color: #3b3124;
     }
     .tagline {
-      margin: 8px 0 14px;
-      font-size: 13px;
-      letter-spacing: 0.12em;
+      margin: 4px 0 6px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--gold-deep);
     }
     .shop-meta {
       margin: 0;
       color: var(--muted);
-      font-size: 14px;
-      line-height: 1.75;
+      font-size: 11px;
+      line-height: 1.35;
     }
     .invoice-badge {
-      min-width: 210px;
+      min-width: 150px;
       background: linear-gradient(180deg, var(--surface) 0%, var(--surface-strong) 100%);
       border: 1px solid var(--line);
-      border-radius: 20px;
-      padding: 18px 18px 16px;
+      border-radius: 12px;
+      padding: 10px 12px;
       text-align: center;
     }
     .invoice-badge .label {
-      font-size: 12px;
-      letter-spacing: 0.24em;
+      font-size: 10px;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
       color: var(--gold-deep);
-      margin-bottom: 10px;
+      margin-bottom: 5px;
     }
     .invoice-badge .title {
-      font-size: 28px;
+      font-size: 20px;
       line-height: 1.15;
       font-weight: 700;
       color: #352d22;
@@ -2596,21 +2609,23 @@
     .info-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 18px;
-      margin-top: 22px;
+      gap: 10px;
+      margin-top: 10px;
     }
     .info-card {
       background: rgba(255, 255, 255, 0.68);
       border: 1px solid var(--line-soft);
-      border-radius: 18px;
-      padding: 18px;
+      border-radius: 10px;
+      padding: 9px 10px;
     }
     .info-card h3,
     .note-card h4,
+    .thanks-card h4,
+    .declaration-card h4,
     .total-card h4 {
-      margin: 0 0 14px;
-      font-size: 13px;
-      letter-spacing: 0.18em;
+      margin: 0 0 6px;
+      font-size: 10px;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--gold-deep);
       font-weight: 700;
@@ -2622,9 +2637,9 @@
       border-collapse: collapse;
     }
     .info-table td {
-      padding: 7px 0;
+      padding: 3px 0;
       vertical-align: top;
-      font-size: 14px;
+      font-size: 11px;
       border-bottom: 1px solid var(--line-soft);
     }
     .info-table tr:last-child td,
@@ -2644,26 +2659,26 @@
       text-align: right;
     }
     .items-wrap {
-      margin-top: 24px;
+      margin-top: 10px;
       border: 1px solid var(--line);
-      border-radius: 20px;
+      border-radius: 10px;
       overflow: hidden;
       background: rgba(255, 255, 255, 0.8);
     }
     .items-table thead th {
       background: linear-gradient(180deg, #fff7e1 0%, #f9edc7 100%);
       color: #6d5718;
-      font-size: 12px;
+      font-size: 9px;
       font-weight: 700;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      padding: 14px 12px;
+      padding: 6px 6px;
       border-bottom: 1px solid var(--line);
       text-align: left;
     }
     .items-table tbody td {
-      padding: 15px 12px;
-      font-size: 14px;
+      padding: 5px 6px;
+      font-size: 10.5px;
       border-bottom: 1px solid var(--line-soft);
       color: #352f26;
     }
@@ -2683,98 +2698,126 @@
     .summary-row {
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
-      gap: 18px;
-      margin-top: 22px;
+      gap: 10px;
+      margin-top: 10px;
       align-items: start;
       break-inside: avoid;
       page-break-inside: avoid;
     }
     .note-card,
+    .thanks-card,
+    .declaration-card,
     .total-card {
-      border-radius: 20px;
+      border-radius: 10px;
       border: 1px solid var(--line);
       background: rgba(255, 255, 255, 0.78);
-      padding: 18px;
+      padding: 10px;
     }
-    .note-card p {
+    .note-stack {
+      display: grid;
+      gap: 8px;
+    }
+    .note-card p,
+    .thanks-card p,
+    .declaration-card p {
       margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.8;
+      font-size: 10.5px;
+      color: #4a4031;
+      line-height: 1.38;
     }
     .totals-table td {
-      padding: 9px 0;
-      font-size: 14px;
+      padding: 4px 0;
+      font-size: 10.5px;
       border-bottom: 1px solid var(--line-soft);
     }
     .grand-total {
-      margin-top: 14px;
+      margin-top: 7px;
       background: linear-gradient(135deg, #fff5d9 0%, #f2ddb4 100%);
       border: 1px solid #e1c36a;
-      border-radius: 16px;
-      padding: 14px 16px;
+      border-radius: 10px;
+      padding: 8px 10px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
+      gap: 10px;
     }
     .grand-total .label {
-      font-size: 13px;
-      letter-spacing: 0.16em;
+      font-size: 10px;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       color: #7a6117;
       font-weight: 700;
     }
     .grand-total .value {
-      font-size: 24px;
+      font-size: 17px;
       font-weight: 700;
       color: #3a2f18;
       font-variant-numeric: tabular-nums;
     }
     .amount-words {
-      margin-top: 10px;
-      font-size: 13px;
+      margin-top: 6px;
+      font-size: 10px;
       color: #6b4e36;
       font-style: italic;
     }
     .footer {
-      margin-top: 20px;
-      padding-top: 12px;
+      margin-top: 8px;
+      padding-top: 7px;
       border-top: 1px solid var(--line);
       display: grid;
-      grid-template-columns: 1fr 240px;
-      gap: 20px;
+      grid-template-columns: minmax(0, 1fr) 230px;
+      gap: 10px;
       align-items: end;
       break-inside: avoid;
       page-break-inside: avoid;
     }
-    .thanks {
-      font-size: 15px;
-      color: #4a4031;
-      line-height: 1.8;
+    .footer-copy {
+      align-self: end;
     }
-    .thanks strong {
+    .declaration-card p {
+      color: var(--muted);
+    }
+    .thanks-card strong {
       color: var(--gold-deep);
       letter-spacing: 0.04em;
     }
     .signature-box { text-align: center; }
     .signature-area {
-      height: 64px;
-      border: 1px dashed #d8c38c;
-      border-radius: 16px;
-      background: linear-gradient(180deg, #fffdf6 0%, #fff7e5 100%);
+      min-height: 46px;
+      border: 0;
+      border-bottom: 1px solid #d8c38c;
+      border-radius: 0;
+      background: transparent;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 0 0 4px;
+    }
+    .signature-area.has-image {
+      border-bottom: 0;
+      background: transparent;
+      min-height: 110px;
+      padding: 0;
+    }
+    .invoice-signature-image {
+      max-width: 220px;
+      max-height: 110px;
+      object-fit: contain;
+      background: transparent;
+      display: block;
+      margin: 0 auto;
     }
     .signature-label {
-      margin-top: 10px;
-      font-size: 12px;
-      letter-spacing: 0.14em;
+      margin-top: 5px;
+      font-size: 9px;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
       color: var(--gold-deep);
       font-weight: 700;
     }
     @page {
       size: A4;
-      margin: 12mm;
+      margin: 8mm;
     }
     @media print {
       html, body {
@@ -2788,7 +2831,17 @@
         box-shadow: none;
         border: 1px solid #d9ccb1;
         margin: 0;
-        padding: 14mm 12mm 10mm;
+        padding: 8mm 8mm 7mm;
+      }
+      .items-table {
+        page-break-inside: auto;
+      }
+      .items-table thead {
+        display: table-header-group;
+      }
+      .items-table tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
       }
       .summary-row,
       .total-card,
@@ -2865,21 +2918,31 @@
       </section>
 
       <section class="summary-row">
-        <div class="note-card">
-          <h4>Customer Note</h4>
-          <p>
-            ${customerNoteHtml ? `${customerNoteHtml}<br><br>` : ""}
-            Metal Value: ${formatCurrency(metalTotal)}<br>
-            Making Charge: ${formatCurrency(makingCharge)}<br>
-            ${adjustment ? `Adjustment: ${formatCurrency(adjustment)}<br>` : ""}
-          </p>
+        <div class="note-stack">
+          <div class="note-card">
+            <h4>Customer Note</h4>
+            <p>
+              ${customerNoteHtml || "Thank you for your business.<br>Please retain this invoice for future reference."}
+            </p>
+          </div>
+          ${thankYouHtml ? `
+          <div class="thanks-card">
+            <h4>Thank You Message</h4>
+            <p>${thankYouHtml}</p>
+          </div>
+          ` : ""}
         </div>
 
         <div class="total-card">
           <h4>Bill Summary</h4>
           <table class="totals-table">
+            <tr><td>Gross Weight</td><td>${totalGrossWeight.toFixed(3)} gm</td></tr>
+            <tr><td>Fine Weight</td><td>${totalFineWeight.toFixed(3)} gm</td></tr>
+            <tr><td>Avg Purity</td><td>${avgPurity.toFixed(2)}%</td></tr>
+            <tr><td>Metal Value</td><td>${formatCurrency(metalTotal)}</td></tr>
+            <tr><td>Making Charge</td><td>${formatCurrency(makingCharge)}</td></tr>
             <tr><td>Subtotal</td><td>${formatCurrency(subtotalBase)}</td></tr>
-            <tr><td>GST (3%)</td><td>${formatCurrency(gstTotal)}</td></tr>
+            ${gstTotal > 0 ? `<tr><td>GST (3%)</td><td>${formatCurrency(gstTotal)}</td></tr>` : ""}
           </table>
 
           <div class="grand-total">
@@ -2893,12 +2956,19 @@
       </section>
 
       <footer class="footer">
-        <div class="thanks">
-          ${thankYouHtml}
+        <div class="footer-copy">
+          ${declarationHtml ? `
+          <div class="declaration-card">
+            <h4>DECLARATION</h4>
+            <p>${declarationHtml}</p>
+          </div>
+          ` : ""}
         </div>
 
         <div class="signature-box">
-          <div class="signature-area"></div>
+          <div class="signature-area${signatureImageSource ? " has-image" : ""}">
+            ${signatureImageSource ? `<img class="invoice-signature-image" src="${signatureImageSource}" alt="Authorised signature" />` : ""}
+          </div>
           <div class="signature-label">${signatureLabel || ""}</div>
         </div>
       </footer>
@@ -2956,7 +3026,7 @@
       const wrapper = document.createElement("div");
       wrapper.innerHTML = html;
 
-      const invoiceBox = wrapper.querySelector(".invoice-box");
+      const invoiceBox = wrapper.querySelector(".invoice-sheet");
       if (!invoiceBox) {
         showToast("Download failed", "error");
         return;
@@ -2965,7 +3035,7 @@
       const invoiceNumber = document.getElementById("billInvoiceNumber").value.trim() || ("billing-" + Date.now());
 
       const opt = {
-        margin: 8,
+        margin: 0,
         filename: `${invoiceNumber}.pdf`,
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },

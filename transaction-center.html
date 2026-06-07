@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transaction Center</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    .transaction-center-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .transaction-center-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 4px 0 2px;
+    }
+
+    .transaction-center-header h2 {
+      margin: 0;
+      font-size: 24px;
+      color: #111827;
+      letter-spacing: 0;
+    }
+
+    .transaction-center-header p {
+      margin: 6px 0 0;
+      max-width: 720px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+
+    .transaction-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .transaction-tab {
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      color: #374151;
+      border-radius: 8px;
+      min-height: 40px;
+      padding: 0 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .transaction-tab.active {
+      background: #111827;
+      border-color: #111827;
+      color: #ffffff;
+    }
+
+    .transaction-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .transaction-card {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 188px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    }
+
+    .transaction-card-top {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .transaction-card-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #f3f4f6;
+      color: #111827;
+      flex: 0 0 auto;
+      font-size: 18px;
+    }
+
+    .transaction-card h3 {
+      margin: 0;
+      font-size: 17px;
+      color: #111827;
+      letter-spacing: 0;
+    }
+
+    .transaction-card p {
+      margin: 8px 0 0;
+      color: #6b7280;
+      line-height: 1.45;
+    }
+
+    .transaction-card-actions {
+      margin-top: 18px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .transaction-card-actions a {
+      min-height: 38px;
+      padding: 0 14px;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #ffffff;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .transaction-empty {
+      display: none;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+      border-radius: 8px;
+      padding: 14px 16px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 640px) {
+      .transaction-center-header h2 {
+        font-size: 21px;
+      }
+
+      .transaction-card {
+        min-height: 170px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand">
+          <a href="dashboard.html" class="logo" title="Go to dashboard">
+            <img src="icons/icon-512.png" alt="ERP" />
+          </a>
+          <h2>ERP PANEL</h2>
+          <p>Jewellery Management</p>
+        </div>
+
+        <ul class="menu" id="transactionCenterMenu">
+          <li><a href="transaction-center.html" class="active"><i class="fas fa-table-columns"></i> Transaction Center</a></li>
+          <li><a href="daily-closing.html"><i class="fas fa-lock"></i> Daily Closing</a></li>
+          <li><a href="payment-accounts.html"><i class="fas fa-wallet"></i> Payment Accounts</a></li>
+          <li><a href="transaction-reversal.html"><i class="fas fa-rotate-left"></i> Reverse Transaction</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="top-left">
+          <button class="hamburger" type="button" onclick="toggleSidebar()" aria-label="Toggle sidebar">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div class="title">
+            <h1>Transaction Center</h1>
+            <p>Accounting workspace</p>
+          </div>
+        </div>
+        <div class="top-right">
+          <button type="button" onclick="window.location.href='dashboard.html'">Dashboard</button>
+          <button type="button" onclick="logoutUser()">Logout</button>
+          <div class="profile-box" id="profileBox"></div>
+        </div>
+      </div>
+
+      <section class="page active">
+        <div class="transaction-center-shell">
+          <div class="transaction-center-header">
+            <div>
+              <h2>Transactions</h2>
+              <p>Open the daily accounting tools from one place. Each page keeps its own posting, ledger, branch, and module controls.</p>
+            </div>
+          </div>
+
+          <div class="transaction-tabs" role="tablist" aria-label="Transaction center tabs">
+            <button class="transaction-tab active" type="button" data-tab="overview" role="tab" aria-selected="true"><i class="fas fa-chart-line"></i> Overview</button>
+            <button class="transaction-tab" type="button" data-tab="voucher" role="tab" aria-selected="false"><i class="fas fa-receipt"></i> New Voucher</button>
+            <button class="transaction-tab" type="button" data-tab="customer" role="tab" aria-selected="false"><i class="fas fa-book"></i> Customer Ledger</button>
+            <button class="transaction-tab" type="button" data-tab="party-metal" role="tab" aria-selected="false"><i class="fas fa-ring"></i> Party Metal</button>
+            <button class="transaction-tab" type="button" data-tab="cash-book" role="tab" aria-selected="false"><i class="fas fa-cash-register"></i> Cash / Branch Book</button>
+            <button class="transaction-tab" type="button" data-tab="account-ledger" role="tab" aria-selected="false"><i class="fas fa-book-open"></i> Account Ledger</button>
+            <button class="transaction-tab" type="button" data-tab="reports" role="tab" aria-selected="false"><i class="fas fa-file-lines"></i> Reports</button>
+          </div>
+
+          <div class="transaction-empty" id="transactionCenterEmpty">
+            No transaction modules are enabled for this company.
+          </div>
+
+          <div class="transaction-card-grid" id="transactionCenterCards">
+            <article class="transaction-card" data-center-card data-tab="overview" data-module-key="TRANSACTION_REPORTS">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-chart-line"></i></div>
+                <div>
+                  <h3>Transaction Dashboard</h3>
+                  <p>Review totals, payment balances, closing status, and transaction health.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="transaction-summary-dashboard.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="voucher" data-module-key="TRANSACTION">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-receipt"></i></div>
+                <div>
+                  <h3>New Voucher</h3>
+                  <p>Create transaction vouchers using the existing voucher workflow.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="transaction.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="customer" data-module-key="CUSTOMER_LEDGER">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-book"></i></div>
+                <div>
+                  <h3>Customer Ledger</h3>
+                  <p>Track customer opening balances, dues, payments, refunds, and running balances.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="customer-ledger.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="party-metal" data-module-key="PARTY_METAL_ACCOUNT">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-ring"></i></div>
+                <div>
+                  <h3>Party Metal</h3>
+                  <p>Manage supplier, karigar, bullion, and party metal receive, return, payment, and ledger views.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="party-metal-account.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="cash-book" data-module-key="BRANCH_CASH_BOOK">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-cash-register"></i></div>
+                <div>
+                  <h3>Cash / Branch Book</h3>
+                  <p>Check branch-scoped cash and payment movements with daily operating visibility.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="branch-cash-book.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="account-ledger" data-module-key="PAYMENT_ACCOUNTS">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-book-open"></i></div>
+                <div>
+                  <h3>Account Ledger</h3>
+                  <p>Review CASH, UPI, BANK, and CARD account movement with running balance.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="account-ledger.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+
+            <article class="transaction-card" data-center-card data-tab="reports" data-module-key="TRANSACTION_REPORTS">
+              <div class="transaction-card-top">
+                <div class="transaction-card-icon"><i class="fas fa-file-lines"></i></div>
+                <div>
+                  <h3>Reports</h3>
+                  <p>Open transaction reporting for accounting review and reconciliation.</p>
+                </div>
+              </div>
+              <div class="transaction-card-actions">
+                <a href="transaction-reports.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/toast.js"></script>
+  <script>
+    requireLogin();
+    requirePageAccess("transaction-center");
+    filterSidebarMenuByRole();
+    renderProfileBox();
+
+    (function initTransactionCenter() {
+      const tabs = Array.from(document.querySelectorAll(".transaction-tab"));
+      const cards = Array.from(document.querySelectorAll("[data-center-card]"));
+      const emptyState = document.getElementById("transactionCenterEmpty");
+
+      function canShowCard(card) {
+        const moduleKey = card.dataset.moduleKey || "";
+        return !moduleKey || typeof isModuleEnabled !== "function" || isModuleEnabled(moduleKey);
+      }
+
+      function renderTab(tabKey) {
+        let visibleCount = 0;
+
+        tabs.forEach((tab) => {
+          const isActive = tab.dataset.tab === tabKey;
+          tab.classList.toggle("active", isActive);
+          tab.setAttribute("aria-selected", isActive ? "true" : "false");
+        });
+
+        cards.forEach((card) => {
+          const shouldShow = card.dataset.tab === tabKey && canShowCard(card);
+          card.style.display = shouldShow ? "" : "none";
+          if (shouldShow) visibleCount += 1;
+        });
+
+        if (emptyState) {
+          emptyState.style.display = visibleCount ? "none" : "block";
+        }
+      }
+
+      tabs.forEach((tab) => {
+        tab.addEventListener("click", () => renderTab(tab.dataset.tab));
+      });
+
+      renderTab("overview");
+    })();
+  </script>
+</body>
+</html>

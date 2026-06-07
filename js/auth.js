@@ -21,6 +21,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   process: ["SUPERADMIN", "OWNER", "STAFF"],
   "staff-management": ["SUPERADMIN", "OWNER"],
   "expense-manager": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
+  "transaction-center": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   transaction: ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "transaction-reports": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "customer-ledger": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
@@ -30,6 +31,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   "payment-accounts": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "account-ledger": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "daily-closing": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
+  "party-metal-account": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "profit-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "lot-commercial-analytics": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "barcode-lifecycle": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
@@ -71,6 +73,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "process.html": "process",
   "staff-management.html": "staff-management",
   "expense-manager.html": "expense-manager",
+  "transaction-center.html": "transaction-center",
   "transaction.html": "transaction",
   "transaction-reports.html": "transaction-reports",
   "customer-ledger.html": "customer-ledger",
@@ -80,6 +83,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "payment-accounts.html": "payment-accounts",
   "account-ledger.html": "account-ledger",
   "daily-closing.html": "daily-closing",
+  "party-metal-account.html": "party-metal-account",
   "profit-report.html": "profit-report",
   "lot-commercial-analytics.html": "lot-commercial-analytics",
   "barcode-lifecycle.html": "barcode-lifecycle",
@@ -110,7 +114,7 @@ const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
 const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "company-package-enforcement", "enforcement-qa-dashboard"]);
-const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction", "transaction-reports", "customer-ledger", "branch-cash-book", "transaction-summary-dashboard", "transaction-reversal", "payment-accounts", "account-ledger", "daily-closing", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction-center", "transaction", "transaction-reports", "customer-ledger", "branch-cash-book", "transaction-summary-dashboard", "transaction-reversal", "payment-accounts", "account-ledger", "daily-closing", "party-metal-account", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
 const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "sales-dashboard",
   "stock",
@@ -119,12 +123,14 @@ const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "return",
   "sales-history",
   "daily-report",
+  "transaction-center",
   "transaction",
   "transaction-reports",
   "customer-ledger",
   "branch-cash-book",
   "account-ledger",
   "daily-closing",
+  "party-metal-account",
   "profit-report",
   "branch-receive",
   "branch-transfer-history"
@@ -168,15 +174,10 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", pageKey: "return", href: "return.html", label: "Return", icon: "fas fa-rotate-left", moduleKey: "RETURN" },
   { mode: "sales", pageKey: "sales-history", href: "sales-history.html", label: "Sales History", icon: "fas fa-clock-rotate-left", moduleKey: "SALES" },
   { mode: "sales", pageKey: "daily-report", href: "daily-report.html", label: "Daily Report", icon: "fas fa-chart-line", moduleKey: "DAILY_REPORT" },
-  { mode: "sales", group: "accounting", pageKey: "transaction", href: "transaction.html", label: "Transaction", icon: "fas fa-arrow-right-arrow-left", moduleKey: "TRANSACTION" },
-  { mode: "sales", group: "accounting", pageKey: "transaction-summary-dashboard", href: "transaction-summary-dashboard.html", label: "Transaction Dashboard", icon: "fas fa-chart-line", moduleKey: "TRANSACTION_REPORTS" },
-  { mode: "sales", group: "accounting", pageKey: "transaction-reports", href: "transaction-reports.html", label: "Transaction Reports", icon: "fas fa-file-lines", moduleKey: "TRANSACTION_REPORTS" },
-  { mode: "sales", group: "accounting", pageKey: "customer-ledger", href: "customer-ledger.html", label: "Customer Ledger", icon: "fas fa-book", moduleKey: "CUSTOMER_LEDGER" },
-  { mode: "sales", group: "accounting", pageKey: "branch-cash-book", href: "branch-cash-book.html", label: "Branch Cash Book", icon: "fas fa-cash-register", moduleKey: "BRANCH_CASH_BOOK" },
-  { mode: "sales", group: "accounting", pageKey: "account-ledger", href: "account-ledger.html", label: "Account Ledger", icon: "fas fa-book-open", moduleKey: "PAYMENT_ACCOUNTS" },
+  { mode: "sales", group: "accounting", pageKey: "transaction-center", href: "transaction-center.html", label: "Transaction Center", icon: "fas fa-table-columns", moduleKeys: ["TRANSACTION", "TRANSACTION_REPORTS", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "PAYMENT_ACCOUNTS", "PARTY_METAL_ACCOUNT"] },
   { mode: "sales", group: "accounting", pageKey: "payment-accounts", href: "payment-accounts.html", label: "Payment Accounts", icon: "fas fa-wallet", moduleKey: "PAYMENT_ACCOUNTS" },
   { mode: "sales", group: "accounting", pageKey: "daily-closing", href: "daily-closing.html", label: "Daily Closing", icon: "fas fa-lock", moduleKey: "DAILY_CLOSING" },
-  { mode: "sales", group: "accounting", pageKey: "transaction-reversal", href: "transaction-reversal.html", label: "Transaction Reversal", icon: "fas fa-rotate-left", moduleKey: "TRANSACTION_REVERSAL" },
+  { mode: "sales", group: "accounting", pageKey: "transaction-reversal", href: "transaction-reversal.html", label: "Reverse Transaction", icon: "fas fa-rotate-left", moduleKey: "TRANSACTION_REVERSAL" },
   { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "lot-commercial-analytics", href: "lot-commercial-analytics.html", label: "Lot Commercial Analytics", icon: "fas fa-chart-line", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline", moduleKey: "AUDIT" },
@@ -823,10 +824,31 @@ function isModulePreviewDebugMode() {
   return window.ERP_MODULE_PREVIEW_MODE === true || document.body?.dataset?.modulePreview === "1";
 }
 
+function getNavigationItemModuleKeys(item = {}) {
+  const keys = [];
+
+  if (Array.isArray(item.moduleKeys)) {
+    item.moduleKeys.forEach((moduleKey) => {
+      const normalizedModuleKey = normalizeErpModuleKey(moduleKey);
+      if (normalizedModuleKey) keys.push(normalizedModuleKey);
+    });
+  }
+
+  const normalizedModuleKey = normalizeErpModuleKey(item.moduleKey);
+  if (normalizedModuleKey) keys.push(normalizedModuleKey);
+
+  return [...new Set(keys)];
+}
+
+function isAnyNavigationModuleEnabled(item = {}) {
+  const moduleKeys = getNavigationItemModuleKeys(item);
+  if (!moduleKeys.length) return true;
+  return moduleKeys.some((moduleKey) => isModuleEnabled(moduleKey));
+}
+
 function canShowNavigationItem(item, user = null) {
   if (!item || !canAccessPage(item.pageKey, user)) return false;
-  if (!item.moduleKey) return true;
-  if (isModuleEnabled(item.moduleKey)) return true;
+  if (isAnyNavigationModuleEnabled(item)) return true;
   if (isModulePreviewDebugMode()) return true;
   if (isSuperAdmin(user) && ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES.has(item.pageKey)) return true;
   return false;
@@ -835,7 +857,9 @@ function canShowNavigationItem(item, user = null) {
 function getCurrentPageModuleKey() {
   const currentPage = getCurrentPageKey();
   const item = ERP_NAVIGATION_ITEMS.find((navItem) => navItem.pageKey === currentPage);
-  return item?.moduleKey || ERP_PAGE_MODULE_KEYS[currentPage] || "";
+  const moduleKeys = getNavigationItemModuleKeys(item);
+  if (moduleKeys.length) return moduleKeys.find((moduleKey) => isModuleEnabled(moduleKey)) || moduleKeys[0];
+  return ERP_PAGE_MODULE_KEYS[currentPage] || "";
 }
 
 function renderModulePreviewWarningIfNeeded() {
@@ -871,7 +895,9 @@ function getModuleDisplayName(moduleKey = "") {
   const normalizedModuleKey = normalizeErpModuleKey(moduleKey);
   if (!normalizedModuleKey) return "";
 
-  const navItem = ERP_NAVIGATION_ITEMS.find((item) => normalizeErpModuleKey(item.moduleKey) === normalizedModuleKey);
+  const navItem =
+    ERP_NAVIGATION_ITEMS.find((item) => normalizeErpModuleKey(item.moduleKey) === normalizedModuleKey) ||
+    ERP_NAVIGATION_ITEMS.find((item) => getNavigationItemModuleKeys(item).includes(normalizedModuleKey));
   if (navItem?.label) return navItem.label;
 
   const contextItem = getCompanyModulePreviewContext()?.moduleList?.find(
@@ -1199,10 +1225,12 @@ function toggleErpNavGroup(groupKey) {
 }
 
 function renderNavigationItem(item, currentPage) {
-  const disabled = Boolean(isModulePreviewDebugMode() && item.moduleKey && !isModuleEnabled(item.moduleKey));
+  const moduleKeys = getNavigationItemModuleKeys(item);
+  const moduleKey = moduleKeys[0] || "";
+  const disabled = Boolean(isModulePreviewDebugMode() && moduleKeys.length && !isAnyNavigationModuleEnabled(item));
   return `
     <li>
-      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""} ${disabled ? "erp-module-preview-disabled" : ""}" data-module-key="${item.moduleKey || ""}">
+      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""} ${disabled ? "erp-module-preview-disabled" : ""}" data-module-key="${moduleKey}">
         <i class="${item.icon}"></i> ${item.label}
         ${disabled ? `<span class="erp-module-disabled-badge">Disabled</span>` : ""}
       </a>

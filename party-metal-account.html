@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Party Metal Account</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .metal-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.metal-tab{border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:9px 12px;cursor:pointer}.metal-tab.active{background:#0f172a;color:#fff;border-color:#0f172a}.metal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metal-panel{border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:14px}.metal-panel.full{grid-column:1/-1}.cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.card{border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:12px}.card span{display:block;color:#64748b;font-size:12px}.card strong{display:block;font-size:18px;margin-top:4px}.tab-view.hidden{display:none}@media(max-width:1050px){.metal-grid,.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.metal-grid,.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="transaction-summary-dashboard.html"><i class="fas fa-chart-line"></i> Transaction Dashboard</a></li>
+      <li><a href="customer-ledger.html"><i class="fas fa-book"></i> Customer Ledger</a></li>
+      <li><a href="branch-cash-book.html"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
+      <li><a href="party-metal-account.html" class="active"><i class="fas fa-ring"></i> Party Metal Account</a></li>
+      <li><a href="payment-accounts.html"><i class="fas fa-wallet"></i> Payment Accounts</a></li>
+      <li><a href="transaction-reversal.html"><i class="fas fa-rotate-left"></i> Transaction Reversal</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Party Metal Account</h1><p>Supplier, karigar, and bullion metal ledger</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active">
+        <div class="section-box">
+          <div class="cards">
+            <div class="card"><span>Supplier Due</span><strong id="supplierDue">Rs 0.00</strong></div>
+            <div class="card"><span>Karigar Due</span><strong id="karigarDue">Rs 0.00</strong></div>
+            <div class="card"><span>Silver Balance</span><strong id="silverBalance">0.000 gm</strong></div>
+            <div class="card"><span>Gold Balance</span><strong id="goldBalance">0.000 gm</strong></div>
+            <div class="card"><span>Outstanding Parties</span><strong id="outstandingCount">0</strong></div>
+          </div>
+
+          <div class="metal-tabs">
+            <button class="metal-tab active" type="button" data-tab="received">Metal Received</button>
+            <button class="metal-tab" type="button" data-tab="returned">Metal Returned</button>
+            <button class="metal-tab" type="button" data-tab="payment">Payment Given</button>
+            <button class="metal-tab" type="button" data-tab="ledger">Party Ledger</button>
+            <button class="metal-tab" type="button" data-tab="summary">Party Summary</button>
+          </div>
+
+          <div id="received" class="tab-view">
+            <div class="metal-panel">
+              <div class="metal-grid">
+                <div class="input-box"><label>Party Type</label><select id="recvPartyType" data-party-type><option>SUPPLIER</option><option>KARIGAR</option><option>BULLION</option><option>CUSTOMER</option></select></div>
+                <div class="input-box"><label>Party</label><select id="recvParty" data-party></select></div>
+                <div class="input-box"><label>Date</label><input id="recvDate" type="date" /></div>
+                <div class="input-box"><label>Branch</label><select id="recvBranch" data-branch></select></div>
+                <div class="input-box"><label>Metal Type</label><select id="recvMetal"><option>SILVER</option><option>GOLD</option></select></div>
+                <div class="input-box"><label>Purity %</label><input id="recvPurity" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Gross Weight</label><input id="recvGross" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Fine Weight</label><input id="recvFine" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Rate Per Gram</label><input id="recvRate" type="number" step="0.01" /></div>
+                <div class="input-box"><label>Total Value</label><input id="recvValue" type="number" step="0.01" /></div>
+                <div class="input-box"><label>Quantity</label><input id="recvQty" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Product Name</label><input id="recvProduct" /></div>
+                <div class="input-box"><label>Reference Number</label><input id="recvRef" /></div>
+                <div class="input-box"><label>Remarks</label><input id="recvRemarks" /></div>
+              </div>
+              <button class="primary-btn" type="button" onclick="submitMetal('received')">Save Metal Received</button>
+            </div>
+          </div>
+
+          <div id="returned" class="tab-view hidden">
+            <div class="metal-panel">
+              <div class="metal-grid">
+                <div class="input-box"><label>Party Type</label><select id="retPartyType" data-party-type><option>SUPPLIER</option><option>KARIGAR</option><option>BULLION</option><option>CUSTOMER</option></select></div>
+                <div class="input-box"><label>Party</label><select id="retParty" data-party></select></div>
+                <div class="input-box"><label>Date</label><input id="retDate" type="date" /></div>
+                <div class="input-box"><label>Branch</label><select id="retBranch" data-branch></select></div>
+                <div class="input-box"><label>Metal Type</label><select id="retMetal"><option>SILVER</option><option>GOLD</option></select></div>
+                <div class="input-box"><label>Purity %</label><input id="retPurity" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Gross Weight</label><input id="retGross" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Fine Weight</label><input id="retFine" type="number" step="0.001" /></div>
+                <div class="input-box"><label>Rate</label><input id="retRate" type="number" step="0.01" /></div>
+                <div class="input-box"><label>Value</label><input id="retValue" type="number" step="0.01" /></div>
+                <div class="input-box"><label>Reference Number</label><input id="retRef" /></div>
+                <div class="input-box"><label>Remarks</label><input id="retRemarks" /></div>
+              </div>
+              <button class="primary-btn" type="button" onclick="submitMetal('returned')">Save Metal Returned</button>
+            </div>
+          </div>
+
+          <div id="payment" class="tab-view hidden">
+            <div class="metal-panel">
+              <div class="metal-grid">
+                <div class="input-box"><label>Party Type</label><select id="payPartyType" data-party-type><option>SUPPLIER</option><option>KARIGAR</option><option>BULLION</option><option>CUSTOMER</option></select></div>
+                <div class="input-box"><label>Party</label><select id="payParty" data-party></select></div>
+                <div class="input-box"><label>Date</label><input id="payDate" type="date" /></div>
+                <div class="input-box"><label>Branch</label><select id="payBranch" data-branch></select></div>
+                <div class="input-box"><label>Amount</label><input id="payAmount" type="number" step="0.01" /></div>
+                <div class="input-box"><label>Account</label><select id="payAccount"></select></div>
+                <div class="input-box"><label>Reference Number</label><input id="payRef" /></div>
+                <div class="input-box"><label>Remarks</label><input id="payRemarks" /></div>
+              </div>
+              <button class="primary-btn" type="button" onclick="submitPayment()">Save Payment</button>
+            </div>
+          </div>
+
+          <div id="ledger" class="tab-view hidden">
+            <div class="metal-panel">
+              <div class="metal-grid">
+                <div class="input-box"><label>Party</label><select id="ledgerParty"></select></div>
+                <div class="input-box"><label>Branch</label><select id="ledgerBranch" data-branch></select></div>
+                <div class="input-box"><label>From</label><input id="ledgerFrom" type="date" /></div>
+                <div class="input-box"><label>To</label><input id="ledgerTo" type="date" /></div>
+              </div>
+              <button class="primary-btn" type="button" onclick="loadLedger()">Load Ledger</button>
+              <div class="table-wrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Reference</th><th>Party</th><th>Metal</th><th>Metal In</th><th>Metal Out</th><th>Running Gross</th><th>Running Fine</th><th>Value</th><th>Payment</th><th>Due</th></tr></thead><tbody id="ledgerBody"></tbody></table></div>
+            </div>
+          </div>
+
+          <div id="summary" class="tab-view hidden">
+            <div class="metal-panel">
+              <div class="metal-grid">
+                <div class="input-box"><label>Party Type</label><select id="summaryPartyType"><option value="">All</option><option>SUPPLIER</option><option>KARIGAR</option><option>BULLION</option><option>CUSTOMER</option></select></div>
+                <div class="input-box"><label>Branch</label><select id="summaryBranch" data-branch></select></div>
+                <div class="input-box"><label>Search</label><input id="summarySearch" /></div>
+              </div>
+              <button class="primary-btn" type="button" onclick="loadSummary()">Load Summary</button>
+              <div class="table-wrap"><table><thead><tr><th>Party</th><th>Type</th><th>Received</th><th>Returned</th><th>Gross Balance</th><th>Fine Balance</th><th>Metal Value</th><th>Paid</th><th>Due</th><th>Last Txn</th></tr></thead><tbody id="summaryBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const API_BASE=window.ERP_API_BASE;let parties=[];let accounts=[];
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    function weight(v){return `${Number(v||0).toFixed(3)} gm`}
+    function params(branchValue){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());if(branchValue)p.set("branchId",branchValue);return p}
+    async function fetchJson(url,opt){const r=await fetch(url,{cache:"no-store",credentials:"include",headers:{"Content-Type":"application/json"},...(opt||{})});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.message||"Request failed");return d}
+    function selectedText(select){return select?.options?.[select.selectedIndex]?.textContent||""}
+    function today(){return new Date().toISOString().slice(0,10)}
+    function partyTypeValue(v){return String(v||"").toUpperCase()==="BULLION"?"BULLION_PARTY":String(v||"").toUpperCase()}
+    function partyTypeLabel(v){return String(v||"")==="BULLION_PARTY"?"BULLION":String(v||"")}
+    function calcFine(prefix){const gross=Number(document.getElementById(`${prefix}Gross`)?.value||0);const purity=Number(document.getElementById(`${prefix}Purity`)?.value||0);const fine=gross>0&&purity>0?(gross*purity)/100:0;const fineEl=document.getElementById(`${prefix}Fine`);if(fineEl&&!fineEl.dataset.manual)fineEl.value=fine?fine.toFixed(3):"";calcValue(prefix)}
+    function calcValue(prefix){const fine=Number(document.getElementById(`${prefix}Fine`)?.value||0);const rate=Number(document.getElementById(`${prefix}Rate`)?.value||0);const valueEl=document.getElementById(`${prefix}Value`);if(valueEl&&!valueEl.dataset.manual)valueEl.value=fine&&rate?(fine*rate).toFixed(2):""}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    function setTab(name){document.querySelectorAll(".metal-tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));document.querySelectorAll(".tab-view").forEach(v=>v.classList.toggle("hidden",v.id!==name));if(name==="ledger")loadLedger();if(name==="summary")loadSummary()}
+    async function loadBranches(){try{const d=await fetchJson(`${API_BASE}/branches?${params()}`);const opts='<option value="">Select Branch</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("");document.querySelectorAll("[data-branch]").forEach(s=>{s.innerHTML=opts})}catch(e){document.querySelectorAll("[data-branch]").forEach(s=>{s.innerHTML='<option value="">Branch unavailable</option>'})}}
+    async function loadParties(){const d=await fetchJson(`${API_BASE}/transaction/parties?${params()}`);parties=(d.parties||[]).filter(p=>["SUPPLIER","KARIGAR","BULLION_PARTY","CUSTOMER"].includes(String(p.party_type||"").toUpperCase()));renderPartySelects()}
+    function renderPartySelects(){document.querySelectorAll("[data-party]").forEach(select=>{const type=partyTypeValue(document.getElementById(select.id.replace("Party","PartyType"))?.value||"");const list=parties.filter(p=>!type||String(p.party_type||"").toUpperCase()===type);select.innerHTML='<option value="">Select Party</option>'+list.map(p=>`<option value="${Number(p.id)}">${esc(p.party_name)} (${esc(partyTypeLabel(p.party_type))})</option>`).join("")});ledgerParty.innerHTML='<option value="">All Parties</option>'+parties.map(p=>`<option value="${Number(p.id)}">${esc(p.party_name)} (${esc(partyTypeLabel(p.party_type))})</option>`).join("")}
+    async function loadAccounts(){try{const d=await fetchJson(`${API_BASE}/transaction/payment-accounts?${params(payBranch.value)}`);accounts=d.accounts||[];payAccount.innerHTML='<option value="">Select Account</option>'+accounts.map(a=>`<option value="${Number(a.id)}">${esc(a.account_name)} - ${esc(a.account_type)} (${esc(a.branch_label||"")})</option>`).join("")}catch(e){payAccount.innerHTML='<option value="">Select Account</option>'}}
+    function metalPayload(prefix){const party=document.getElementById(`${prefix}Party`);const branch=document.getElementById(`${prefix}Branch`);return{partyId:Number(party.value||0),partyType:partyTypeValue(document.getElementById(`${prefix}PartyType`).value),date:document.getElementById(`${prefix}Date`).value,branchId:Number(branch.value||0),metalType:document.getElementById(`${prefix}Metal`).value,purity:Number(document.getElementById(`${prefix}Purity`).value||0),grossWeight:Number(document.getElementById(`${prefix}Gross`).value||0),fineWeight:Number(document.getElementById(`${prefix}Fine`).value||0),ratePerGram:Number(document.getElementById(`${prefix}Rate`).value||0),totalValue:Number(document.getElementById(`${prefix}Value`).value||0),quantity:Number(document.getElementById(`${prefix}Qty`)?.value||0),productName:document.getElementById(`${prefix}Product`)?.value||"",referenceNo:document.getElementById(`${prefix}Ref`).value.trim(),remarks:document.getElementById(`${prefix}Remarks`).value.trim(),idempotency_key:`PM-${Date.now()}-${Math.random().toString(36).slice(2,8)}`}}
+    async function submitMetal(kind){try{const prefix=kind==="received"?"recv":"ret";const payload=metalPayload(prefix);if(!payload.partyId||!payload.branchId||!payload.metalType||payload.grossWeight<=0)throw new Error("Party, branch, metal, and weight are required");await fetchJson(`${API_BASE}/transaction/party-metal/${kind}?${params(payload.branchId)}`,{method:"POST",body:JSON.stringify(payload)});showToast("Voucher saved","success");await refreshReports()}catch(e){showToast(e.message,"error")}}
+    async function submitPayment(){try{const payload={partyId:Number(payParty.value||0),partyType:partyTypeValue(payPartyType.value),date:payDate.value,branchId:Number(payBranch.value||0),amount:Number(payAmount.value||0),accountId:Number(payAccount.value||0)||null,referenceNo:payRef.value.trim(),remarks:payRemarks.value.trim(),idempotency_key:`PMP-${Date.now()}-${Math.random().toString(36).slice(2,8)}`};if(!payload.partyId||!payload.branchId||payload.amount<=0||!payload.accountId)throw new Error("Party, branch, amount, and payment account are required");await fetchJson(`${API_BASE}/transaction/party-metal/payment?${params(payload.branchId)}`,{method:"POST",body:JSON.stringify(payload)});showToast("Payment saved","success");await refreshReports()}catch(e){showToast(e.message,"error")}}
+    function ledgerParams(){const p=params(ledgerBranch.value);if(ledgerParty.value)p.set("partyId",ledgerParty.value);if(ledgerFrom.value)p.set("fromDate",ledgerFrom.value);if(ledgerTo.value)p.set("toDate",ledgerTo.value);return p}
+    async function loadLedger(){try{const d=await fetchJson(`${API_BASE}/transaction/party-metal/ledger?${ledgerParams()}`);ledgerBody.innerHTML=(d.rows||[]).map(r=>`<tr><td>${esc(r.voucher_date||"")}</td><td>${esc(r.voucher_no||"")}</td><td>${esc(r.reference_no||"")}</td><td>${esc(r.party_name||"")}</td><td>${esc(r.metal_type||"Cash")}</td><td>${weight(r.gross_in)}</td><td>${weight(r.gross_out)}</td><td>${weight(r.running_gross_balance)}</td><td>${weight(r.running_fine_balance)}</td><td>${money(r.value)}</td><td>${money(r.payment)}</td><td>${money(r.due_balance)}</td></tr>`).join("")||'<tr><td colspan="12">No ledger data</td></tr>'}catch(e){showToast(e.message,"error")}}
+    function summaryParams(){const p=params(summaryBranch.value);if(summaryPartyType.value)p.set("partyType",summaryPartyType.value);if(summarySearch.value.trim())p.set("search",summarySearch.value.trim());return p}
+    async function loadSummary(){try{const d=await fetchJson(`${API_BASE}/transaction/party-metal/summary?${summaryParams()}`);const dash=d.dashboard||{};supplierDue.textContent=money(dash.totalSupplierDue);karigarDue.textContent=money(dash.totalKarigarDue);silverBalance.textContent=weight(dash.totalSilverBalance);goldBalance.textContent=weight(dash.totalGoldBalance);outstandingCount.textContent=Number((dash.topOutstandingParties||[]).length);summaryBody.innerHTML=(d.summaries||[]).map(r=>`<tr><td>${esc(r.party_name)}</td><td>${esc(partyTypeLabel(r.party_type))}</td><td>${weight(r.total_metal_received)}</td><td>${weight(r.total_metal_returned)}</td><td>${weight(r.gross_balance)}</td><td>${weight(r.fine_balance)}</td><td>${money(r.total_metal_value)}</td><td>${money(r.total_paid)}</td><td>${money(r.current_due)}</td><td>${esc(r.last_transaction_date||"")}</td></tr>`).join("")||'<tr><td colspan="10">No summary data</td></tr>'}catch(e){showToast(e.message,"error")}}
+    async function refreshReports(){await Promise.all([loadSummary(),loadLedger()])}
+    document.querySelectorAll(".metal-tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
+    document.querySelectorAll("[data-party-type]").forEach(s=>s.addEventListener("change",renderPartySelects));
+    ["recv","ret"].forEach(p=>["Gross","Purity"].forEach(k=>document.getElementById(`${p}${k}`).addEventListener("input",()=>calcFine(p))));
+    ["recv","ret"].forEach(p=>["Fine","Rate"].forEach(k=>document.getElementById(`${p}${k}`).addEventListener("input",()=>calcValue(p))));
+    ["recv","ret"].forEach(p=>document.getElementById(`${p}Value`).addEventListener("input",e=>{e.target.dataset.manual="1"}));
+    ["recv","ret"].forEach(p=>document.getElementById(`${p}Fine`).addEventListener("input",e=>{e.target.dataset.manual="1";calcValue(p)}));
+    payBranch.addEventListener("change",loadAccounts);
+    window.addEventListener("load",async()=>{profileBox.textContent=user()?.name||user()?.email||"User";["recvDate","retDate","payDate"].forEach(id=>document.getElementById(id).value=today());await loadBranches();await loadParties();await loadAccounts();await refreshReports()});
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("party-metal-account");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

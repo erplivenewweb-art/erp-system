@@ -46,6 +46,7 @@ const PROTECTED_PAGES = new Set([
   "material-stock.html",
   "daily-report.html",
   "expense-manager.html",
+  "transaction-center.html",
   "transaction.html",
   "transaction-reports.html",
   "customer-ledger.html",
@@ -55,6 +56,7 @@ const PROTECTED_PAGES = new Set([
   "payment-accounts.html",
   "account-ledger.html",
   "daily-closing.html",
+  "party-metal-account.html",
   "profit-report.html",
   "reconciliation-dashboard.html",
   "lot-commercial-analytics.html",
@@ -109,6 +111,7 @@ const OPERATIONAL_MUTATION_PATHS = [
   "/transaction/payment-accounts",
   "/transaction/account-ledger",
   "/transaction/daily-closing",
+  "/transaction/party-metal",
   "/transaction/parties",
   "/transaction/transactions",
   "/updatesticker/"
@@ -310,6 +313,39 @@ function getSafeSmtpDiagnostic(error) {
   return "SMTP verification failed. Check provider settings and credentials.";
 }
 
+function sanitizeSmtpText(value = "") {
+  let clean = String(value || "").trim();
+  const secrets = [
+    process.env.SMTP_PASS,
+    process.env.SMTP_USER,
+    process.env.SMTP_FROM
+  ].filter((item) => String(item || "").trim());
+
+  secrets.forEach((secret) => {
+    const escaped = String(secret).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    clean = clean.replace(new RegExp(escaped, "g"), "<redacted>");
+  });
+
+  return clean;
+}
+
+function getSafeSmtpErrorDetails(error) {
+  return {
+    code: error?.code || "",
+    command: error?.command || "",
+    responseCode: error?.responseCode || "",
+    response: sanitizeSmtpText(error?.response || error?.message || "")
+  };
+}
+
+function logSafeSmtpError(prefix, error) {
+  const details = getSafeSmtpErrorDetails(error);
+  console.warn(`${prefix} code=${details.code || "(none)"} command=${details.command || "(none)"} responseCode=${details.responseCode || "(none)"}`);
+  if (details.response) {
+    console.warn(`${prefix} response=${details.response}`);
+  }
+}
+
 function getEmailDomainOnly(value) {
   const clean = String(value || "").trim();
   const atIndex = clean.lastIndexOf("@");
@@ -318,9 +354,10 @@ function getEmailDomainOnly(value) {
 
 function getSmtpPassState() {
   const pass = String(process.env.SMTP_PASS || "").trim();
+  const compactPass = pass.replace(/\s+/g, "");
   if (!pass) return "missing";
   if (isSmtpPlaceholderValue(pass)) return "placeholder";
-  return `set length ${pass.length}`;
+  return `set length ${compactPass.length}${pass.length !== compactPass.length ? " (whitespace removed for auth)" : ""}`;
 }
 
 function parseEnvBoolean(value, fallback = false) {
@@ -443,6 +480,11 @@ const startupStatus = {
 
 function logDbStartupConfig() {
   console.log("[STARTUP] DB CONFIG:", getSafeMysqlStartupConfig());
+}
+
+function isLocalRequest(req) {
+  const ip = getRequestIpAddress(req).replace(/^::ffff:/, "");
+  return ["127.0.0.1", "::1", "localhost"].includes(ip);
 }
 
 function getSafeMysqlStartupConfig() {
@@ -820,7 +862,7 @@ function getSmtpConfig() {
     port,
     secure: parseEnvBoolean(process.env.SMTP_SECURE, port === 465),
     user: String(process.env.SMTP_USER || "").trim(),
-    pass: String(process.env.SMTP_PASS || "").trim(),
+    pass: String(process.env.SMTP_PASS || "").trim().replace(/\s+/g, ""),
     from: String(process.env.SMTP_FROM || "").trim()
   };
 }
@@ -855,6 +897,25 @@ function assertSmtpAvailableForOtp() {
   }
 }
 
+function createSmtpTransporter(config = getSmtpConfig()) {
+  // Gmail requires an App Password. A normal Gmail password will be rejected with 535-5.7.8.
+  const transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
+    auth: {
+      user: config.user,
+      pass: config.pass
+    }
+  });
+
+  transporter._erpFromEmail = config.from;
+  return transporter;
+}
+
 function getMailTransporter() {
   const config = getSmtpConfig();
   if (!config.enabled || startupStatus.smtp === "disabled" || startupStatus.smtp === "failed") {
@@ -879,21 +940,7 @@ function getMailTransporter() {
     throw new Error(EMAIL_SERVICE_NOT_CONFIGURED_MESSAGE);
   }
 
-  // Gmail requires an App Password. A normal Gmail password will be rejected with 535-5.7.8.
-  mailTransporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
-    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
-    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
-    auth: {
-      user: config.user,
-      pass: config.pass
-    }
-  });
-
-  mailTransporter._erpFromEmail = config.from;
+  mailTransporter = createSmtpTransporter(config);
 
   return mailTransporter;
 }
@@ -935,6 +982,7 @@ async function testSmtpConnection() {
     markSmtpUnavailable(getSafeSmtpDiagnostic(error));
     console.warn("[STARTUP] SMTP verification failed. Email features are disabled until SMTP settings are fixed.");
     console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
+    logSafeSmtpError("[STARTUP] SMTP detail:", error);
   }
 }
 
@@ -1006,12 +1054,15 @@ const TRANSACTION_TYPES = [
   "PAYMENT_RECEIVED",
   "PAYMENT_RECEIVED_REVERSAL",
   "PAYMENT_GIVEN",
+  "PAYMENT_GIVEN_REVERSAL",
   "ADVANCE_RECEIVED",
   "ADVANCE_GIVEN",
   "CASH_ADJUSTMENT",
   "CASH_ADJUSTMENT_REVERSAL",
   "METAL_RECEIVED",
+  "METAL_RECEIVED_REVERSAL",
   "METAL_GIVEN",
+  "METAL_GIVEN_REVERSAL",
   "METAL_ADJUSTMENT",
   "METAL_SETTLEMENT_RECEIVED",
   "METAL_SETTLEMENT_REVERSAL",
@@ -2701,6 +2752,11 @@ function normalizeCompanySettingsRow(row) {
     declaration: "",
     upi_id: "",
     upi_name: "",
+    logo_url: "",
+    logo_data_url: "",
+    customer_note: "",
+    thank_you_message: "",
+    signature_label: "",
     business_state: "Odisha",
     default_bill_type: "GST",
     default_tax_type: "CGST_SGST",
@@ -2709,7 +2765,8 @@ function normalizeCompanySettingsRow(row) {
     subscription_plan: "basic",
     subscription_status: "active",
     subscription_start_date: "",
-    subscription_end_date: ""
+    subscription_end_date: "",
+    signature_image_data_url: ""
   };
 
   if (!row) return base;
@@ -2725,6 +2782,11 @@ function normalizeCompanySettingsRow(row) {
     declaration: String(row.declaration || "").trim(),
     upi_id: String(row.upi_id || "").trim(),
     upi_name: String(row.upi_name || "").trim(),
+    logo_url: String(row.logo_url || "").trim(),
+    logo_data_url: String(row.logo_data_url || "").trim(),
+    customer_note: String(row.customer_note || "").trim(),
+    thank_you_message: String(row.thank_you_message || "").trim(),
+    signature_label: String(row.signature_label || "").trim(),
     business_state: String(row.business_state || "Odisha").trim() || "Odisha",
     default_bill_type: String(row.default_bill_type || "GST").trim() || "GST",
     default_tax_type: String(row.default_tax_type || "CGST_SGST").trim() || "CGST_SGST",
@@ -2733,7 +2795,8 @@ function normalizeCompanySettingsRow(row) {
     subscription_plan: String(row.subscription_plan || "basic").trim() || "basic",
     subscription_status: String(row.subscription_status || "active").trim() || "active",
     subscription_start_date: row.subscription_start_date || "",
-    subscription_end_date: row.subscription_end_date || ""
+    subscription_end_date: row.subscription_end_date || "",
+    signature_image_data_url: String(row.signature_image_data_url || "").trim()
   };
 }
 
@@ -7517,17 +7580,68 @@ async function verifyOtpSessionToken(connection, { email, purpose, sessionToken,
       AND session_token_hash = ?
       AND verified_at IS NOT NULL
       AND consumed_at IS NULL
-      AND session_expires_at IS NOT NULL
-      AND session_expires_at >= NOW()
+      AND (
+        ? = ?
+        OR (session_expires_at IS NOT NULL AND session_expires_at >= NOW())
+      )
       AND (? IS NULL OR user_id = ?)
       AND (? IS NULL OR company_id <=> ?)
     ORDER BY id DESC
     LIMIT 1
     `,
-    [email, purpose, tokenHash, userId, userId, companyId, companyId]
+    [email, purpose, tokenHash, purpose, OTP_PURPOSES.SETTINGS_UNLOCK, userId, userId, companyId, companyId]
   );
 
   return rows[0] || null;
+}
+
+async function consumeSettingsUnlockSessions(connection, {
+  id = null,
+  userId = null,
+  companyId = null,
+  email = "",
+  sessionToken = ""
+} = {}) {
+  const clauses = ["purpose = ?", "consumed_at IS NULL"];
+  const params = [OTP_PURPOSES.SETTINGS_UNLOCK];
+
+  if (id !== null && id !== undefined) {
+    clauses.push("id = ?");
+    params.push(Number(id));
+  }
+  if (userId !== null && userId !== undefined) {
+    clauses.push("user_id = ?");
+    params.push(Number(userId));
+  }
+  if (companyId !== null && companyId !== undefined) {
+    clauses.push("company_id <=> ?");
+    params.push(Number(companyId));
+  }
+  const cleanEmail = normalizeEmail(email);
+  if (cleanEmail) {
+    clauses.push("LOWER(email) = LOWER(?)");
+    params.push(cleanEmail);
+  }
+  const cleanToken = String(sessionToken || "").trim();
+  if (cleanToken) {
+    clauses.push("session_token_hash = ?");
+    params.push(hashSecret(cleanToken));
+  }
+
+  if (clauses.length <= 2) {
+    return { affectedRows: 0 };
+  }
+
+  const [result] = await connection.query(
+    `
+    UPDATE otp_verifications
+    SET consumed_at = NOW(),
+        updated_at = NOW()
+    WHERE ${clauses.join(" AND ")}
+    `,
+    params
+  );
+  return result;
 }
 
 function estimateReturnLineAmount(saleItem, saleRow) {
@@ -8411,6 +8525,7 @@ const ERP_MODULE_CATALOG = [
   { key: "TRANSACTION_REVERSAL", name: "Transaction Reversal", category: "FINANCE", description: "Controlled transaction reversal workflow", sortOrder: 342 },
   { key: "PAYMENT_ACCOUNTS", name: "Payment Accounts", category: "FINANCE", description: "Cash, UPI, bank, and card account ledgers", sortOrder: 344 },
   { key: "DAILY_CLOSING", name: "Daily Closing", category: "FINANCE", description: "Branch daily cash closing and reopening audit", sortOrder: 346 },
+  { key: "PARTY_METAL_ACCOUNT", name: "Party Metal Account", category: "FINANCE", description: "Supplier, karigar, and bullion party metal accounting", sortOrder: 348 },
   { key: "PROFIT_REPORT", name: "Profit Report", category: "FINANCE", description: "Profit and loss reporting", sortOrder: 350 },
   { key: "BRANCH", name: "Branch", category: "BRANCH", description: "Branch setup and branch context", sortOrder: 400 },
   { key: "BRANCH_TRANSFER", name: "Branch Transfer", category: "BRANCH", description: "Branch stock transfer workflows", sortOrder: 410 },
@@ -8434,9 +8549,9 @@ const ERP_PLAN_CATALOG = [
 
 const ERP_PLAN_MODULES = {
   PRODUCTION_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
-  STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING"],
+  STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING", "PARTY_METAL_ACCOUNT"],
   PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
-  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING"],
+  STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING", "PARTY_METAL_ACCOUNT"],
   BRANCH_STORE: [
     "DASHBOARD",
     "SETTINGS",
@@ -8457,6 +8572,7 @@ const ERP_PLAN_MODULES = {
     "TRANSACTION_REVERSAL",
     "PAYMENT_ACCOUNTS",
     "DAILY_CLOSING",
+    "PARTY_METAL_ACCOUNT",
     "BRANCH",
     "BRANCH_TRANSFER",
     "BRANCH_RECEIVE",
@@ -8474,7 +8590,8 @@ const PHASE3_ACCOUNTING_MODULE_KEYS = [
   "BRANCH_CASH_BOOK",
   "PAYMENT_ACCOUNTS",
   "DAILY_CLOSING",
-  "TRANSACTION_REVERSAL"
+  "TRANSACTION_REVERSAL",
+  "PARTY_METAL_ACCOUNT"
 ];
 
 const PHASE3_ACCOUNTING_AUTO_ENABLE_PLANS = ["FULL_ERP", "STORE_SYSTEM", "STORE_ONLY"];
@@ -9113,6 +9230,8 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "PAYMENT_ACCOUNTS", pattern: /^\/transaction\/account-ledger(?:\/|$)?/i },
   { moduleKey: "DAILY_CLOSING", pattern: /^\/daily-closing(?:\.html)?$/i },
   { moduleKey: "DAILY_CLOSING", pattern: /^\/transaction\/daily-closing(?:\/|$)?/i },
+  { moduleKey: "PARTY_METAL_ACCOUNT", pattern: /^\/party-metal-account(?:\.html)?$/i },
+  { moduleKey: "PARTY_METAL_ACCOUNT", pattern: /^\/transaction\/party-metal(?:\/|$)?/i },
   { moduleKey: "CUSTOMER_LEDGER", pattern: /^\/customer-ledger(?:\.html)?$/i },
   { moduleKey: "CUSTOMER_LEDGER", pattern: /^\/transaction\/customer-ledger(?:\/|$)?/i },
   { moduleKey: "BRANCH_CASH_BOOK", pattern: /^\/branch-cash-book(?:\.html)?$/i },
@@ -10732,6 +10851,7 @@ async function ensureSchema() {
       transaction_type VARCHAR(60) DEFAULT '',
       party_id INT NOT NULL,
       party_type VARCHAR(50) DEFAULT '',
+      branch_id INT DEFAULT NULL,
       status VARCHAR(50) DEFAULT 'POSTED',
       reference_no VARCHAR(120) DEFAULT '',
       invoice_no VARCHAR(120) DEFAULT '',
@@ -10846,6 +10966,7 @@ async function ensureSchema() {
       debit_amount DECIMAL(14,2) DEFAULT 0.00,
       credit_amount DECIMAL(14,2) DEFAULT 0.00,
       running_balance DECIMAL(14,2) DEFAULT 0.00,
+      branch_id INT DEFAULT NULL,
       account_id INT DEFAULT NULL,
       reference_type VARCHAR(60) DEFAULT '',
       reference_no VARCHAR(120) DEFAULT '',
@@ -10923,6 +11044,7 @@ async function ensureSchema() {
       entry_date DATE DEFAULT NULL,
       metal_type VARCHAR(20) DEFAULT '',
       entry_type VARCHAR(20) DEFAULT '',
+      branch_id INT DEFAULT NULL,
       purity DECIMAL(8,3) DEFAULT 0.000,
       gross_in DECIMAL(14,3) DEFAULT 0.000,
       gross_out DECIMAL(14,3) DEFAULT 0.000,
@@ -11391,6 +11513,11 @@ async function ensureSchema() {
       declaration TEXT DEFAULT NULL,
       upi_id VARCHAR(255) DEFAULT '',
       upi_name VARCHAR(255) DEFAULT '',
+      logo_url VARCHAR(1000) DEFAULT '',
+      logo_data_url LONGTEXT NULL,
+      customer_note TEXT DEFAULT NULL,
+      thank_you_message TEXT DEFAULT NULL,
+      signature_label VARCHAR(255) DEFAULT '',
       business_state VARCHAR(120) DEFAULT 'Odisha',
       default_bill_type VARCHAR(50) DEFAULT 'GST',
       default_tax_type VARCHAR(50) DEFAULT 'CGST_SGST',
@@ -11400,6 +11527,7 @@ async function ensureSchema() {
       subscription_status VARCHAR(80) DEFAULT 'active',
       subscription_start_date DATE DEFAULT NULL,
       subscription_end_date DATE DEFAULT NULL,
+      signature_image_data_url LONGTEXT NULL,
       created_by INT DEFAULT NULL,
       updated_by INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -12233,6 +12361,11 @@ async function ensureSchema() {
     await addColumnIfMissing("company_settings", "declaration", "TEXT DEFAULT NULL");
     await addColumnIfMissing("company_settings", "upi_id", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("company_settings", "upi_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("company_settings", "logo_url", "VARCHAR(1000) DEFAULT ''");
+    await addColumnIfMissing("company_settings", "logo_data_url", "LONGTEXT NULL");
+    await addColumnIfMissing("company_settings", "customer_note", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("company_settings", "thank_you_message", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("company_settings", "signature_label", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("company_settings", "business_state", "VARCHAR(120) DEFAULT 'Odisha'");
     await addColumnIfMissing("company_settings", "default_bill_type", "VARCHAR(50) DEFAULT 'GST'");
     await addColumnIfMissing("company_settings", "default_tax_type", "VARCHAR(50) DEFAULT 'CGST_SGST'");
@@ -12242,6 +12375,7 @@ async function ensureSchema() {
     await addColumnIfMissing("company_settings", "subscription_status", "VARCHAR(80) DEFAULT 'active'");
     await addColumnIfMissing("company_settings", "subscription_start_date", "DATE DEFAULT NULL");
     await addColumnIfMissing("company_settings", "subscription_end_date", "DATE DEFAULT NULL");
+    await addColumnIfMissing("company_settings", "signature_image_data_url", "LONGTEXT NULL");
     await addColumnIfMissing("company_settings", "created_by", "INT DEFAULT NULL");
     await addColumnIfMissing("company_settings", "updated_by", "INT DEFAULT NULL");
     await addColumnIfMissing("company_settings", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
@@ -12635,6 +12769,7 @@ async function ensureSchema() {
 
   if (await tableExists("transaction_master")) {
     await addColumnIfMissingSafe("transaction_master", "idempotency_key", "VARCHAR(120) DEFAULT ''");
+    await addColumnIfMissing("transaction_master", "branch_id", "INT DEFAULT NULL");
     await addColumnIfMissing("transaction_master", "reversal_transaction_id", "INT DEFAULT NULL");
     await addColumnIfMissing("transaction_master", "reversed_at", "DATETIME DEFAULT NULL");
     await addColumnIfMissing("transaction_master", "reversed_by", "INT DEFAULT NULL");
@@ -12644,6 +12779,7 @@ async function ensureSchema() {
     await addIndexIfMissing("transaction_master", "idx_txn_company_status", "(company_id, status)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_invoice", "(company_id, invoice_no)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_date", "(company_id, voucher_date)");
+    await addIndexIfMissing("transaction_master", "idx_txn_company_branch_date", "(company_id, branch_id, voucher_date)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_source_voucher", "(company_id, source_module, voucher_no)");
     await addIndexIfMissing("transaction_master", "idx_txn_company_idempotency", "(company_id, idempotency_key)");
     await addIndexIfMissing("transaction_master", "idx_txn_reversal_txn", "(company_id, reversal_transaction_id)");
@@ -12710,11 +12846,13 @@ async function ensureSchema() {
   }
 
   if (await tableExists("cash_ledger")) {
+    await addColumnIfMissing("cash_ledger", "branch_id", "INT DEFAULT NULL");
     await addColumnIfMissing("cash_ledger", "account_id", "INT DEFAULT NULL");
     await addIndexIfMissing("cash_ledger", "idx_cash_company_party", "(company_id, party_id)");
     await addIndexIfMissing("cash_ledger", "idx_cash_transaction", "(transaction_id)");
     await addIndexIfMissing("cash_ledger", "idx_cash_company_date", "(company_id, entry_date)");
     await addIndexIfMissing("cash_ledger", "idx_cash_account_date", "(company_id, account_id, entry_date)");
+    await addIndexIfMissing("cash_ledger", "idx_cash_branch_date", "(company_id, branch_id, entry_date)");
   }
 
   if (await tableExists("payment_accounts")) {
@@ -12737,10 +12875,12 @@ async function ensureSchema() {
   }
 
   if (await tableExists("metal_ledger")) {
+    await addColumnIfMissing("metal_ledger", "branch_id", "INT DEFAULT NULL");
     await addIndexIfMissing("metal_ledger", "idx_metal_company_party", "(company_id, party_id)");
     await addIndexIfMissing("metal_ledger", "idx_metal_transaction", "(transaction_id)");
     await addIndexIfMissing("metal_ledger", "idx_metal_company_date", "(company_id, entry_date)");
     await addIndexIfMissing("metal_ledger", "idx_metal_company_type", "(company_id, metal_type)");
+    await addIndexIfMissing("metal_ledger", "idx_metal_branch_date", "(company_id, branch_id, entry_date)");
   }
 
   await seedDefaultProcessTemplatesForCompanies();
@@ -12926,7 +13066,7 @@ async function resolvePaymentAccountId(connection, payload = {}) {
   }
 
   const referenceType = String(payload.referenceType || "").trim().toUpperCase();
-  const shouldAutoAccount = ["PAYMENT_RECEIVED", "EXPENSE_PAYMENT", "CASH_REFUND_PAID", "CASH_ADJUSTMENT"].includes(referenceType)
+  const shouldAutoAccount = ["PAYMENT_RECEIVED", "PAYMENT_GIVEN", "EXPENSE_PAYMENT", "CASH_REFUND_PAID", "CASH_ADJUSTMENT"].includes(referenceType)
     || referenceType.endsWith("_REVERSAL");
   if (!shouldAutoAccount) return null;
 
@@ -13037,10 +13177,10 @@ async function createCashLedgerEntry(connection, payload) {
     INSERT INTO cash_ledger
     (
       company_id, party_id, transaction_id, entry_date, entry_type,
-      debit_amount, credit_amount, running_balance, account_id,
+      debit_amount, credit_amount, running_balance, branch_id, account_id,
       reference_type, reference_no, remarks, created_by
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       companyId,
@@ -13051,6 +13191,7 @@ async function createCashLedgerEntry(connection, payload) {
       debitAmount,
       creditAmount,
       runningBalance,
+      payload.branchId ?? payload.branch_id ?? null,
       accountId,
       String(payload.referenceType || "").trim(),
       String(payload.referenceNo || "").trim(),
@@ -13088,12 +13229,12 @@ async function createMetalLedgerEntry(connection, payload) {
     `
     INSERT INTO metal_ledger
     (
-      company_id, party_id, transaction_id, entry_date, metal_type, entry_type,
+      company_id, party_id, transaction_id, entry_date, metal_type, entry_type, branch_id,
       purity, gross_in, gross_out, fine_in, fine_out,
       running_gross_balance, running_fine_balance,
       reference_type, reference_no, lot_no, remarks, created_by
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       companyId,
@@ -13102,6 +13243,7 @@ async function createMetalLedgerEntry(connection, payload) {
       String(payload.entryDate || getTodayDateOnly()).trim(),
       metalType,
       normalizeMetalEntryType(payload.entryType),
+      payload.branchId ?? payload.branch_id ?? null,
       toNumber(payload.purity),
       grossIn,
       grossOut,
@@ -14399,6 +14541,69 @@ app.get("/ready", async (req, res) => {
   }
 });
 
+app.get("/dev/smtp-test", async (req, res) => {
+  if (!isLocalRuntime() || isProductionRuntime() || !isLocalRequest(req)) {
+    return res.status(404).json({ success: false, message: "Not found" });
+  }
+
+  const config = getSmtpConfig();
+  const safeConfig = {
+    enabled: config.enabled,
+    host: config.host || "(missing)",
+    port: config.port,
+    secure: config.secure,
+    userDomain: getEmailDomainOnly(config.user),
+    fromDomain: getEmailDomainOnly(config.from),
+    passState: getSmtpPassState()
+  };
+
+  try {
+    if (!config.enabled) {
+      return res.status(400).json({ success: false, message: "SMTP is disabled", smtp: safeConfig });
+    }
+
+    const missingSmtpEnv = getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS);
+    if (missingSmtpEnv.length) {
+      return res.status(400).json({
+        success: false,
+        message: `SMTP configuration is incomplete. Missing: ${missingSmtpEnv.join(", ")}`,
+        smtp: safeConfig
+      });
+    }
+
+    if (hasPlaceholderSmtpConfig()) {
+      return res.status(400).json({
+        success: false,
+        message: getSmtpPlaceholderMessage(),
+        smtp: safeConfig
+      });
+    }
+
+    const transporter = createSmtpTransporter(config);
+    await transporter.verify();
+    await transporter.sendMail({
+      from: config.from,
+      to: config.user,
+      subject: "ERP SMTP Test",
+      text: `ERP SMTP test succeeded at ${new Date().toISOString()}.`
+    });
+
+    return res.json({
+      success: true,
+      message: "SMTP verify passed and test email was sent to SMTP_USER.",
+      smtp: safeConfig
+    });
+  } catch (error) {
+    logSafeSmtpError("[DEV] SMTP test detail:", error);
+    return res.status(500).json({
+      success: false,
+      message: getSafeSmtpDiagnostic(error),
+      smtp: safeConfig,
+      error: getSafeSmtpErrorDetails(error)
+    });
+  }
+});
+
 function getBackupDir() {
   return path.resolve(FRONTEND_ROOT, process.env.BACKUP_DIR || "backups");
 }
@@ -15580,6 +15785,9 @@ app.post("/otp/verify", async (req, res) => {
     }
 
     const sessionToken = generateSessionToken();
+    const sessionExpiresAt = purpose === OTP_PURPOSES.SETTINGS_UNLOCK
+      ? null
+      : getFutureDate(OTP_SESSION_EXPIRY_MINUTES);
     await connection.query(
       `
       UPDATE otp_verifications
@@ -15590,7 +15798,7 @@ app.post("/otp/verify", async (req, res) => {
           updated_at = NOW()
       WHERE id = ?
       `,
-      [hashSecret(sessionToken), getFutureDate(OTP_SESSION_EXPIRY_MINUTES), otpRow.id]
+      [hashSecret(sessionToken), sessionExpiresAt, otpRow.id]
     );
 
     await logOtpActivitySafe(connection, req, access, "OTP_VERIFY", "success", "OTP verified", {
@@ -15803,6 +16011,11 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
       declaration: req.body.declaration,
       upi_id: req.body.upi_id,
       upi_name: req.body.upi_name,
+      logo_url: req.body.logo_url,
+      logo_data_url: req.body.logo_data_url,
+      customer_note: req.body.customer_note,
+      thank_you_message: req.body.thank_you_message,
+      signature_label: req.body.signature_label,
       business_state: req.body.business_state,
       default_bill_type: req.body.default_bill_type,
       default_tax_type: req.body.default_tax_type,
@@ -15811,7 +16024,8 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
       subscription_plan: req.body.subscription_plan,
       subscription_status: req.body.subscription_status,
       subscription_start_date: req.body.subscription_start_date,
-      subscription_end_date: req.body.subscription_end_date
+      subscription_end_date: req.body.subscription_end_date,
+      signature_image_data_url: req.body.signature_image_data_url
     });
 
     const existingRow = await getCompanySettingsForCompany(connection, companyId);
@@ -15830,6 +16044,11 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
             declaration = ?,
             upi_id = ?,
             upi_name = ?,
+            logo_url = ?,
+            logo_data_url = ?,
+            customer_note = ?,
+            thank_you_message = ?,
+            signature_label = ?,
             business_state = ?,
             default_bill_type = ?,
             default_tax_type = ?,
@@ -15839,6 +16058,7 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
             subscription_status = ?,
             subscription_start_date = ?,
             subscription_end_date = ?,
+            signature_image_data_url = ?,
             updated_by = ?,
             updated_at = NOW()
         WHERE id = ?
@@ -15854,6 +16074,11 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
           payload.declaration,
           payload.upi_id,
           payload.upi_name,
+          payload.logo_url,
+          payload.logo_data_url || null,
+          payload.customer_note,
+          payload.thank_you_message,
+          payload.signature_label,
           payload.business_state,
           payload.default_bill_type,
           payload.default_tax_type,
@@ -15863,6 +16088,7 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
           payload.subscription_status,
           payload.subscription_start_date || null,
           payload.subscription_end_date || null,
+          payload.signature_image_data_url || null,
           createdBy,
           existingRow.id
         ]
@@ -15873,12 +16099,13 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
         INSERT INTO company_settings
         (
           company_id, owner_email, top_title, company_name, gstin, account_no, ifsc,
-          address, declaration, upi_id, upi_name, business_state, default_bill_type,
+          address, declaration, upi_id, upi_name, logo_url, logo_data_url, customer_note,
+          thank_you_message, signature_label, business_state, default_bill_type,
           default_tax_type, default_rate_per_gram, default_mc_rate, subscription_plan,
           subscription_status, subscription_start_date, subscription_end_date,
-          created_by, updated_by, created_at, updated_at
+          signature_image_data_url, created_by, updated_by, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
         `,
         [
           companyId,
@@ -15892,6 +16119,11 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
           payload.declaration,
           payload.upi_id,
           payload.upi_name,
+          payload.logo_url,
+          payload.logo_data_url || null,
+          payload.customer_note,
+          payload.thank_you_message,
+          payload.signature_label,
           payload.business_state,
           payload.default_bill_type,
           payload.default_tax_type,
@@ -15901,6 +16133,7 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
           payload.subscription_status,
           payload.subscription_start_date || null,
           payload.subscription_end_date || null,
+          payload.signature_image_data_url || null,
           createdBy,
           createdBy
         ]
@@ -15922,6 +16155,8 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
       }
     });
 
+    await consumeSettingsUnlockSessions(connection, { id: verifiedUnlock.id });
+
     return res.json({
       success: true,
       message: "Settings saved successfully",
@@ -15932,6 +16167,33 @@ app.post("/settings/company", authMiddleware, checkRole(["SUPERADMIN", "OWNER"])
     return res.status(500).json({
       success: false,
       message: "Company settings save failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.post("/settings/unlock/lock", authMiddleware, async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveCompanyAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+
+    connection = await pool.getConnection();
+    await consumeSettingsUnlockSessions(connection, {
+      userId: access.actingUserId ?? getRequestedUserId(req),
+      companyId: access.companyScope ?? getRequestedCompanyId(req),
+      email: req.body.verificationEmail || req.body.unlockEmail || req.body.ownerEmail || "",
+      sessionToken: req.body.settingsUnlockToken || ""
+    });
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Settings unlock lock error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Settings lock failed",
       error: getErrorDetail(error)
     });
   } finally {
@@ -17450,10 +17712,10 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
 
   const stickerWeight = toNumber(nextWeight);
   const stickerQty = toNumber(nextQty);
-  if (stickerWeight <= 0) {
+  if (stickerWeight < 0) {
     return {
       ok: false,
-      message: "Sticker weight must be greater than zero"
+      message: "Weight cannot be negative"
     };
   }
 
@@ -24520,8 +24782,8 @@ function normalizeStickerSaveItem(item = {}, index = 0) {
   }
 
   const parsedWeight = parseRequiredNumber(item.weight, `${rowLabel} weight`);
-  if (!parsedWeight.ok || parsedWeight.value <= 0) {
-    throw createStickerBulkError(`${rowLabel}: ${parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message}`);
+  if (!parsedWeight.ok || parsedWeight.value < 0) {
+    throw createStickerBulkError(`${rowLabel}: ${parsedWeight.ok ? "Weight cannot be negative" : parsedWeight.message}`);
   }
 
   const qtyProvided = hasProvidedValue(item.qty);
@@ -24986,7 +25248,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       });
     }
 
-    if (!serial || !productName || !purity || !sku || !size || !weight || !lot || !barcode) {
+    if (!serial || !productName || !purity || !sku || !size || !hasProvidedValue(weight) || !lot || !barcode) {
       return res.json({
         success: false,
         message: "Serial, product, purity, SKU, size, weight, lot, and barcode are required"
@@ -24999,10 +25261,10 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     await ensureSingleStockBarcode(finalCompanyId, cleanBarcode);
 
     const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
-    if (!parsedWeight.ok || parsedWeight.value <= 0) {
+    if (!parsedWeight.ok || parsedWeight.value < 0) {
       return res.json({
         success: false,
-        message: parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message
+        message: parsedWeight.ok ? "Weight cannot be negative" : parsedWeight.message
       });
     }
 
@@ -25248,7 +25510,7 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
       });
     }
 
-    if (!serial || !productName || !purity || !sku || !size || !weight || !lot) {
+    if (!serial || !productName || !purity || !sku || !size || !hasProvidedValue(weight) || !lot) {
       return res.json({
         success: false,
         message: "Serial, product, purity, SKU, size, weight, and lot are required"
@@ -25262,10 +25524,10 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     await ensureSingleStockBarcode(finalCompanyId, newBarcode);
 
     const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
-    if (!parsedWeight.ok || parsedWeight.value <= 0) {
+    if (!parsedWeight.ok || parsedWeight.value < 0) {
       return res.json({
         success: false,
-        message: parsedWeight.ok ? "Sticker weight must be greater than zero" : parsedWeight.message
+        message: parsedWeight.ok ? "Weight cannot be negative" : parsedWeight.message
       });
     }
 
@@ -38000,16 +38262,29 @@ app.post("/login", loginRateLimiter, async (req, res) => {
 });
 
 app.post("/auth/logout", async (req, res) => {
+  const logoutUserId = getRequestedUserId(req);
   await logActivitySafe(pool, req, null, {
-    userId: getRequestedUserId(req),
+    userId: logoutUserId,
     actorRole: req.user?.role || "",
     actionType: "LOGOUT",
     entityType: "AUTH",
-    entityId: String(getRequestedUserId(req) || ""),
+    entityId: String(logoutUserId || ""),
     moduleName: "auth",
     status: "success",
     message: "Logout successful"
   });
+
+  if (logoutUserId !== null) {
+    let connection;
+    try {
+      connection = await pool.getConnection();
+      await consumeSettingsUnlockSessions(connection, { userId: logoutUserId });
+    } catch (error) {
+      console.warn("Settings unlock logout cleanup failed:", getErrorDetail(error));
+    } finally {
+      if (connection) connection.release();
+    }
+  }
 
   res.clearCookie(AUTH_COOKIE_NAME, getClearAuthCookieOptions());
 
@@ -39413,7 +39688,7 @@ app.get("/transaction/reversal/search", authMiddleware, async (req, res) => {
     const whereParts = ["tm.company_id = ?", `tm.transaction_type IN (${sqlInList(Array.from(REVERSIBLE_TRANSACTION_TYPES))})`];
     const params = [access.companyScope, ...Array.from(REVERSIBLE_TRANSACTION_TYPES)];
     if (branchScope.isBranchFiltered) {
-      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      whereParts.push("COALESCE(tm.branch_id, itlb.branch_id, 0) = ?");
       params.push(branchScope.branchId);
     }
     if (search) {
@@ -39452,8 +39727,11 @@ app.get("/transaction/reversal/search", authMiddleware, async (req, res) => {
 
 const REVERSIBLE_TRANSACTION_TYPES = new Set([
   "PAYMENT_RECEIVED",
+  "PAYMENT_GIVEN",
   "EXPENSE_PAYMENT",
   "CASH_ADJUSTMENT",
+  "METAL_RECEIVED",
+  "METAL_GIVEN",
   "METAL_SETTLEMENT_RECEIVED",
   "RETURN_REFUND_PAYABLE",
   "CASH_REFUND_PAID"
@@ -39461,8 +39739,11 @@ const REVERSIBLE_TRANSACTION_TYPES = new Set([
 
 const REVERSAL_TRANSACTION_TYPE_BY_ORIGINAL = {
   PAYMENT_RECEIVED: "PAYMENT_RECEIVED_REVERSAL",
+  PAYMENT_GIVEN: "PAYMENT_GIVEN_REVERSAL",
   EXPENSE_PAYMENT: "EXPENSE_PAYMENT_REVERSAL",
   CASH_ADJUSTMENT: "CASH_ADJUSTMENT_REVERSAL",
+  METAL_RECEIVED: "METAL_RECEIVED_REVERSAL",
+  METAL_GIVEN: "METAL_GIVEN_REVERSAL",
   METAL_SETTLEMENT_RECEIVED: "METAL_SETTLEMENT_REVERSAL",
   RETURN_REFUND_PAYABLE: "RETURN_REFUND_PAYABLE_REVERSAL",
   CASH_REFUND_PAID: "CASH_REFUND_REVERSAL"
@@ -39483,14 +39764,14 @@ async function getTransactionForReversal(connection, companyId, transactionId) {
     `
     SELECT
       tm.*,
-      COALESCE(itlb.branch_id, NULL) AS branch_id,
+      COALESCE(tm.branch_id, itlb.branch_id, NULL) AS branch_id,
       pm.party_name,
       b.branch_name,
       b.branch_code
     FROM transaction_master tm
     LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
     ${getTransactionBranchJoinSql("tm")}
-    LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+    LEFT JOIN branches b ON b.id = COALESCE(tm.branch_id, itlb.branch_id) AND b.company_id = tm.company_id
     WHERE tm.company_id = ?
       AND tm.id = ?
     LIMIT 1
@@ -39673,10 +39954,10 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
       INSERT INTO transaction_master
       (
         company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
-        status, reference_no, invoice_no, source_module, payment_mode, payment_status,
+        branch_id, status, reference_no, invoice_no, source_module, payment_mode, payment_status,
         remarks, note, reversal_of_transaction_id, created_by
       )
-      VALUES (?, ?, CURDATE(), ?, ?, ?, 'POSTED', ?, ?, 'transaction-reversal', ?, 'REVERSED', ?, ?, ?, ?)
+      VALUES (?, ?, CURDATE(), ?, ?, ?, ?, 'POSTED', ?, ?, 'transaction-reversal', ?, 'REVERSED', ?, ?, ?, ?)
       `,
       [
         access.companyScope,
@@ -39684,6 +39965,7 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
         reversalType,
         original.party_id,
         original.party_type || "CUSTOMER",
+        original.branch_id ?? null,
         original.voucher_no || String(original.id),
         original.invoice_no || "",
         original.payment_mode || "",
@@ -39825,6 +40107,7 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
         referenceNo: voucherNo,
         lotNo: metalRow.lot_no || "",
         remarks: `Reversal of metal ledger #${metalRow.id}: ${reason}`,
+        branchId: original.branch_id ?? metalRow.branch_id ?? null,
         createdBy
       });
     }
@@ -39866,6 +40149,649 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
     return res.status(error.status || 500).json({ success: false, message: error.message || "Transaction reversal failed", error: getErrorDetail(error) });
   } finally {
     if (connection) connection.release();
+  }
+});
+
+const PARTY_METAL_PARTY_TYPES = new Set(["SUPPLIER", "KARIGAR", "BULLION_PARTY", "CUSTOMER"]);
+const PARTY_METAL_TRANSACTION_TYPES = new Set([
+  "METAL_RECEIVED",
+  "METAL_RECEIVED_REVERSAL",
+  "METAL_GIVEN",
+  "METAL_GIVEN_REVERSAL",
+  "PAYMENT_GIVEN",
+  "PAYMENT_GIVEN_REVERSAL"
+]);
+
+function normalizePartyMetalPartyType(value = "") {
+  const clean = String(value || "").trim().toUpperCase();
+  if (clean === "BULLION") return "BULLION_PARTY";
+  return PARTY_METAL_PARTY_TYPES.has(clean) ? clean : "";
+}
+
+function getPartyMetalFineWeight(grossWeight, purity) {
+  const explicit = toNumber(grossWeight) * getPurityRatio(purity);
+  return explicit > 0 ? explicit : 0;
+}
+
+function validatePartyMetalFineWeight(grossWeight, purity, suppliedFineWeight) {
+  const expectedFineWeight = getPartyMetalFineWeight(grossWeight, purity);
+  const hasSuppliedFineWeight = suppliedFineWeight !== undefined && suppliedFineWeight !== null && String(suppliedFineWeight).trim() !== "";
+  const finalFineWeight = hasSuppliedFineWeight ? toNumber(suppliedFineWeight) : expectedFineWeight;
+  if (Math.abs(finalFineWeight - expectedFineWeight) > 0.001) {
+    const error = new Error(`Fine weight mismatch. Expected ${expectedFineWeight.toFixed(3)} gm for gross weight and purity.`);
+    error.status = 400;
+    throw error;
+  }
+  return finalFineWeight;
+}
+
+function getPartyMetalBranchId(branchScope, value) {
+  if (branchScope?.isBranchFiltered) return Number(branchScope.branchId || 0);
+  const branchId = Number(value || 0);
+  return Number.isFinite(branchId) && branchId > 0 ? branchId : 0;
+}
+
+async function assertPartyMetalBranch(connection, access, branchScope, branchId) {
+  const cleanBranchId = Number(branchId || 0);
+  if (!cleanBranchId) {
+    const error = new Error("Branch is required for party metal vouchers");
+    error.status = 400;
+    throw error;
+  }
+  assertTransactionBranchScope(access, branchScope, cleanBranchId);
+  await requireActiveBranchForCompany(connection, access.companyScope, cleanBranchId);
+}
+
+function getPartyMetalVoucherNo(prefix) {
+  return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`.slice(0, 100);
+}
+
+async function getPartyMetalAvailableBalance(connection, {
+  companyId,
+  partyId,
+  branchId,
+  metalType
+}) {
+  const [rows] = await connection.query(
+    `
+    SELECT
+      COALESCE(SUM(ml.gross_in), 0) - COALESCE(SUM(ml.gross_out), 0) AS gross_balance,
+      COALESCE(SUM(ml.fine_in), 0) - COALESCE(SUM(ml.fine_out), 0) AS fine_balance
+    FROM metal_ledger ml
+    INNER JOIN transaction_master tm ON tm.id = ml.transaction_id AND tm.company_id = ml.company_id
+    ${getTransactionBranchJoinSql("tm")}
+    WHERE ml.company_id = ?
+      AND ml.party_id = ?
+      AND ml.metal_type = ?
+      AND COALESCE(ml.branch_id, tm.branch_id, itlb.branch_id, 0) = ?
+    `,
+    [companyId, partyId, metalType, branchId]
+  );
+  return {
+    grossBalance: toNumber(rows[0]?.gross_balance),
+    fineBalance: toNumber(rows[0]?.fine_balance)
+  };
+}
+
+async function assertPartyMetalReturnAvailable(connection, payload) {
+  const available = await getPartyMetalAvailableBalance(connection, payload);
+  const grossWeight = toNumber(payload.grossWeight);
+  const fineWeight = toNumber(payload.fineWeight);
+  if (grossWeight - available.grossBalance > 0.001 || fineWeight - available.fineBalance > 0.001) {
+    const error = new Error(
+      `Metal return exceeds available ${payload.metalType} balance for this branch. Available gross ${available.grossBalance.toFixed(3)} gm, fine ${available.fineBalance.toFixed(3)} gm.`
+    );
+    error.status = 409;
+    throw error;
+  }
+}
+
+async function postPartyMetalVoucher(connection, req, access, branchScope, config) {
+  const finalUserId = access.actingUserId ?? getRequestedUserId(req);
+  const partyId = Number(req.body.partyId || req.body.party_id || 0);
+  const branchId = getPartyMetalBranchId(branchScope, req.body.branchId ?? req.body.branch_id);
+  const voucherDate = String(req.body.date || req.body.voucher_date || req.body.voucherDate || getTodayDateOnly()).trim();
+  const referenceNo = String(req.body.referenceNo || req.body.reference_no || "").trim();
+  const remarks = String(req.body.remarks || "").trim();
+  const idempotencyKey = String(req.body.idempotency_key || req.body.idempotencyKey || req.body.request_id || req.body.requestId || "").trim().slice(0, 120);
+  const voucherNo = String(req.body.voucherNo || req.body.voucher_no || getPartyMetalVoucherNo(config.prefix)).trim().slice(0, 100);
+  const sourceModule = "party-metal-account";
+
+  if (!partyId) {
+    const error = new Error("Party is required");
+    error.status = 400;
+    throw error;
+  }
+  await assertPartyMetalBranch(connection, access, branchScope, branchId);
+
+  const party = await getPartyByIdForCompany(connection, access.companyScope, partyId);
+  if (!party) {
+    const error = new Error("Party not found");
+    error.status = 404;
+    throw error;
+  }
+  const masterPartyType = normalizePartyMetalPartyType(party.party_type);
+  const requestedPartyType = normalizePartyMetalPartyType(req.body.partyType || req.body.party_type);
+  if (requestedPartyType && requestedPartyType !== masterPartyType) {
+    const error = new Error("Selected party type does not match party master");
+    error.status = 400;
+    throw error;
+  }
+  const partyType = masterPartyType;
+  if (!partyType) {
+    const error = new Error("Party type must be Supplier, Karigar, Bullion, or Customer");
+    error.status = 400;
+    throw error;
+  }
+
+  let metalDetails = null;
+  let paymentDetails = null;
+  if (config.kind === "METAL") {
+    const metalType = normalizeMetalType(req.body.metalType || req.body.metal_type);
+    const purity = toNumber(req.body.purity ?? 0);
+    const grossWeight = toNumber(req.body.grossWeight ?? req.body.gross_weight ?? 0);
+    const fineWeight = validatePartyMetalFineWeight(grossWeight, purity, req.body.fineWeight ?? req.body.fine_weight);
+    const ratePerGram = toNumber(req.body.ratePerGram ?? req.body.rate_per_gram ?? 0);
+    const metalValue = toNumber(req.body.totalValue ?? req.body.total_value ?? req.body.metalValue ?? req.body.metal_value ?? fineWeight * ratePerGram);
+    const qty = toNumber(req.body.quantity ?? req.body.qty ?? 0);
+    const productName = String(req.body.productName || req.body.product_name || req.body.description || "").trim();
+
+    if (!metalType || grossWeight <= 0) {
+      const error = new Error("Metal type and gross weight are required");
+      error.status = 400;
+      throw error;
+    }
+    if (config.metalEntryType === "OUT") {
+      await assertPartyMetalReturnAvailable(connection, {
+        companyId: access.companyScope,
+        partyId,
+        branchId,
+        metalType,
+        grossWeight,
+        fineWeight
+      });
+    }
+    metalDetails = { metalType, purity, grossWeight, fineWeight, ratePerGram, metalValue, qty, productName };
+  }
+
+  if (config.kind === "PAYMENT") {
+    const amount = toNumber(req.body.amount ?? req.body.cashAmount ?? req.body.cash_amount ?? 0);
+    const accountId = Number(req.body.accountId || req.body.account_id || req.body.paymentAccountId || 0);
+    if (amount <= 0) {
+      const error = new Error("Payment amount is required");
+      error.status = 400;
+      throw error;
+    }
+    if (!accountId) {
+      const error = new Error("Payment account is required for party metal payments");
+      error.status = 400;
+      throw error;
+    }
+    const account = await assertPaymentAccountBranchAccess(connection, access, accountId);
+    const accountBranchId = account.branch_id === null || account.branch_id === undefined ? null : Number(account.branch_id);
+    if (accountBranchId !== null && accountBranchId !== branchId) {
+      const error = new Error("Selected payment account belongs to another branch");
+      error.status = 403;
+      throw error;
+    }
+    paymentDetails = { amount, accountId, paymentMode: String(account.account_type || "").trim() };
+  }
+
+  const existingTransaction = await getExistingTransactionForRetry(connection, access.companyScope, {
+    idempotencyKey,
+    voucherNo,
+    sourceModule
+  });
+  if (existingTransaction?.id) return { duplicate: true, ...buildDuplicateTransactionResponse(existingTransaction) };
+
+  const [insertResult] = await connection.query(
+    `
+    INSERT INTO transaction_master
+    (
+      company_id, voucher_no, voucher_date, transaction_type, party_id, party_type,
+      branch_id, status, reference_no, source_module, idempotency_key,
+      payment_mode, payment_status, remarks, note, created_by
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      access.companyScope,
+      voucherNo,
+      voucherDate || null,
+      config.transactionType,
+      partyId,
+      partyType,
+      branchId,
+      referenceNo,
+      sourceModule,
+      idempotencyKey,
+      paymentDetails?.paymentMode || config.paymentMode || "",
+      config.paymentStatus || "",
+      remarks,
+      config.note || "",
+      finalUserId
+    ]
+  );
+  const transactionId = Number(insertResult.insertId || 0);
+
+  if (config.kind === "METAL") {
+    await connection.query(
+      `
+      INSERT INTO transaction_lines
+      (
+        transaction_id, line_no, item_name, metal_type, purity, gross_weight,
+        fine_weight, qty, rate_per_gram, metal_value, line_amount, remarks
+      )
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        transactionId,
+        metalDetails.productName,
+        metalDetails.metalType,
+        metalDetails.purity,
+        metalDetails.grossWeight,
+        metalDetails.fineWeight,
+        metalDetails.qty,
+        metalDetails.ratePerGram,
+        metalDetails.metalValue,
+        metalDetails.metalValue,
+        remarks
+      ]
+    );
+
+    await createMetalLedgerEntry(connection, {
+      companyId: access.companyScope,
+      partyId,
+      transactionId,
+      entryDate: voucherDate,
+      metalType: metalDetails.metalType,
+      entryType: config.metalEntryType,
+      purity: metalDetails.purity,
+      grossIn: config.metalEntryType === "IN" ? metalDetails.grossWeight : 0,
+      grossOut: config.metalEntryType === "OUT" ? metalDetails.grossWeight : 0,
+      fineIn: config.metalEntryType === "IN" ? metalDetails.fineWeight : 0,
+      fineOut: config.metalEntryType === "OUT" ? metalDetails.fineWeight : 0,
+      referenceType: config.transactionType,
+      referenceNo: voucherNo,
+      remarks,
+      branchId,
+      createdBy: finalUserId
+    });
+  }
+
+  if (config.kind === "PAYMENT") {
+    await connection.query(
+      `
+      INSERT INTO transaction_lines
+      (transaction_id, line_no, item_name, qty, line_amount, remarks)
+      VALUES (?, 1, 'Payment Given To Party', 1, ?, ?)
+      `,
+      [transactionId, paymentDetails.amount, remarks]
+    );
+
+    await createCashLedgerEntry(connection, {
+      companyId: access.companyScope,
+      partyId,
+      transactionId,
+      entryDate: voucherDate,
+      entryType: "DEBIT",
+      debitAmount: paymentDetails.amount,
+      creditAmount: 0,
+      referenceType: config.transactionType,
+      referenceNo: voucherNo,
+      remarks,
+      paymentMode: paymentDetails.paymentMode,
+      accountId: paymentDetails.accountId,
+      branchId,
+      createdBy: finalUserId
+    });
+  }
+
+  await connection.query(
+    `
+    INSERT INTO invoice_transaction_link
+    (company_id, invoice_no, transaction_id, branch_id, link_type, remarks, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    [access.companyScope, referenceNo || voucherNo, transactionId, branchId, config.transactionType, "Party metal branch scope", finalUserId]
+  );
+
+  await recalcPartyBalanceSummary(connection, access.companyScope, partyId, transactionId);
+  await writeAuditLogSafe(connection, req, {
+    companyId: access.companyScope,
+    userId: finalUserId ?? null,
+    actionType: `PARTY_METAL_${config.transactionType}`,
+    entityType: "TRANSACTION",
+    entityId: String(transactionId),
+    moduleName: "party-metal-account",
+    status: "success",
+    message: `${config.transactionType} party metal voucher created`,
+    metadata: { voucherNo, partyId, branchId, referenceNo }
+  });
+
+  return { success: true, transactionId, voucherNo };
+}
+
+async function handlePartyMetalCreate(req, res, config) {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const result = await postPartyMetalVoucher(connection, req, access, branchScope, config);
+    await connection.commit();
+    return res.json(result);
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Party metal voucher create error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal voucher create failed", error: getErrorDetail(error) });
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
+app.post("/transaction/party-metal/received", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
+  kind: "METAL",
+  prefix: "PMR",
+  transactionType: "METAL_RECEIVED",
+  metalEntryType: "IN",
+  note: "Metal received from party"
+}));
+
+app.post("/transaction/party-metal/returned", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
+  kind: "METAL",
+  prefix: "PMT",
+  transactionType: "METAL_GIVEN",
+  metalEntryType: "OUT",
+  note: "Metal returned to party"
+}));
+
+app.post("/transaction/party-metal/payment", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
+  kind: "PAYMENT",
+  prefix: "PMP",
+  transactionType: "PAYMENT_GIVEN",
+  paymentStatus: "PAID",
+  note: "Payment given to party"
+}));
+
+function getPartyMetalReportWhere(access, branchScope, req, alias = "tm") {
+  const partyId = Number(req.query.partyId || req.query.party_id || 0);
+  const partyType = normalizePartyMetalPartyType(req.query.partyType || req.query.party_type);
+  const metalType = normalizeMetalType(req.query.metalType || req.query.metal_type);
+  const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+  const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+  const search = String(req.query.search || "").trim().toLowerCase();
+  const whereParts = [`${alias}.company_id = ?`, `UPPER(${alias}.transaction_type) IN (${sqlInList(Array.from(PARTY_METAL_TRANSACTION_TYPES))})`];
+  const params = [access.companyScope, ...Array.from(PARTY_METAL_TRANSACTION_TYPES)];
+  if (branchScope.isBranchFiltered) {
+    whereParts.push(`COALESCE(${alias}.branch_id, itlb.branch_id, 0) = ?`);
+    params.push(branchScope.branchId);
+  }
+  if (partyId) {
+    whereParts.push(`${alias}.party_id = ?`);
+    params.push(partyId);
+  }
+  if (partyType) {
+    whereParts.push("pm.party_type = ?");
+    params.push(partyType);
+  }
+  if (fromDate) {
+    whereParts.push(`${alias}.voucher_date >= ?`);
+    params.push(fromDate);
+  }
+  if (toDate) {
+    whereParts.push(`${alias}.voucher_date <= ?`);
+    params.push(toDate);
+  }
+  if (metalType) {
+    whereParts.push("COALESCE(line_totals.metal_type, metal_totals.metal_type, '') = ?");
+    params.push(metalType);
+  }
+  if (search) {
+    whereParts.push("(LOWER(pm.party_name) LIKE ? OR LOWER(tm.voucher_no) LIKE ? OR LOWER(tm.reference_no) LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  return { whereParts, params };
+}
+
+function getPartyMetalAmountEffects(row = {}) {
+  const type = String(row.transaction_type || "").trim().toUpperCase();
+  const lineValue = toNumber(row.metal_value);
+  const cashDebit = toNumber(row.cash_debit ?? row.payment_amount);
+  const cashCredit = toNumber(row.cash_credit);
+  if (type === "METAL_RECEIVED") return { receivedValue: lineValue, returnedValue: 0, paid: 0, dueEffect: lineValue };
+  if (type === "METAL_RECEIVED_REVERSAL") return { receivedValue: -lineValue, returnedValue: 0, paid: 0, dueEffect: -lineValue };
+  if (type === "METAL_GIVEN") return { receivedValue: 0, returnedValue: lineValue, paid: 0, dueEffect: -lineValue };
+  if (type === "METAL_GIVEN_REVERSAL") return { receivedValue: 0, returnedValue: -lineValue, paid: 0, dueEffect: lineValue };
+  if (type === "PAYMENT_GIVEN") return { receivedValue: 0, returnedValue: 0, paid: cashDebit, dueEffect: -cashDebit };
+  if (type === "PAYMENT_GIVEN_REVERSAL") return { receivedValue: 0, returnedValue: 0, paid: -cashCredit, dueEffect: cashCredit };
+  return { receivedValue: 0, returnedValue: 0, paid: 0, dueEffect: 0 };
+}
+
+app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
+    const [rows] = await pool.query(
+      `
+      SELECT
+        tm.id,
+        tm.voucher_date,
+        tm.voucher_no,
+        tm.reference_no,
+        tm.transaction_type,
+        tm.party_id,
+        pm.party_name,
+        pm.party_type,
+        COALESCE(tm.branch_id, itlb.branch_id, NULL) AS branch_id,
+        b.branch_name,
+        b.branch_code,
+        COALESCE(line_totals.metal_type, metal_totals.metal_type, '') AS metal_type,
+        COALESCE(line_totals.purity, metal_totals.purity, 0) AS purity,
+        COALESCE(metal_totals.gross_in, 0) AS gross_in,
+        COALESCE(metal_totals.gross_out, 0) AS gross_out,
+        COALESCE(metal_totals.fine_in, 0) AS fine_in,
+        COALESCE(metal_totals.fine_out, 0) AS fine_out,
+        COALESCE(line_totals.metal_value, 0) AS metal_value,
+        COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
+        COALESCE(cash_totals.cash_credit, 0) AS cash_credit
+      FROM transaction_master tm
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+      ${getTransactionBranchJoinSql("tm")}
+      LEFT JOIN branches b ON b.id = COALESCE(tm.branch_id, itlb.branch_id) AND b.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT transaction_id, MAX(metal_type) AS metal_type, MAX(purity) AS purity, SUM(metal_value) AS metal_value
+        FROM transaction_lines
+        GROUP BY transaction_id
+      ) line_totals ON line_totals.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT transaction_id, MAX(metal_type) AS metal_type, MAX(purity) AS purity,
+          SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out, SUM(fine_in) AS fine_in, SUM(fine_out) AS fine_out
+        FROM metal_ledger
+        GROUP BY transaction_id
+      ) metal_totals ON metal_totals.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+        FROM cash_ledger
+        GROUP BY transaction_id
+      ) cash_totals ON cash_totals.transaction_id = tm.id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY tm.voucher_date ASC, tm.id ASC
+      `,
+      params
+    );
+
+    const runningMetalByPartyType = new Map();
+    const runningDueByParty = new Map();
+    const ledgerRows = rows.map((row) => {
+      const effects = getPartyMetalAmountEffects(row);
+      const grossIn = toNumber(row.gross_in);
+      const grossOut = toNumber(row.gross_out);
+      const fineIn = toNumber(row.fine_in);
+      const fineOut = toNumber(row.fine_out);
+      const metalType = normalizeMetalType(row.metal_type) || "CASH";
+      const metalBalanceKey = `${Number(row.party_id || 0)}|${metalType}`;
+      const dueBalanceKey = String(Number(row.party_id || 0));
+      const previousMetal = runningMetalByPartyType.get(metalBalanceKey) || { gross: 0, fine: 0 };
+      const nextMetal = {
+        gross: previousMetal.gross + grossIn - grossOut,
+        fine: previousMetal.fine + fineIn - fineOut
+      };
+      runningMetalByPartyType.set(metalBalanceKey, nextMetal);
+      const runningDue = toNumber(runningDueByParty.get(dueBalanceKey)) + effects.dueEffect;
+      runningDueByParty.set(dueBalanceKey, runningDue);
+      return {
+        ...row,
+        metal_type: metalType === "CASH" ? "" : metalType,
+        gross_in: grossIn,
+        gross_out: grossOut,
+        fine_in: fineIn,
+        fine_out: fineOut,
+        net_gross: grossIn - grossOut,
+        net_fine: fineIn - fineOut,
+        value: effects.receivedValue - effects.returnedValue,
+        payment: effects.paid,
+        running_gross_balance: nextMetal.gross,
+        running_fine_balance: nextMetal.fine,
+        due_balance: runningDue,
+        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned")
+      };
+    });
+
+    return res.json({
+      success: true,
+      rows: ledgerRows,
+      summary: {
+        partyDueBalances: Object.fromEntries(runningDueByParty),
+        partyMetalBalances: Object.fromEntries([...runningMetalByPartyType.entries()].map(([key, value]) => [key, value]))
+      },
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Party metal ledger error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal ledger failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
+    const [rows] = await pool.query(
+      `
+      SELECT
+        tm.id,
+        tm.voucher_date,
+        tm.transaction_type,
+        tm.party_id,
+        pm.party_name,
+        pm.party_type,
+        COALESCE(line_totals.metal_type, metal_totals.metal_type, '') AS metal_type,
+        COALESCE(metal_totals.gross_in, 0) AS gross_in,
+        COALESCE(metal_totals.gross_out, 0) AS gross_out,
+        COALESCE(metal_totals.fine_in, 0) AS fine_in,
+        COALESCE(metal_totals.fine_out, 0) AS fine_out,
+        COALESCE(line_totals.metal_value, 0) AS metal_value,
+        COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
+        COALESCE(cash_totals.cash_credit, 0) AS cash_credit
+      FROM transaction_master tm
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+      ${getTransactionBranchJoinSql("tm")}
+      LEFT JOIN (
+        SELECT transaction_id, MAX(metal_type) AS metal_type, SUM(metal_value) AS metal_value
+        FROM transaction_lines
+        GROUP BY transaction_id
+      ) line_totals ON line_totals.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT transaction_id, MAX(metal_type) AS metal_type,
+          SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out, SUM(fine_in) AS fine_in, SUM(fine_out) AS fine_out
+        FROM metal_ledger
+        GROUP BY transaction_id
+      ) metal_totals ON metal_totals.transaction_id = tm.id
+      LEFT JOIN (
+        SELECT transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+        FROM cash_ledger
+        GROUP BY transaction_id
+      ) cash_totals ON cash_totals.transaction_id = tm.id
+      WHERE ${whereParts.join(" AND ")}
+      ORDER BY tm.voucher_date ASC, tm.id ASC
+      `,
+      params
+    );
+
+    const summaryMap = new Map();
+    for (const row of rows) {
+      const key = String(row.party_id || "");
+      if (!key) continue;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          party_id: row.party_id,
+          party_name: row.party_name || "",
+          party_type: row.party_type || "",
+          total_metal_received: 0,
+          total_metal_returned: 0,
+          gross_balance: 0,
+          fine_balance: 0,
+          gold_gross_balance: 0,
+          silver_gross_balance: 0,
+          total_metal_value: 0,
+          total_returned_value: 0,
+          total_paid: 0,
+          current_due: 0,
+          last_transaction_date: ""
+        });
+      }
+      const summary = summaryMap.get(key);
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      const metalType = normalizeMetalType(row.metal_type);
+      const grossIn = toNumber(row.gross_in);
+      const grossOut = toNumber(row.gross_out);
+      const fineIn = toNumber(row.fine_in);
+      const fineOut = toNumber(row.fine_out);
+      const effects = getPartyMetalAmountEffects(row);
+      summary.total_metal_received += type === "METAL_RECEIVED" ? grossIn : type === "METAL_RECEIVED_REVERSAL" ? -grossOut : 0;
+      summary.total_metal_returned += type === "METAL_GIVEN" ? grossOut : type === "METAL_GIVEN_REVERSAL" ? -grossIn : 0;
+      summary.gross_balance += grossIn - grossOut;
+      summary.fine_balance += fineIn - fineOut;
+      if (metalType === "GOLD") summary.gold_gross_balance += grossIn - grossOut;
+      if (metalType === "SILVER") summary.silver_gross_balance += grossIn - grossOut;
+      summary.total_metal_value += effects.receivedValue;
+      summary.total_returned_value += effects.returnedValue;
+      summary.total_paid += effects.paid;
+      summary.current_due += effects.dueEffect;
+      summary.last_transaction_date = row.voucher_date || summary.last_transaction_date;
+    }
+
+    const summaries = Array.from(summaryMap.values()).sort((a, b) => Math.abs(b.current_due) - Math.abs(a.current_due));
+    const dashboard = summaries.reduce(
+      (acc, row) => {
+        if (row.party_type === "SUPPLIER" || row.party_type === "BULLION_PARTY") acc.totalSupplierDue += row.current_due;
+        if (row.party_type === "KARIGAR") acc.totalKarigarDue += row.current_due;
+        acc.totalSilverBalance += row.silver_gross_balance;
+        acc.totalGoldBalance += row.gold_gross_balance;
+        return acc;
+      },
+      { totalSupplierDue: 0, totalKarigarDue: 0, totalSilverBalance: 0, totalGoldBalance: 0 }
+    );
+    dashboard.topOutstandingParties = summaries.filter((row) => row.current_due > 0.009).slice(0, 10);
+
+    return res.json({ success: true, summaries, dashboard, branchScope: getBranchScopeResponse(branchScope) });
+  } catch (error) {
+    console.error("Party metal summary error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal summary failed", error: getErrorDetail(error) });
   }
 });
 
@@ -43095,6 +44021,7 @@ async function runBackgroundStartupTasks() {
     markSmtpUnavailable(getSafeSmtpDiagnostic(error));
     console.warn("[STARTUP] SMTP connection failed. Email features are disabled until SMTP settings are fixed.");
     console.warn(`[STARTUP] SMTP warning: ${smtpFailureMessage}`);
+    logSafeSmtpError("[STARTUP] SMTP detail:", error);
   }
 }
 
