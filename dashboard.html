@@ -54,7 +54,7 @@
         const rawRole = String(user.role || "").trim().toLowerCase();
         const email = String(user.email || "").trim().toLowerCase();
 
-        if (normalizedRole === "superadmin" || email === "grudrapratap0@gmail.com" || normalizedRole === "owner") {
+        if (normalizedRole === "superadmin" || normalizedRole === "owner") {
           return ["production", "sales"];
         }
 
@@ -1527,7 +1527,7 @@
       const user = getLoggedInUser();
       const role = String(user?.role || "").toLowerCase();
       const email = String(user?.email || "").toLowerCase();
-      return role === "superadmin" || email === "grudrapratap0@gmail.com";
+      return role === "superadmin";
     }
 
     function getItemCompanyId(item) {

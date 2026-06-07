@@ -49,7 +49,7 @@
     function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
     function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
     function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
-    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"||String(u?.email||"").toLowerCase()==="grudrapratap0@gmail.com"}
+    function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin"}
     function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());if(branchId.value)p.set("branchId",branchId.value);return p}
     function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
     function money(v){return `Rs ${Number(v||0).toFixed(2)}`}

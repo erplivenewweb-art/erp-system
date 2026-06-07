@@ -394,7 +394,7 @@
       const user = getLoggedInUserSafe();
       const role = String(user?.role || "").toLowerCase();
       const email = String(user?.email || "").toLowerCase();
-      return role === "superadmin" || email === "grudrapratap0@gmail.com";
+      return role === "superadmin";
     }
 
     function escapeHtml(value) {

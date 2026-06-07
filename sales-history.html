@@ -710,7 +710,7 @@
       const user = getLoggedInUser();
       const role = String(user?.role || "").trim().toLowerCase();
       const email = String(user?.email || "").trim().toLowerCase();
-      return role === "superadmin" || email === "grudrapratap0@gmail.com";
+      return role === "superadmin";
     }
 
     function pageGuard() {
@@ -882,7 +882,7 @@
       const raw = String(user?.role || "").trim().toLowerCase();
       const email = String(user?.email || "").trim().toLowerCase();
 
-      if (raw === "superadmin" || email === "grudrapratap0@gmail.com") return "superadmin";
+      if (raw === "superadmin") return "superadmin";
       if (raw === "admin") return "owner";
       if (["billing", "invoice", "sticker", "stock", "process"].includes(raw)) return "staff";
       if (["transaction", "expense"].includes(raw)) return "accounts";

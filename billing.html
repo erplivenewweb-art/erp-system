@@ -979,7 +979,7 @@
       const user = getLoggedInUser();
       const role = String(user?.role || "").trim().toLowerCase();
       const email = String(user?.email || "").trim().toLowerCase();
-      return role === "superadmin" || email === "grudrapratap0@gmail.com";
+      return role === "superadmin";
     }
 
     function pageGuard() {

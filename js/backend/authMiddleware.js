@@ -141,8 +141,7 @@ function checkRole(allowedRoles = []) {
 
   return function roleCheckMiddleware(req, res, next) {
     const role = normalizeRoleValue(req.user?.role || "");
-    const email = String(req.user?.email || "").trim().toLowerCase();
-    const isSuperAdmin = role === "SUPERADMIN" || email === "grudrapratap0@gmail.com";
+    const isSuperAdmin = role === "SUPERADMIN";
 
     if (isSuperAdmin) {
       return next();

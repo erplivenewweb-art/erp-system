@@ -3215,10 +3215,7 @@ function getActingUserId(req) {
 
 function isSuperAdminUser(user) {
   if (!user) return false;
-  return (
-    String(user.role || "").trim().toLowerCase() === "superadmin" ||
-    String(user.email || "").trim().toLowerCase() === "grudrapratap0@gmail.com"
-  );
+  return String(user.role || "").trim().toLowerCase() === "superadmin";
 }
 
 function normalizeAccessValue(value = "", fallback = "") {
@@ -9481,26 +9478,16 @@ async function logModuleEnforcementEvent({
   );
 }
 
-async function modulePreviewEnforcementMiddleware(req, res, next) {
+function sendModuleAccessVerificationError(res, moduleKey = "") {
+  return res.status(503).json({
+    success: false,
+    message: "Module access could not be verified. Please try again or contact admin.",
+    module: normalizeModuleKey(moduleKey)
+  });
+}
+
+async function logModuleAccessBestEffort({ req, companyId, moduleKey, enforcementMode, eventType }) {
   try {
-    if (!req.user) return next();
-
-    const moduleKey = getRouteModuleKey(req);
-    if (!moduleKey) return next();
-
-    const companyId = getRequestCompanyIdForModulePreview(req);
-    if (!companyId) return next();
-
-    const enabled = await isCompanyModuleEnabled(companyId, moduleKey);
-    if (enabled) return next();
-
-    req.modulePreviewWarning = true;
-    req.modulePreviewModule = moduleKey;
-    res.setHeader("X-Module-Preview-Warning", "MODULE_DISABLED_PREVIEW");
-    const effectiveMode = await getEffectiveEnforcementMode(companyId);
-    const enforcementMode = normalizeEnforcementMode(effectiveMode.enforcement_mode);
-    const eventType = enforcementMode === "HARD_ENFORCEMENT" ? "HARD_BLOCK" : "WOULD_BLOCK";
-
     await logWouldBlockModuleAccess({
       req,
       companyId,
@@ -9509,6 +9496,11 @@ async function modulePreviewEnforcementMiddleware(req, res, next) {
       moduleKey,
       pageKey: getPreviewPageKey(req)
     });
+  } catch (error) {
+    console.error("Module access violation logging failed:", error);
+  }
+
+  try {
     await logModuleEnforcementEvent({
       req,
       companyId,
@@ -9518,21 +9510,78 @@ async function modulePreviewEnforcementMiddleware(req, res, next) {
       enforcementMode,
       eventType
     });
+  } catch (error) {
+    console.error("Module enforcement event logging failed:", error);
+  }
+}
 
+async function logModuleAccessVerificationFailureBestEffort({ req, companyId, moduleKey, error }) {
+  console.error("Module access verification failed:", error);
+  try {
+    await logModuleEnforcementEvent({
+      req,
+      companyId,
+      userId: getRequestedUserId(req),
+      role: req.user?.role || "",
+      moduleKey,
+      enforcementMode: "HARD_ENFORCEMENT",
+      eventType: "HARD_BLOCK"
+    });
+  } catch (logError) {
+    console.error("Module access verification failure audit logging failed:", logError);
+  }
+}
+
+async function modulePreviewEnforcementMiddleware(req, res, next) {
+  if (!req.user) return next();
+
+  const moduleKey = getRouteModuleKey(req);
+  if (!moduleKey) return next();
+
+  const companyId = getRequestCompanyIdForModulePreview(req);
+  if (!companyId) return next();
+
+  let enforcementMode = "REPORT_ONLY";
+  try {
+    const effectiveMode = await getEffectiveEnforcementMode(companyId);
+    enforcementMode = normalizeEnforcementMode(effectiveMode.enforcement_mode);
+  } catch (error) {
+    await logModuleAccessVerificationFailureBestEffort({ req, companyId, moduleKey, error });
+    return sendModuleAccessVerificationError(res, moduleKey);
+  }
+
+  let enabled = true;
+  try {
+    enabled = await isCompanyModuleEnabled(companyId, moduleKey);
+  } catch (error) {
     if (enforcementMode === "HARD_ENFORCEMENT") {
-      return res.status(403).json({
-        success: false,
-        message: "This module is not enabled for your company",
-        module: moduleKey,
-        enforcement_mode: "HARD_ENFORCEMENT"
-      });
+      await logModuleAccessVerificationFailureBestEffort({ req, companyId, moduleKey, error });
+      return sendModuleAccessVerificationError(res, moduleKey);
     }
 
-    return next();
-  } catch (error) {
-    console.error("Module preview middleware failed open:", error);
+    console.error("Module preview middleware failed open in REPORT_ONLY:", error);
     return next();
   }
+
+  if (enabled) return next();
+
+  req.modulePreviewWarning = true;
+  req.modulePreviewModule = moduleKey;
+  res.setHeader("X-Module-Preview-Warning", "MODULE_DISABLED_PREVIEW");
+
+  const eventType = enforcementMode === "HARD_ENFORCEMENT" ? "HARD_BLOCK" : "WOULD_BLOCK";
+  await logModuleAccessBestEffort({ req, companyId, moduleKey, enforcementMode, eventType });
+
+  if (enforcementMode === "HARD_ENFORCEMENT") {
+    return res.status(403).json({
+      success: false,
+      message: "This module is not enabled for your company",
+      module: moduleKey,
+      enforcement_mode: "HARD_ENFORCEMENT"
+    });
+  }
+
+  return next();
 }
 
 async function getCompanyForPlanManagement(connection, companyId) {
@@ -14408,11 +14457,14 @@ async function ensureSuperAdminExists() {
     console.log("[STARTUP] SuperAdmin syncing.");
 
     const [rows] = await pool.query(
-      `SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
+      `SELECT id, role FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
       [superAdminEmail]
     );
 
     if (rows.length > 0) {
+      if (String(rows[0].role || "").trim().toLowerCase() !== "superadmin") {
+        console.warn("[STARTUP] Bootstrap SuperAdmin email exists without SuperAdmin role. Syncing role now.");
+      }
       await pool.query(
         `
         UPDATE users
@@ -33031,6 +33083,15 @@ function canApproveBranchAudit(access = {}) {
   return ["OWNER", "ACCOUNTS"].includes(normalizeRoleValue(access.role || access.actingUser?.role || ""));
 }
 
+function canPerformFinanceAdminAction(access = {}) {
+  if (!access?.ok || access.isSuperAdmin) return false;
+  return ["OWNER", "ACCOUNTS"].includes(normalizeRoleValue(access.role || access.actingUser?.role || ""));
+}
+
+function sendSensitiveActionPermissionError(res) {
+  return res.status(403).json({ success: false, message: "You do not have permission to perform this action." });
+}
+
 async function resolveBranchAuditAccess(req, { requireCompanyScope = false } = {}) {
   const access = await resolveBranchAccessContext(req, { requireCompanyScope });
   if (!access.ok) return { access };
@@ -33513,6 +33574,7 @@ app.post("/branch-audit/snapshot", authMiddleware, async (req, res) => {
     if (!access.ok) return sendAccessError(res, access);
     if (!branchScope.ok) return sendAccessError(res, branchScope);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canApproveBranchAudit(access)) return sendSensitiveActionPermissionError(res);
 
     const snapshotDate = getAuditDateValue(req.body?.snapshotDate || req.body?.snapshot_date, getTodayDateOnly());
     connection = await pool.getConnection();
@@ -33627,6 +33689,7 @@ app.post("/branch-audit/reconcile", authMiddleware, async (req, res) => {
     if (!access.ok) return sendAccessError(res, access);
     if (!branchScope.ok) return sendAccessError(res, branchScope);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canApproveBranchAudit(access)) return sendSensitiveActionPermissionError(res);
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -39529,6 +39592,7 @@ app.post("/transaction/payment-accounts", authMiddleware, async (req, res) => {
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canPerformFinanceAdminAction(access)) return sendSensitiveActionPermissionError(res);
 
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
@@ -39575,6 +39639,7 @@ app.put("/transaction/payment-accounts/:id", authMiddleware, async (req, res) =>
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canPerformFinanceAdminAction(access)) return sendSensitiveActionPermissionError(res);
 
     const accountId = Number(req.params.id || 0);
     const accountName = String(req.body.accountName || req.body.account_name || "").trim();
@@ -40945,6 +41010,7 @@ app.post("/transaction/daily-closing/close", authMiddleware, async (req, res) =>
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canPerformFinanceAdminAction(access)) return sendSensitiveActionPermissionError(res);
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
@@ -41030,6 +41096,7 @@ app.post("/transaction/daily-closing/reopen", authMiddleware, async (req, res) =
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canPerformFinanceAdminAction(access)) return sendSensitiveActionPermissionError(res);
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 

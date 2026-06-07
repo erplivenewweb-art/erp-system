@@ -316,9 +316,8 @@ function normalizeAllowedRoles(roles = []) {
 function isSuperAdmin(user = null) {
   const targetUser = user || getLoggedInUser();
   const role = getNormalizedRole(targetUser);
-  const email = String(targetUser?.email || "").trim().toLowerCase();
 
-  return role === "superadmin" || email === "grudrapratap0@gmail.com";
+  return role === "superadmin";
 }
 
 function isAdminUser(user = null) {
