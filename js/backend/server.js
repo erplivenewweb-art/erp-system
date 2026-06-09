@@ -3041,6 +3041,23 @@ function getTodayDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function normalizeStrictDateOnly(value, fallback = getTodayDateOnly()) {
+  const clean = String(value || fallback || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return "";
+
+  const [year, month, day] = clean.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return "";
+  }
+
+  return clean;
+}
+
 async function generateInvoiceNumberForCompany(connection, companyId, billDate, prefix = "BILL") {
   const cleanCompanyId = Number(companyId || 0);
   const cleanPrefix =
@@ -40984,7 +41001,8 @@ app.get("/transaction/daily-closing/summary", authMiddleware, async (req, res) =
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = String(req.query.date || req.query.closingDate || req.query.closing_date || getTodayDateOnly()).trim();
+    const closingDate = normalizeStrictDateOnly(req.query.date || req.query.closingDate || req.query.closing_date);
+    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
     const summary = await computeDailyClosingSummary(pool, access, branchScope, closingDate);
     const [closingRows] = await pool.query(
       `
@@ -41014,7 +41032,8 @@ app.post("/transaction/daily-closing/close", authMiddleware, async (req, res) =>
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
+    const closingDate = normalizeStrictDateOnly(req.body.date || req.body.closingDate || req.body.closing_date);
+    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
     const remarks = String(req.body.remarks || "").trim();
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -41100,7 +41119,8 @@ app.post("/transaction/daily-closing/reopen", authMiddleware, async (req, res) =
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
+    const closingDate = normalizeStrictDateOnly(req.body.date || req.body.closingDate || req.body.closing_date);
+    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
     const reason = String(req.body.reason || req.body.reopenReason || req.body.reopen_reason || "").trim();
     if (!reason) return res.status(400).json({ success: false, message: "Reopen reason is required" });
 

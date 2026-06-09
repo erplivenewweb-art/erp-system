@@ -92,6 +92,19 @@ function attachUserIfPresent(req, _res, next) {
   next();
 }
 
+function applyAuthenticatedDbUser(req) {
+  const dbUser = req.accessUser;
+  if (!dbUser || !req.user) return;
+
+  req.user.role = normalizeRoleValue(dbUser.role || "");
+  req.user.email = String(dbUser.email || req.user.email || "").trim();
+  req.user.companyId =
+    dbUser.company_id === null || dbUser.company_id === undefined || dbUser.company_id === ""
+      ? null
+      : Number(dbUser.company_id);
+  req.user.company_id = req.user.companyId;
+}
+
 async function authMiddleware(req, res, next) {
   try {
     const token = getRequestToken(req);
@@ -111,6 +124,7 @@ async function authMiddleware(req, res, next) {
       });
     }
 
+    applyAuthenticatedDbUser(req);
     return next();
   } catch (_) {
     return res.status(401).json({
