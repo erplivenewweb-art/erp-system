@@ -4,9 +4,14 @@ const jwt = require("jsonwebtoken");
 
 const AUTH_COOKIE_NAME = "erp_auth_token";
 let authAccessValidator = null;
+let authSessionValidator = null;
 
 function setAuthAccessValidator(validator) {
   authAccessValidator = typeof validator === "function" ? validator : null;
+}
+
+function setAuthSessionValidator(validator) {
+  authSessionValidator = typeof validator === "function" ? validator : null;
 }
 
 function parseCookies(cookieHeader = "") {
@@ -34,20 +39,29 @@ function getJwtSecret() {
   return secret;
 }
 
-function signAuthToken(user) {
+function signAuthToken(user, session = {}) {
+  const sessionId = String(session.sessionId || session.tokenJti || session.jti || "").trim();
+  const payload = {
+    userId: Number(user.id),
+    role: String(user.role || "").trim(),
+    companyId:
+      user.company_id === null || user.company_id === undefined || user.company_id === ""
+        ? null
+        : Number(user.company_id)
+  };
+  const options = {
+    expiresIn: "12h"
+  };
+
+  if (sessionId) {
+    payload.sessionId = sessionId;
+    options.jwtid = sessionId;
+  }
+
   return jwt.sign(
-    {
-      userId: Number(user.id),
-      role: String(user.role || "").trim(),
-      companyId:
-        user.company_id === null || user.company_id === undefined || user.company_id === ""
-          ? null
-          : Number(user.company_id)
-    },
+    payload,
     getJwtSecret(),
-    {
-      expiresIn: "12h"
-    }
+    options
   );
 }
 
@@ -70,6 +84,11 @@ function verifyToken(token) {
 }
 
 async function validateAuthenticatedRequest(req) {
+  if (authSessionValidator && req.user) {
+    const sessionAccess = await authSessionValidator(req);
+    if (!sessionAccess?.ok) return sessionAccess;
+  }
+
   if (!authAccessValidator || !req.user) {
     return { ok: true };
   }
@@ -77,16 +96,26 @@ async function validateAuthenticatedRequest(req) {
   return authAccessValidator(req);
 }
 
-function attachUserIfPresent(req, _res, next) {
+async function attachUserIfPresent(req, _res, next) {
   try {
     const token = getRequestToken(req);
     if (token) {
       req.user = verifyToken(token);
+      req.authToken = token;
+      if (authSessionValidator) {
+        const sessionAccess = await authSessionValidator(req);
+        if (!sessionAccess?.ok) {
+          req.user = null;
+          req.authToken = "";
+        }
+      }
     } else {
       req.user = null;
+      req.authToken = "";
     }
   } catch (_) {
     req.user = null;
+    req.authToken = "";
   }
 
   next();
@@ -116,6 +145,7 @@ async function authMiddleware(req, res, next) {
     }
 
     req.user = verifyToken(token);
+    req.authToken = token;
     const access = await validateAuthenticatedRequest(req);
     if (!access?.ok) {
       return res.status(access?.status || 403).json({
@@ -180,6 +210,7 @@ async function requirePageAuth(req, res, next) {
     }
 
     req.user = verifyToken(token);
+    req.authToken = token;
     const access = await validateAuthenticatedRequest(req);
     if (!access?.ok) {
       return res.redirect("/login.html");
@@ -199,5 +230,6 @@ module.exports = {
   normalizeRoleValue,
   requirePageAuth,
   setAuthAccessValidator,
+  setAuthSessionValidator,
   signAuthToken
 };

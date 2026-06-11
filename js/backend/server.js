@@ -6,6 +6,7 @@ require("dotenv").config({ path: LOCAL_ENV_FILE });
 
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
@@ -17,6 +18,7 @@ const {
   normalizeRoleValue,
   requirePageAuth,
   setAuthAccessValidator,
+  setAuthSessionValidator,
   signAuthToken
 } = require("./authMiddleware");
 const mysql = require("mysql2/promise");
@@ -25,6 +27,7 @@ const nodemailer = require("nodemailer");
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");
 const FRONTEND_INDEX_FILE = path.join(FRONTEND_ROOT, "index.html");
 const FRONTEND_CSS_DIR = path.join(FRONTEND_ROOT, "css");
@@ -142,6 +145,62 @@ function isAllowedCorsOrigin(origin = "") {
   }
 }
 
+const hstsMiddleware = helmet.hsts({
+  maxAge: 15552000,
+  includeSubDomains: true
+});
+
+function productionHttpsHsts(req, res, next) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+
+  if (isProductionRuntime() && (req.secure || forwardedProto === "https")) {
+    return hstsMiddleware(req, res, next);
+  }
+
+  return next();
+}
+
+function permissionsPolicyMiddleware(_req, res, next) {
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
+  );
+  return next();
+}
+
+app.use(helmet.hidePoweredBy());
+app.use(helmet.noSniff());
+app.use(helmet.referrerPolicy({ policy: "strict-origin-when-cross-origin" }));
+app.use(helmet.frameguard({ action: "sameorigin" }));
+app.use(productionHttpsHsts);
+app.use(permissionsPolicyMiddleware);
+app.use(
+  helmet.contentSecurityPolicy({
+    reportOnly: true,
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'self'"],
+      connectSrc: ["'self'", "http://localhost:*", "http://127.0.0.1:*", "https:"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        "https://cdnjs.cloudflare.com",
+        "https://cdn.jsdelivr.net",
+        "https://unpkg.com"
+      ]
+    }
+  })
+);
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -152,13 +211,14 @@ app.use(
       return callback(new Error("CORS origin not allowed"));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-XSRF-TOKEN"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   })
 );
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUserIfPresent);
+app.use(csrfProtectionMiddleware);
 app.use(modulePreviewEnforcementMiddleware);
 
 function isOperationalMutationPath(pathname = "") {
@@ -605,6 +665,288 @@ function getRequestIpAddress(req) {
       req.connection?.remoteAddress ||
       ""
   ).trim();
+}
+
+function getAuthTokenJti(tokenPayload = {}) {
+  return String(tokenPayload?.jti || tokenPayload?.sessionId || tokenPayload?.session_id || "").trim();
+}
+
+const CSRF_COOKIE_NAME = "XSRF-TOKEN";
+const CSRF_HEADER_NAMES = ["x-csrf-token", "x-xsrf-token"];
+const CSRF_TOKEN_EXEMPT_MUTATION_PATHS = new Set([
+  "/auth/logout",
+  "/auth/reset-password",
+  "/login",
+  "/otp/request",
+  "/otp/verify",
+  "/registeruser",
+  "/requestcompanysignup",
+  "/requeststaffjoin"
+]);
+const CSRF_UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function getAuthSessionExpiryDate() {
+  return new Date(Date.now() + 12 * 60 * 60 * 1000);
+}
+
+async function createAuthSession(req, user) {
+  const userId = Number(user?.id || 0);
+  if (!userId) {
+    throw new Error("Cannot create auth session without user id");
+  }
+
+  const tokenJti = crypto.randomUUID();
+  const expiresAt = getAuthSessionExpiryDate();
+  await pool.query(
+    `
+    INSERT INTO auth_sessions
+      (user_id, token_jti, expires_at, user_agent, ip_address)
+    VALUES (?, ?, ?, ?, ?)
+    `,
+    [
+      userId,
+      tokenJti,
+      expiresAt,
+      String(req.headers["user-agent"] || "").slice(0, 1000),
+      getRequestIpAddress(req).slice(0, 120)
+    ]
+  );
+
+  return {
+    tokenJti,
+    expiresAt
+  };
+}
+
+async function validateAuthSession(req) {
+  const userId = Number(req.user?.userId || 0);
+  const tokenJti = getAuthTokenJti(req.user);
+  if (!userId || !tokenJti) {
+    return accessDenied(401, "Session expired. Please login again.");
+  }
+
+  const [rows] = await pool.query(
+    `
+    SELECT id, user_id, token_jti, expires_at, revoked_at
+    FROM auth_sessions
+    WHERE user_id = ?
+      AND token_jti = ?
+    LIMIT 1
+    `,
+    [userId, tokenJti]
+  );
+  const session = rows[0] || null;
+  if (!session || session.revoked_at) {
+    return accessDenied(401, "Session expired. Please login again.");
+  }
+
+  const expiresAt = parseAccessDate(session.expires_at);
+  if (!expiresAt || expiresAt.getTime() <= Date.now()) {
+    return accessDenied(401, "Session expired. Please login again.");
+  }
+
+  req.authSession = session;
+  return { ok: true };
+}
+
+async function revokeAuthSessionForPayload(tokenPayload = {}) {
+  const userId = Number(tokenPayload?.userId || 0);
+  const tokenJti = getAuthTokenJti(tokenPayload);
+  if (!userId || !tokenJti) return { affectedRows: 0 };
+
+  const [result] = await pool.query(
+    `
+    UPDATE auth_sessions
+    SET revoked_at = COALESCE(revoked_at, NOW())
+    WHERE user_id = ?
+      AND token_jti = ?
+      AND revoked_at IS NULL
+    `,
+    [userId, tokenJti]
+  );
+
+  return result;
+}
+
+async function revokeAllAuthSessionsForUser(connection, userId) {
+  const cleanUserId = Number(userId || 0);
+  if (!cleanUserId) return { affectedRows: 0 };
+
+  const executor = connection || pool;
+  const [result] = await executor.query(
+    `
+    UPDATE auth_sessions
+    SET revoked_at = COALESCE(revoked_at, NOW())
+    WHERE user_id = ?
+      AND revoked_at IS NULL
+    `,
+    [cleanUserId]
+  );
+
+  return result;
+}
+
+function parseRequestCookies(cookieHeader = "") {
+  return String(cookieHeader || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const separatorIndex = part.indexOf("=");
+      if (separatorIndex === -1) return acc;
+      const key = part.slice(0, separatorIndex).trim();
+      const value = part.slice(separatorIndex + 1).trim();
+      if (key) {
+        try {
+          acc[key] = decodeURIComponent(value || "");
+        } catch (_) {
+          acc[key] = value || "";
+        }
+      }
+      return acc;
+    }, {});
+}
+
+function toBase64Url(value) {
+  return Buffer.from(String(value || ""), "utf8").toString("base64url");
+}
+
+function fromBase64Url(value) {
+  return Buffer.from(String(value || ""), "base64url").toString("utf8");
+}
+
+function createSignedCsrfToken(sessionJti) {
+  const cleanSessionJti = String(sessionJti || "").trim();
+  if (!cleanSessionJti) {
+    throw new Error("Cannot create CSRF token without session id");
+  }
+
+  const payload = {
+    sessionJti: cleanSessionJti,
+    nonce: crypto.randomBytes(18).toString("base64url"),
+    exp: Date.now() + 12 * 60 * 60 * 1000
+  };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac("sha256", String(process.env.JWT_SECRET || ""))
+    .update(encodedPayload)
+    .digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifySignedCsrfToken(token, sessionJti) {
+  const cleanToken = String(token || "").trim();
+  const cleanSessionJti = String(sessionJti || "").trim();
+  if (!cleanToken || !cleanSessionJti) return false;
+
+  const [encodedPayload, signature] = cleanToken.split(".");
+  if (!encodedPayload || !signature) return false;
+
+  const expectedSignature = crypto
+    .createHmac("sha256", String(process.env.JWT_SECRET || ""))
+    .update(encodedPayload)
+    .digest("base64url");
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(fromBase64Url(encodedPayload));
+    if (String(payload.sessionJti || "") !== cleanSessionJti) return false;
+    if (Number(payload.exp || 0) <= Date.now()) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function getCsrfCookieOptions() {
+  return {
+    httpOnly: false,
+    secure: isProductionRuntime(),
+    sameSite: "Lax",
+    path: "/",
+    maxAge: 12 * 60 * 60 * 1000
+  };
+}
+
+function setCsrfCookie(res, token) {
+  res.cookie(CSRF_COOKIE_NAME, token, getCsrfCookieOptions());
+}
+
+function getRequestOriginUrl(req) {
+  const host = String(req.headers.host || "").trim();
+  if (!host) return "";
+  return `${req.protocol || "http"}://${host}`.replace(/\/+$/, "");
+}
+
+function isAllowedCsrfOrigin(value, req) {
+  const clean = String(value || "").trim().replace(/\/+$/, "");
+  if (!clean) return false;
+  if (isAllowedCorsOrigin(clean)) return true;
+  return clean === getRequestOriginUrl(req);
+}
+
+function hasValidUnsafeRequestOrigin(req) {
+  const origin = String(req.headers.origin || "").trim();
+  if (origin) return isAllowedCsrfOrigin(origin, req);
+
+  const referer = String(req.headers.referer || req.headers.referrer || "").trim();
+  if (!referer) return false;
+
+  try {
+    const refererUrl = new URL(referer);
+    return isAllowedCsrfOrigin(refererUrl.origin, req);
+  } catch (_) {
+    return false;
+  }
+}
+
+function getCsrfHeaderToken(req) {
+  for (const headerName of CSRF_HEADER_NAMES) {
+    const value = String(req.headers[headerName] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function isCsrfTokenExemptPath(req) {
+  return CSRF_TOKEN_EXEMPT_MUTATION_PATHS.has(String(req.path || "").trim().toLowerCase());
+}
+
+function csrfProtectionMiddleware(req, res, next) {
+  const method = String(req.method || "").trim().toUpperCase();
+  if (!CSRF_UNSAFE_METHODS.has(method)) return next();
+
+  if (!hasValidUnsafeRequestOrigin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Invalid request origin."
+    });
+  }
+
+  if (!req.user || isCsrfTokenExemptPath(req)) return next();
+
+  const headerToken = getCsrfHeaderToken(req);
+  const cookieToken = parseRequestCookies(req.headers.cookie || "")[CSRF_COOKIE_NAME] || "";
+  const sessionJti = getAuthTokenJti(req.user);
+  if (
+    !headerToken ||
+    !cookieToken ||
+    headerToken !== cookieToken ||
+    !verifySignedCsrfToken(headerToken, sessionJti)
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: "Invalid CSRF token."
+    });
+  }
+
+  return next();
 }
 
 function maskDebugIdentifier(value = "") {
@@ -3377,6 +3719,7 @@ async function validateActiveAuthenticatedRequest(req) {
 }
 
 setAuthAccessValidator(validateActiveAuthenticatedRequest);
+setAuthSessionValidator(validateAuthSession);
 
 function isApprovedAdminUser(user) {
   if (!user) return false;
@@ -10360,6 +10703,21 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      token_jti VARCHAR(120) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      revoked_at DATETIME DEFAULT NULL,
+      user_agent TEXT DEFAULT NULL,
+      ip_address VARCHAR(120) DEFAULT NULL,
+      INDEX idx_auth_sessions_user_active (user_id, revoked_at, expires_at),
+      INDEX idx_auth_sessions_expires (expires_at)
+    )
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS stock (
       id INT AUTO_INCREMENT PRIMARY KEY,
       serial VARCHAR(50) DEFAULT '',
@@ -11851,6 +12209,19 @@ async function ensureSchema() {
     await addIndexIfMissing("users", "idx_users_company_login_status", "(company_id, login_status)");
     await addIndexIfMissing("users", "idx_users_deleted_at", "(deleted_at)");
     await addIndexIfMissing("users", "idx_users_force_logout_after", "(force_logout_after)");
+  }
+
+  if (await tableExists("auth_sessions")) {
+    await addColumnIfMissing("auth_sessions", "user_id", "INT NOT NULL");
+    await addColumnIfMissing("auth_sessions", "token_jti", "VARCHAR(120) NOT NULL");
+    await addColumnIfMissing("auth_sessions", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    await addColumnIfMissing("auth_sessions", "expires_at", "DATETIME NOT NULL");
+    await addColumnIfMissing("auth_sessions", "revoked_at", "DATETIME DEFAULT NULL");
+    await addColumnIfMissing("auth_sessions", "user_agent", "TEXT DEFAULT NULL");
+    await addColumnIfMissing("auth_sessions", "ip_address", "VARCHAR(120) DEFAULT NULL");
+    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_token_jti", "(token_jti)");
+    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_user_active", "(user_id, revoked_at, expires_at)");
+    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_expires", "(expires_at)");
   }
 
   if (await tableExists("companies")) {
@@ -37818,6 +38189,7 @@ app.post("/superadmin/users/:id/force-logout", authMiddleware, checkRole(["SUPER
         `,
         [reason, access.actingUserId, targetId]
       );
+      await revokeAllAuthSessionsForUser(connection, targetId);
       return { ok: true };
     }
   });
@@ -38282,7 +38654,8 @@ app.post("/login", loginRateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, message: "Role not assigned yet" });
     }
 
-    const token = signAuthToken(user);
+    const authSession = await createAuthSession(req, user);
+    const token = signAuthToken(user, authSession);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
@@ -38341,8 +38714,42 @@ app.post("/login", loginRateLimiter, async (req, res) => {
   }
 });
 
+app.get("/auth/csrf", authMiddleware, async (req, res) => {
+  try {
+    const sessionJti = getAuthTokenJti(req.user);
+    if (!sessionJti) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please login again."
+      });
+    }
+
+    const token = createSignedCsrfToken(sessionJti);
+    setCsrfCookie(res, token);
+    return res.json({
+      success: true,
+      csrfToken: token
+    });
+  } catch (error) {
+    console.error("CSRF token issue error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "CSRF token request failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
 app.post("/auth/logout", async (req, res) => {
   const logoutUserId = getRequestedUserId(req);
+  if (req.user) {
+    try {
+      await revokeAuthSessionForPayload(req.user);
+    } catch (error) {
+      console.warn("Auth session logout revocation failed:", getErrorDetail(error));
+    }
+  }
+
   await logActivitySafe(pool, req, null, {
     userId: logoutUserId,
     actorRole: req.user?.role || "",

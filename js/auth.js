@@ -1319,12 +1319,64 @@ function filterSidebarMenuByRole() {
   renderModulePreviewWarningIfNeeded();
 }
 
+let ERP_CSRF_TOKEN_MEMORY = "";
+const ERP_CSRF_UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function getCookieValue(name) {
+  const target = `${String(name || "").trim()}=`;
+  if (!target || typeof document === "undefined") return "";
+
+  return String(document.cookie || "")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(target))
+    ?.slice(target.length) || "";
+}
+
+function getStoredCsrfToken() {
+  const cookieToken = getCookieValue("XSRF-TOKEN");
+  if (cookieToken) {
+    try {
+      return decodeURIComponent(cookieToken);
+    } catch (_) {
+      return cookieToken;
+    }
+  }
+
+  return String(ERP_CSRF_TOKEN_MEMORY || "").trim();
+}
+
+async function fetchCsrfToken(originalFetch, apiBase, bearerToken = "") {
+  if (typeof originalFetch !== "function" || !apiBase) return "";
+
+  const csrfUrl =
+    typeof window.buildErpApiUrl === "function"
+      ? window.buildErpApiUrl("/auth/csrf")
+      : `${String(apiBase || "").replace(/\/+$/, "")}/auth/csrf`;
+  const headers = {};
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  }
+
+  const response = await originalFetch(csrfUrl, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+    headers
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) return "";
+
+  ERP_CSRF_TOKEN_MEMORY = String(data.csrfToken || data.token || "").trim();
+  return getStoredCsrfToken();
+}
+
 function patchFetchWithAuthHeader() {
   if (window.__erpFetchAuthPatched) return;
   const originalFetch = window.fetch?.bind(window);
   if (typeof originalFetch !== "function") return;
 
-  window.fetch = function (input, init = {}) {
+  window.fetch = async function (input, init = {}) {
     const token = getAuthToken();
     const inputUrl = typeof input === "string" ? input : input?.url || "";
     const apiBase =
@@ -1386,6 +1438,16 @@ function patchFetchWithAuthHeader() {
 
     if (token && isApiRequest && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    if (isApiRequest && ERP_CSRF_UNSAFE_METHODS.has(method) && !headers.has("X-CSRF-Token")) {
+      let csrfToken = getStoredCsrfToken();
+      if (!csrfToken && getLoggedInUser()) {
+        csrfToken = await fetchCsrfToken(originalFetch, apiBase, token);
+      }
+      if (csrfToken) {
+        headers.set("X-CSRF-Token", csrfToken);
+      }
     }
 
     return originalFetch(resolvedUrl, {
