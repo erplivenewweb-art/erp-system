@@ -37,59 +37,30 @@
       line-height: 1.5;
     }
 
-    .transaction-tabs {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 2px;
-    }
-
-    .transaction-tab {
-      border: 1px solid #d1d5db;
-      background: #ffffff;
-      color: #374151;
-      border-radius: 8px;
-      min-height: 40px;
-      padding: 0 14px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      white-space: nowrap;
-      cursor: pointer;
-      font-weight: 600;
-    }
-
-    .transaction-tab.active {
-      background: #111827;
-      border-color: #111827;
-      color: #ffffff;
-    }
-
-    .transaction-card-grid {
+    .transaction-group-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 14px;
     }
 
-    .transaction-card {
+    .transaction-group {
       background: #ffffff;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
       padding: 18px;
-      min-height: 188px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      gap: 14px;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
     }
 
-    .transaction-card-top {
+    .transaction-group-top {
       display: flex;
       gap: 12px;
       align-items: flex-start;
     }
 
-    .transaction-card-icon {
+    .transaction-group-icon {
       width: 42px;
       height: 42px;
       border-radius: 8px;
@@ -102,36 +73,54 @@
       font-size: 18px;
     }
 
-    .transaction-card h3 {
+    .transaction-group h3 {
       margin: 0;
       font-size: 17px;
       color: #111827;
       letter-spacing: 0;
     }
 
-    .transaction-card p {
+    .transaction-group p {
       margin: 8px 0 0;
       color: #6b7280;
       line-height: 1.45;
     }
 
-    .transaction-card-actions {
-      margin-top: 18px;
-      display: flex;
-      justify-content: flex-end;
+    .transaction-link-list {
+      display: grid;
+      gap: 8px;
     }
 
-    .transaction-card-actions a {
-      min-height: 38px;
-      padding: 0 14px;
+    .transaction-link-list a {
+      min-height: 42px;
+      padding: 0 12px;
       border-radius: 8px;
-      background: #2563eb;
-      color: #ffffff;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+      color: #111827;
       text-decoration: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .transaction-link-list a:hover {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .transaction-link-list a i:first-child {
+      color: #2563eb;
+      width: 18px;
+      text-align: center;
+    }
+
+    .transaction-link-label {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      font-weight: 700;
     }
 
     .transaction-empty {
@@ -149,8 +138,8 @@
         font-size: 21px;
       }
 
-      .transaction-card {
-        min-height: 170px;
+      .transaction-group-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -169,9 +158,11 @@
 
         <ul class="menu" id="transactionCenterMenu">
           <li><a href="transaction-center.html" class="active"><i class="fas fa-table-columns"></i> Transaction Center</a></li>
-          <li><a href="daily-closing.html"><i class="fas fa-lock"></i> Daily Closing</a></li>
-          <li><a href="payment-accounts.html"><i class="fas fa-wallet"></i> Payment Accounts</a></li>
-          <li><a href="transaction-reversal.html"><i class="fas fa-rotate-left"></i> Reverse Transaction</a></li>
+          <li><a href="#finance-dashboard"><i class="fas fa-chart-line"></i> Finance Dashboard</a></li>
+          <li><a href="#customers"><i class="fas fa-book"></i> Customers</a></li>
+          <li><a href="#party-metal"><i class="fas fa-ring"></i> Party &amp; Metal</a></li>
+          <li><a href="#cash-closing"><i class="fas fa-cash-register"></i> Cash &amp; Closing</a></li>
+          <li><a href="#admin-audit"><i class="fas fa-file-lines"></i> Admin / Audit</a></li>
         </ul>
       </div>
     </aside>
@@ -205,111 +196,79 @@
             </div>
           </div>
 
-          <div class="transaction-tabs" role="tablist" aria-label="Transaction center tabs">
-            <button class="transaction-tab active" type="button" data-tab="overview" role="tab" aria-selected="true"><i class="fas fa-chart-line"></i> Overview</button>
-            <button class="transaction-tab" type="button" data-tab="voucher" role="tab" aria-selected="false"><i class="fas fa-receipt"></i> New Voucher</button>
-            <button class="transaction-tab" type="button" data-tab="customer" role="tab" aria-selected="false"><i class="fas fa-book"></i> Customer Ledger</button>
-            <button class="transaction-tab" type="button" data-tab="party-metal" role="tab" aria-selected="false"><i class="fas fa-ring"></i> Party Metal</button>
-            <button class="transaction-tab" type="button" data-tab="cash-book" role="tab" aria-selected="false"><i class="fas fa-cash-register"></i> Cash / Branch Book</button>
-            <button class="transaction-tab" type="button" data-tab="account-ledger" role="tab" aria-selected="false"><i class="fas fa-book-open"></i> Account Ledger</button>
-            <button class="transaction-tab" type="button" data-tab="reports" role="tab" aria-selected="false"><i class="fas fa-file-lines"></i> Reports</button>
-          </div>
-
           <div class="transaction-empty" id="transactionCenterEmpty">
             No transaction modules are enabled for this company.
           </div>
 
-          <div class="transaction-card-grid" id="transactionCenterCards">
-            <article class="transaction-card" data-center-card data-tab="overview" data-module-key="TRANSACTION_REPORTS">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-chart-line"></i></div>
+          <div class="transaction-group-grid" id="transactionCenterGroups">
+            <section class="transaction-group" id="finance-dashboard" data-center-group data-group-key="finance-dashboard" data-group-roles="owner,superadmin" data-module-key="TRANSACTION_REPORTS">
+              <div class="transaction-group-top">
+                <div class="transaction-group-icon"><i class="fas fa-chart-line"></i></div>
                 <div>
-                  <h3>Transaction Dashboard</h3>
-                  <p>Review totals, payment balances, closing status, and transaction health.</p>
+                  <h3>Finance Dashboard</h3>
+                  <p>Cash, dues, metal and branch overview</p>
                 </div>
               </div>
-              <div class="transaction-card-actions">
-                <a href="transaction-summary-dashboard.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              <div class="transaction-link-list">
+                <a href="transaction-summary-dashboard.html" data-page-key="transaction-summary-dashboard" data-module-key="TRANSACTION_REPORTS"><span class="transaction-link-label"><i class="fas fa-chart-line"></i> Transaction Dashboard</span><i class="fas fa-arrow-up-right-from-square"></i></a>
               </div>
-            </article>
+            </section>
 
-            <article class="transaction-card" data-center-card data-tab="voucher" data-module-key="TRANSACTION">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-receipt"></i></div>
+            <section class="transaction-group" id="customers" data-center-group data-group-key="customers" data-group-roles="owner,accounts,staff,superadmin">
+              <div class="transaction-group-top">
+                <div class="transaction-group-icon"><i class="fas fa-book"></i></div>
                 <div>
-                  <h3>New Voucher</h3>
-                  <p>Create transaction vouchers using the existing voucher workflow.</p>
+                  <h3>Customers</h3>
+                  <p>Customer dues, payments and refunds</p>
                 </div>
               </div>
-              <div class="transaction-card-actions">
-                <a href="transaction.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              <div class="transaction-link-list">
+                <a href="customer-ledger.html" data-page-key="customer-ledger" data-module-key="CUSTOMER_LEDGER"><span class="transaction-link-label"><i class="fas fa-book"></i> Customer Ledger</span><i class="fas fa-arrow-up-right-from-square"></i></a>
               </div>
-            </article>
+            </section>
 
-            <article class="transaction-card" data-center-card data-tab="customer" data-module-key="CUSTOMER_LEDGER">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-book"></i></div>
+            <section class="transaction-group" id="party-metal" data-center-group data-group-key="party-metal" data-group-roles="owner,accounts,superadmin">
+              <div class="transaction-group-top">
+                <div class="transaction-group-icon"><i class="fas fa-ring"></i></div>
                 <div>
-                  <h3>Customer Ledger</h3>
-                  <p>Track customer opening balances, dues, payments, refunds, and running balances.</p>
+                  <h3>Party / Metal</h3>
+                  <p>Supplier, karigar, bullion and metal balances</p>
                 </div>
               </div>
-              <div class="transaction-card-actions">
-                <a href="customer-ledger.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              <div class="transaction-link-list">
+                <a href="party-metal-account.html" data-page-key="party-metal-account" data-module-key="PARTY_METAL_ACCOUNT"><span class="transaction-link-label"><i class="fas fa-ring"></i> Party Metal Account</span><i class="fas fa-arrow-up-right-from-square"></i></a>
               </div>
-            </article>
+            </section>
 
-            <article class="transaction-card" data-center-card data-tab="party-metal" data-module-key="PARTY_METAL_ACCOUNT">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-ring"></i></div>
+            <section class="transaction-group" id="cash-closing" data-center-group data-group-key="cash-closing" data-group-roles="owner,accounts,staff,superadmin">
+              <div class="transaction-group-top">
+                <div class="transaction-group-icon"><i class="fas fa-cash-register"></i></div>
                 <div>
-                  <h3>Party Metal</h3>
-                  <p>Manage supplier, karigar, bullion, and party metal receive, return, payment, and ledger views.</p>
+                  <h3>Cash &amp; Closing</h3>
+                  <p>Payment accounts, branch cash and day closing</p>
                 </div>
               </div>
-              <div class="transaction-card-actions">
-                <a href="party-metal-account.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              <div class="transaction-link-list">
+                <a href="payment-accounts.html" data-page-key="payment-accounts" data-module-key="PAYMENT_ACCOUNTS" data-item-roles="owner,accounts,superadmin"><span class="transaction-link-label"><i class="fas fa-wallet"></i> Payment Accounts</span><i class="fas fa-arrow-up-right-from-square"></i></a>
+                <a href="account-ledger.html" data-page-key="account-ledger" data-module-key="PAYMENT_ACCOUNTS" data-item-roles="owner,accounts,superadmin"><span class="transaction-link-label"><i class="fas fa-book-open"></i> Account Ledger</span><i class="fas fa-arrow-up-right-from-square"></i></a>
+                <a href="branch-cash-book.html" data-page-key="branch-cash-book" data-module-key="BRANCH_CASH_BOOK"><span class="transaction-link-label"><i class="fas fa-cash-register"></i> Branch Cash Book</span><i class="fas fa-arrow-up-right-from-square"></i></a>
+                <a href="daily-closing.html" data-page-key="daily-closing" data-module-key="DAILY_CLOSING"><span class="transaction-link-label"><i class="fas fa-lock"></i> Daily Closing</span><i class="fas fa-arrow-up-right-from-square"></i></a>
               </div>
-            </article>
+            </section>
 
-            <article class="transaction-card" data-center-card data-tab="cash-book" data-module-key="BRANCH_CASH_BOOK">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-cash-register"></i></div>
+            <section class="transaction-group" id="admin-audit" data-center-group data-group-key="admin-audit" data-group-roles="owner,accounts,superadmin">
+              <div class="transaction-group-top">
+                <div class="transaction-group-icon"><i class="fas fa-file-lines"></i></div>
                 <div>
-                  <h3>Cash / Branch Book</h3>
-                  <p>Check branch-scoped cash and payment movements with daily operating visibility.</p>
+                  <h3>Admin / Audit</h3>
+                  <p>Reports, reversals and reconciliation</p>
                 </div>
               </div>
-              <div class="transaction-card-actions">
-                <a href="branch-cash-book.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+              <div class="transaction-link-list">
+                <a href="transaction-reports.html" data-page-key="transaction-reports" data-module-key="TRANSACTION_REPORTS"><span class="transaction-link-label"><i class="fas fa-file-lines"></i> Transaction Reports</span><i class="fas fa-arrow-up-right-from-square"></i></a>
+                <a href="transaction-reversal.html" data-page-key="transaction-reversal" data-module-key="TRANSACTION_REVERSAL"><span class="transaction-link-label"><i class="fas fa-rotate-left"></i> Transaction Reversal</span><i class="fas fa-arrow-up-right-from-square"></i></a>
               </div>
-            </article>
-
-            <article class="transaction-card" data-center-card data-tab="account-ledger" data-module-key="PAYMENT_ACCOUNTS">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-book-open"></i></div>
-                <div>
-                  <h3>Account Ledger</h3>
-                  <p>Review CASH, UPI, BANK, and CARD account movement with running balance.</p>
-                </div>
-              </div>
-              <div class="transaction-card-actions">
-                <a href="account-ledger.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
-              </div>
-            </article>
-
-            <article class="transaction-card" data-center-card data-tab="reports" data-module-key="TRANSACTION_REPORTS">
-              <div class="transaction-card-top">
-                <div class="transaction-card-icon"><i class="fas fa-file-lines"></i></div>
-                <div>
-                  <h3>Reports</h3>
-                  <p>Open transaction reporting for accounting review and reconciliation.</p>
-                </div>
-              </div>
-              <div class="transaction-card-actions">
-                <a href="transaction-reports.html"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
-              </div>
-            </article>
+            </section>
           </div>
         </div>
       </section>
@@ -325,27 +284,50 @@
     renderProfileBox();
 
     (function initTransactionCenter() {
-      const tabs = Array.from(document.querySelectorAll(".transaction-tab"));
-      const cards = Array.from(document.querySelectorAll("[data-center-card]"));
+      const groups = Array.from(document.querySelectorAll("[data-center-group]"));
       const emptyState = document.getElementById("transactionCenterEmpty");
+      const menu = document.getElementById("transactionCenterMenu");
+      let renderingSidebar = false;
+      const groupLabels = {
+        "finance-dashboard": { label: "Finance Dashboard", icon: "fas fa-chart-line" },
+        customers: { label: "Customers", icon: "fas fa-book" },
+        "party-metal": { label: "Party / Metal", icon: "fas fa-ring" },
+        "cash-closing": { label: "Cash & Closing", icon: "fas fa-cash-register" },
+        "admin-audit": { label: "Admin / Audit", icon: "fas fa-file-lines" }
+      };
 
-      function canShowCard(card) {
-        const moduleKey = card.dataset.moduleKey || "";
+      function role() {
+        return typeof getNormalizedRole === "function" ? getNormalizedRole() : String(getLoggedInUser()?.role || "").trim().toLowerCase();
+      }
+
+      function roleAllowed(list) {
+        const allowed = String(list || "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean);
+        return !allowed.length || allowed.includes(role());
+      }
+
+      function pageAllowed(pageKey) {
+        return !pageKey || typeof canAccessPage !== "function" || canAccessPage(pageKey);
+      }
+
+      function moduleAllowed(moduleKey) {
         return !moduleKey || typeof isModuleEnabled !== "function" || isModuleEnabled(moduleKey);
       }
 
-      function renderTab(tabKey) {
+      function linkAllowed(link) {
+        return roleAllowed(link.dataset.itemRoles || "") && pageAllowed(link.dataset.pageKey || "") && moduleAllowed(link.dataset.moduleKey || "");
+      }
+
+      function renderGroups() {
         let visibleCount = 0;
 
-        tabs.forEach((tab) => {
-          const isActive = tab.dataset.tab === tabKey;
-          tab.classList.toggle("active", isActive);
-          tab.setAttribute("aria-selected", isActive ? "true" : "false");
-        });
-
-        cards.forEach((card) => {
-          const shouldShow = card.dataset.tab === tabKey && canShowCard(card);
-          card.style.display = shouldShow ? "" : "none";
+        groups.forEach((group) => {
+          const links = Array.from(group.querySelectorAll(".transaction-link-list a"));
+          links.forEach((link) => {
+            link.style.display = linkAllowed(link) ? "" : "none";
+          });
+          const visibleLinks = links.filter((link) => link.style.display !== "none");
+          const shouldShow = roleAllowed(group.dataset.groupRoles || "") && moduleAllowed(group.dataset.moduleKey || "") && visibleLinks.length > 0;
+          group.style.display = shouldShow ? "" : "none";
           if (shouldShow) visibleCount += 1;
         });
 
@@ -354,11 +336,37 @@
         }
       }
 
-      tabs.forEach((tab) => {
-        tab.addEventListener("click", () => renderTab(tab.dataset.tab));
-      });
+      function renderSimpleSidebar() {
+        if (!menu) return;
+        const visibleGroups = groups.filter((group) => group.style.display !== "none");
+        renderingSidebar = true;
+        menu.innerHTML = `
+          <li><a href="transaction-center.html" class="active"><i class="fas fa-table-columns"></i> Transaction Center</a></li>
+          ${visibleGroups.map((group) => {
+            const meta = groupLabels[group.dataset.groupKey] || { label: group.dataset.groupKey, icon: "fas fa-folder" };
+            return `<li><a href="#${group.id}"><i class="${meta.icon}"></i> ${meta.label}</a></li>`;
+          }).join("")}
+        `;
+        setTimeout(() => {
+          renderingSidebar = false;
+        }, 0);
+      }
 
-      renderTab("overview");
+      function renderNavigation() {
+        renderGroups();
+        renderSimpleSidebar();
+      }
+
+      renderNavigation();
+
+      if (menu && typeof MutationObserver === "function") {
+        const observer = new MutationObserver(() => {
+          if (!renderingSidebar) renderNavigation();
+        });
+        observer.observe(menu, { childList: true });
+      }
+
+      window.addEventListener("erp:module-preview-context", renderNavigation);
     })();
   </script>
 </body>

@@ -859,12 +859,19 @@
     }
 
     function switchReportTab(tabKey) {
+      const tabExists = !!document.querySelector(`.report-tab-btn[data-report-tab="${tabKey}"]`);
+      if (!tabExists) tabKey = "party-ledger";
       document.querySelectorAll(".report-tab-btn").forEach((button) => {
         button.classList.toggle("active", button.dataset.reportTab === tabKey);
       });
       document.querySelectorAll(".report-panel").forEach((panel) => {
         panel.classList.toggle("active", panel.id === `panel-${tabKey}`);
       });
+    }
+
+    function switchReportTabFromHash() {
+      const tabKey = String(window.location.hash || "").replace(/^#/, "");
+      if (tabKey) switchReportTab(tabKey);
     }
 
     function setTodayAndMonthDefaults() {
@@ -1114,6 +1121,7 @@
     window.addEventListener("load", async function () {
       renderProfileBox();
       setTodayAndMonthDefaults();
+      switchReportTabFromHash();
       await loadParties();
 
       document.getElementById("partyLedgerPartyType")?.addEventListener("change", function () {
@@ -1136,6 +1144,8 @@
       await loadMetalLedgerReport("GOLD");
       await loadMetalLedgerReport("SILVER");
     });
+
+    window.addEventListener("hashchange", switchReportTabFromHash);
   </script>
 
   <script src="js/auth.js"></script>

@@ -4,7 +4,7 @@
   <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Customer Ledger</title>
+  <title>Billing Customer Ledger</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="icons/icon-192.png">
   <script src="js/pwa.js" defer></script>
@@ -17,6 +17,9 @@
     .summary-card { border:1px solid #e2e8f0; border-radius:8px; background:#fff; padding:14px; }
     .summary-card h4 { margin:0 0 6px; font-size:12px; color:#64748b; text-transform:uppercase; }
     .summary-card p { margin:0; font-size:20px; font-weight:800; color:#0f172a; }
+    .ledger-shortcuts { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+    .ledger-shortcuts a { min-height:38px; padding:0 12px; border:1px solid #cbd5e1; border-radius:8px; display:inline-flex; align-items:center; gap:8px; color:#0f172a; background:#fff; text-decoration:none; font-weight:700; }
+    .ledger-shortcuts a:hover { border-color:#93c5fd; background:#eff6ff; }
     @media (max-width: 900px) { .filter-grid, .summary-grid { grid-template-columns:1fr 1fr; } }
     @media (max-width: 620px) { .filter-grid, .summary-grid { grid-template-columns:1fr; } }
   </style>
@@ -30,7 +33,7 @@
           <li><a href="dashboard.html"><i class="fas fa-chart-pie"></i> Dashboard</a></li>
           <li><a href="transaction.html"><i class="fas fa-arrow-right-arrow-left"></i> Transaction</a></li>
           <li><a href="transaction-reports.html"><i class="fas fa-file-lines"></i> Transaction Reports</a></li>
-          <li><a href="customer-ledger.html" class="active"><i class="fas fa-book"></i> Customer Ledger</a></li>
+          <li><a href="customer-ledger.html" class="active"><i class="fas fa-book"></i> Billing Customer Ledger</a></li>
           <li><a href="branch-cash-book.html"><i class="fas fa-cash-register"></i> Branch Cash Book</a></li>
           <li><a href="transaction-summary-dashboard.html"><i class="fas fa-chart-line"></i> Transaction Summary</a></li>
         </ul>
@@ -40,13 +43,16 @@
       <div class="topbar">
         <div class="top-left">
           <button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
-          <div class="title"><h1 id="pageCompanyTitle">Customer Ledger</h1><p>Customer receivable ledger</p></div>
+          <div class="title"><h1 id="pageCompanyTitle">Billing Customer Ledger</h1><p>Billing customer receivable ledger</p></div>
         </div>
         <div class="top-right"><button type="button" onclick="window.print()">Print</button><div class="profile-box" id="profileBox"></div></div>
       </div>
       <section class="page active">
         <div class="section-box">
-          <h2>Customer Ledger</h2>
+          <h2>Billing Customer Ledger</h2>
+          <div class="ledger-shortcuts" aria-label="Customer ledger reports">
+            <a href="transaction-reports.html#customer-due"><i class="fas fa-user-clock"></i> Customer Due Report</a>
+          </div>
           <div class="filter-grid">
             <div class="input-box"><label>Customer / Party</label><select id="partyId"><option value="">All Customers</option></select></div>
             <div class="input-box"><label>Search</label><input id="searchText" placeholder="Name, mobile, invoice" /></div>

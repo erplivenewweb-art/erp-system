@@ -109,9 +109,10 @@
     async function loadHealth() {
       try {
         const data = await readJson(await fetch(`${API_BASE}/backup/health`, { cache: "no-store" }));
-        document.getElementById("backupStatus").textContent = data.backupCount ? "Backup available" : "No backup found";
-        document.getElementById("backupStatus").className = `status ${data.backupCount ? "ok" : "bad"}`;
-        document.getElementById("backupMeta").textContent = `Folder: ${data.backupDir}`;
+        document.getElementById("backupStatus").textContent = data.backupAgeWarning ? (data.warning || "Backup needs attention") : "Backup healthy";
+        document.getElementById("backupStatus").className = `status ${data.backupAgeWarning ? "bad" : "ok"}`;
+        const ageText = data.latestBackupAgeHours === null ? "none" : `${data.latestBackupAgeHours}h`;
+        document.getElementById("backupMeta").textContent = `Folder: ${data.backupDir} | Latest age: ${ageText} | Total size: ${formatSize(data.totalBackupSize)} | Retention: ${data.retentionCount}`;
         document.getElementById("backupRows").innerHTML = (data.backups || []).map((item) => `
           <tr>
             <td>${item.file}</td>

@@ -6,7 +6,6 @@ require("dotenv").config({ path: LOCAL_ENV_FILE });
 
 const express = require("express");
 const cors = require("cors");
-const helmet = require("helmet");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
@@ -18,7 +17,6 @@ const {
   normalizeRoleValue,
   requirePageAuth,
   setAuthAccessValidator,
-  setAuthSessionValidator,
   signAuthToken
 } = require("./authMiddleware");
 const mysql = require("mysql2/promise");
@@ -27,7 +25,6 @@ const nodemailer = require("nodemailer");
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
-app.disable("x-powered-by");
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");
 const FRONTEND_INDEX_FILE = path.join(FRONTEND_ROOT, "index.html");
 const FRONTEND_CSS_DIR = path.join(FRONTEND_ROOT, "css");
@@ -145,62 +142,6 @@ function isAllowedCorsOrigin(origin = "") {
   }
 }
 
-const hstsMiddleware = helmet.hsts({
-  maxAge: 15552000,
-  includeSubDomains: true
-});
-
-function productionHttpsHsts(req, res, next) {
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-
-  if (isProductionRuntime() && (req.secure || forwardedProto === "https")) {
-    return hstsMiddleware(req, res, next);
-  }
-
-  return next();
-}
-
-function permissionsPolicyMiddleware(_req, res, next) {
-  res.setHeader(
-    "Permissions-Policy",
-    "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
-  );
-  return next();
-}
-
-app.use(helmet.hidePoweredBy());
-app.use(helmet.noSniff());
-app.use(helmet.referrerPolicy({ policy: "strict-origin-when-cross-origin" }));
-app.use(helmet.frameguard({ action: "sameorigin" }));
-app.use(productionHttpsHsts);
-app.use(permissionsPolicyMiddleware);
-app.use(
-  helmet.contentSecurityPolicy({
-    reportOnly: true,
-    useDefaults: false,
-    directives: {
-      defaultSrc: ["'self'"],
-      baseUri: ["'self'"],
-      objectSrc: ["'none'"],
-      frameAncestors: ["'self'"],
-      connectSrc: ["'self'", "http://localhost:*", "http://127.0.0.1:*", "https:"],
-      imgSrc: ["'self'", "data:", "blob:"],
-      fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "data:"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      scriptSrc: [
-        "'self'",
-        "'unsafe-inline'",
-        "https://cdnjs.cloudflare.com",
-        "https://cdn.jsdelivr.net",
-        "https://unpkg.com"
-      ]
-    }
-  })
-);
-
 app.use(
   cors({
     origin(origin, callback) {
@@ -211,14 +152,13 @@ app.use(
       return callback(new Error("CORS origin not allowed"));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-XSRF-TOKEN"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   })
 );
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUserIfPresent);
-app.use(csrfProtectionMiddleware);
 app.use(modulePreviewEnforcementMiddleware);
 
 function isOperationalMutationPath(pathname = "") {
@@ -665,288 +605,6 @@ function getRequestIpAddress(req) {
       req.connection?.remoteAddress ||
       ""
   ).trim();
-}
-
-function getAuthTokenJti(tokenPayload = {}) {
-  return String(tokenPayload?.jti || tokenPayload?.sessionId || tokenPayload?.session_id || "").trim();
-}
-
-const CSRF_COOKIE_NAME = "XSRF-TOKEN";
-const CSRF_HEADER_NAMES = ["x-csrf-token", "x-xsrf-token"];
-const CSRF_TOKEN_EXEMPT_MUTATION_PATHS = new Set([
-  "/auth/logout",
-  "/auth/reset-password",
-  "/login",
-  "/otp/request",
-  "/otp/verify",
-  "/registeruser",
-  "/requestcompanysignup",
-  "/requeststaffjoin"
-]);
-const CSRF_UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-
-function getAuthSessionExpiryDate() {
-  return new Date(Date.now() + 12 * 60 * 60 * 1000);
-}
-
-async function createAuthSession(req, user) {
-  const userId = Number(user?.id || 0);
-  if (!userId) {
-    throw new Error("Cannot create auth session without user id");
-  }
-
-  const tokenJti = crypto.randomUUID();
-  const expiresAt = getAuthSessionExpiryDate();
-  await pool.query(
-    `
-    INSERT INTO auth_sessions
-      (user_id, token_jti, expires_at, user_agent, ip_address)
-    VALUES (?, ?, ?, ?, ?)
-    `,
-    [
-      userId,
-      tokenJti,
-      expiresAt,
-      String(req.headers["user-agent"] || "").slice(0, 1000),
-      getRequestIpAddress(req).slice(0, 120)
-    ]
-  );
-
-  return {
-    tokenJti,
-    expiresAt
-  };
-}
-
-async function validateAuthSession(req) {
-  const userId = Number(req.user?.userId || 0);
-  const tokenJti = getAuthTokenJti(req.user);
-  if (!userId || !tokenJti) {
-    return accessDenied(401, "Session expired. Please login again.");
-  }
-
-  const [rows] = await pool.query(
-    `
-    SELECT id, user_id, token_jti, expires_at, revoked_at
-    FROM auth_sessions
-    WHERE user_id = ?
-      AND token_jti = ?
-    LIMIT 1
-    `,
-    [userId, tokenJti]
-  );
-  const session = rows[0] || null;
-  if (!session || session.revoked_at) {
-    return accessDenied(401, "Session expired. Please login again.");
-  }
-
-  const expiresAt = parseAccessDate(session.expires_at);
-  if (!expiresAt || expiresAt.getTime() <= Date.now()) {
-    return accessDenied(401, "Session expired. Please login again.");
-  }
-
-  req.authSession = session;
-  return { ok: true };
-}
-
-async function revokeAuthSessionForPayload(tokenPayload = {}) {
-  const userId = Number(tokenPayload?.userId || 0);
-  const tokenJti = getAuthTokenJti(tokenPayload);
-  if (!userId || !tokenJti) return { affectedRows: 0 };
-
-  const [result] = await pool.query(
-    `
-    UPDATE auth_sessions
-    SET revoked_at = COALESCE(revoked_at, NOW())
-    WHERE user_id = ?
-      AND token_jti = ?
-      AND revoked_at IS NULL
-    `,
-    [userId, tokenJti]
-  );
-
-  return result;
-}
-
-async function revokeAllAuthSessionsForUser(connection, userId) {
-  const cleanUserId = Number(userId || 0);
-  if (!cleanUserId) return { affectedRows: 0 };
-
-  const executor = connection || pool;
-  const [result] = await executor.query(
-    `
-    UPDATE auth_sessions
-    SET revoked_at = COALESCE(revoked_at, NOW())
-    WHERE user_id = ?
-      AND revoked_at IS NULL
-    `,
-    [cleanUserId]
-  );
-
-  return result;
-}
-
-function parseRequestCookies(cookieHeader = "") {
-  return String(cookieHeader || "")
-    .split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce((acc, part) => {
-      const separatorIndex = part.indexOf("=");
-      if (separatorIndex === -1) return acc;
-      const key = part.slice(0, separatorIndex).trim();
-      const value = part.slice(separatorIndex + 1).trim();
-      if (key) {
-        try {
-          acc[key] = decodeURIComponent(value || "");
-        } catch (_) {
-          acc[key] = value || "";
-        }
-      }
-      return acc;
-    }, {});
-}
-
-function toBase64Url(value) {
-  return Buffer.from(String(value || ""), "utf8").toString("base64url");
-}
-
-function fromBase64Url(value) {
-  return Buffer.from(String(value || ""), "base64url").toString("utf8");
-}
-
-function createSignedCsrfToken(sessionJti) {
-  const cleanSessionJti = String(sessionJti || "").trim();
-  if (!cleanSessionJti) {
-    throw new Error("Cannot create CSRF token without session id");
-  }
-
-  const payload = {
-    sessionJti: cleanSessionJti,
-    nonce: crypto.randomBytes(18).toString("base64url"),
-    exp: Date.now() + 12 * 60 * 60 * 1000
-  };
-  const encodedPayload = toBase64Url(JSON.stringify(payload));
-  const signature = crypto
-    .createHmac("sha256", String(process.env.JWT_SECRET || ""))
-    .update(encodedPayload)
-    .digest("base64url");
-
-  return `${encodedPayload}.${signature}`;
-}
-
-function verifySignedCsrfToken(token, sessionJti) {
-  const cleanToken = String(token || "").trim();
-  const cleanSessionJti = String(sessionJti || "").trim();
-  if (!cleanToken || !cleanSessionJti) return false;
-
-  const [encodedPayload, signature] = cleanToken.split(".");
-  if (!encodedPayload || !signature) return false;
-
-  const expectedSignature = crypto
-    .createHmac("sha256", String(process.env.JWT_SECRET || ""))
-    .update(encodedPayload)
-    .digest("base64url");
-
-  const signatureBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expectedSignature);
-  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
-    return false;
-  }
-
-  try {
-    const payload = JSON.parse(fromBase64Url(encodedPayload));
-    if (String(payload.sessionJti || "") !== cleanSessionJti) return false;
-    if (Number(payload.exp || 0) <= Date.now()) return false;
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function getCsrfCookieOptions() {
-  return {
-    httpOnly: false,
-    secure: isProductionRuntime(),
-    sameSite: "Lax",
-    path: "/",
-    maxAge: 12 * 60 * 60 * 1000
-  };
-}
-
-function setCsrfCookie(res, token) {
-  res.cookie(CSRF_COOKIE_NAME, token, getCsrfCookieOptions());
-}
-
-function getRequestOriginUrl(req) {
-  const host = String(req.headers.host || "").trim();
-  if (!host) return "";
-  return `${req.protocol || "http"}://${host}`.replace(/\/+$/, "");
-}
-
-function isAllowedCsrfOrigin(value, req) {
-  const clean = String(value || "").trim().replace(/\/+$/, "");
-  if (!clean) return false;
-  if (isAllowedCorsOrigin(clean)) return true;
-  return clean === getRequestOriginUrl(req);
-}
-
-function hasValidUnsafeRequestOrigin(req) {
-  const origin = String(req.headers.origin || "").trim();
-  if (origin) return isAllowedCsrfOrigin(origin, req);
-
-  const referer = String(req.headers.referer || req.headers.referrer || "").trim();
-  if (!referer) return false;
-
-  try {
-    const refererUrl = new URL(referer);
-    return isAllowedCsrfOrigin(refererUrl.origin, req);
-  } catch (_) {
-    return false;
-  }
-}
-
-function getCsrfHeaderToken(req) {
-  for (const headerName of CSRF_HEADER_NAMES) {
-    const value = String(req.headers[headerName] || "").trim();
-    if (value) return value;
-  }
-  return "";
-}
-
-function isCsrfTokenExemptPath(req) {
-  return CSRF_TOKEN_EXEMPT_MUTATION_PATHS.has(String(req.path || "").trim().toLowerCase());
-}
-
-function csrfProtectionMiddleware(req, res, next) {
-  const method = String(req.method || "").trim().toUpperCase();
-  if (!CSRF_UNSAFE_METHODS.has(method)) return next();
-
-  if (!hasValidUnsafeRequestOrigin(req)) {
-    return res.status(403).json({
-      success: false,
-      message: "Invalid request origin."
-    });
-  }
-
-  if (!req.user || isCsrfTokenExemptPath(req)) return next();
-
-  const headerToken = getCsrfHeaderToken(req);
-  const cookieToken = parseRequestCookies(req.headers.cookie || "")[CSRF_COOKIE_NAME] || "";
-  const sessionJti = getAuthTokenJti(req.user);
-  if (
-    !headerToken ||
-    !cookieToken ||
-    headerToken !== cookieToken ||
-    !verifySignedCsrfToken(headerToken, sessionJti)
-  ) {
-    return res.status(403).json({
-      success: false,
-      message: "Invalid CSRF token."
-    });
-  }
-
-  return next();
 }
 
 function maskDebugIdentifier(value = "") {
@@ -1435,6 +1093,7 @@ const BARCODE_LIFECYCLE_EVENT_TYPES = Object.freeze({
   TRANSFER_DISPATCHED: "TRANSFER_DISPATCHED",
   TRANSFER_RECEIVED: "TRANSFER_RECEIVED",
   TRANSFER_SHORTAGE: "TRANSFER_SHORTAGE",
+  PROCESS_STOCK_CREATED: "PROCESS_STOCK_CREATED",
   PROCESS_LINKED: "PROCESS_LINKED",
   LAMINATION_APPROVED: "LAMINATION_APPROVED",
   STOCK_LIFECYCLE_NORMALIZED: "STOCK_LIFECYCLE_NORMALIZED"
@@ -1651,6 +1310,27 @@ function normalizeKarigarDisplayName(value) {
 
 function normalizeProcessName(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+const PROCESS_QTY_TOLERANCE = 0.0005;
+const PROCESS_QTY_INCREASE_MESSAGE = "Output quantity can increase only in Baton/Patta process.";
+const PROCESS_QTY_INCREASE_ALLOWED_STEPS = new Set(["baton", "batton", "batan", "patta", "patti"]);
+
+function normalizeProcessStepNameForQuantityRule(value = "") {
+  return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function isQuantityIncreaseAllowedProcessStep(processName) {
+  return PROCESS_QTY_INCREASE_ALLOWED_STEPS.has(normalizeProcessStepNameForQuantityRule(processName));
+}
+
+function isTestProcessLotDeleteEnabled() {
+  return String(process.env.ALLOW_TEST_PROCESS_LOT_DELETE || "").trim().toLowerCase() === "true";
+}
+
+function isTestProcessLotDeleteRoleAllowed(role = "") {
+  const clean = normalizeRoleValue(role);
+  return clean === "OWNER" || clean === "ADMIN";
 }
 
 function normalizeProcessLotRow(row) {
@@ -2181,7 +1861,7 @@ async function getProcessStepAdditiveIssueTotals(connection, companyId, processS
 async function recalcProcessStepAdditiveTotals(connection, companyId, processStepId, options = {}) {
   const totals = await getProcessStepAdditiveIssueTotals(connection, companyId, processStepId, options);
 
-  const [insertResult] = await connection.query(
+  await connection.query(
     `
     UPDATE process_step_additive_issues
     SET used_weight = GREATEST(COALESCE(given_weight, 0) - COALESCE(returned_weight, 0), 0)
@@ -2193,7 +1873,7 @@ async function recalcProcessStepAdditiveTotals(connection, companyId, processSte
     [companyId, processStepId]
   );
 
-  await connection.query(
+  const [insertResult] = await connection.query(
     `
     UPDATE process_steps
     SET additive_given_weight = ?,
@@ -2860,8 +2540,8 @@ function getProcessStepCorrectionValuesFromBody(body = {}, beforeStep = {}) {
   });
   if (!weightValidation.ok) return weightValidation;
   if (outputQty < 0) return { ok: false, message: "Output quantity cannot be negative" };
-  if (inputQty > 0 && outputQty > inputQty + 0.0005) {
-    return { ok: false, message: "Output quantity cannot be greater than input quantity" };
+  if (inputQty > 0 && outputQty > inputQty + PROCESS_QTY_TOLERANCE && !isQuantityIncreaseAllowedProcessStep(processName)) {
+    return { ok: false, message: PROCESS_QTY_INCREASE_MESSAGE };
   }
 
   return {
@@ -3383,23 +3063,6 @@ function getTodayDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function normalizeStrictDateOnly(value, fallback = getTodayDateOnly()) {
-  const clean = String(value || fallback || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return "";
-
-  const [year, month, day] = clean.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    return "";
-  }
-
-  return clean;
-}
-
 async function generateInvoiceNumberForCompany(connection, companyId, billDate, prefix = "BILL") {
   const cleanCompanyId = Number(companyId || 0);
   const cleanPrefix =
@@ -3719,7 +3382,6 @@ async function validateActiveAuthenticatedRequest(req) {
 }
 
 setAuthAccessValidator(validateActiveAuthenticatedRequest);
-setAuthSessionValidator(validateAuthSession);
 
 function isApprovedAdminUser(user) {
   if (!user) return false;
@@ -8164,6 +7826,7 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
   const refundCashAmount = toNumber(payload.refundCashAmount);
   const refundMetalWeight = toNumber(payload.refundMetalWeight);
   const refundModeHint = String(payload.refundModeHint || "UNKNOWN").trim().toUpperCase();
+  const returnValue = estimateReturnLineAmount(saleItem, saleItem);
 
   const party = await findOrCreateBillingParty(connection, {
     companyId,
@@ -8219,8 +7882,8 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
       grossWeight,
       calculateFineWeight(grossWeight, purity),
       1,
-      refundCashAmount,
-      `Refund payable only (${refundModeHint}); no cash or metal payout posted`
+      returnValue,
+      `Return value credited; refund payable liability ${refundCashAmount.toFixed(2)} (${refundModeHint})`
     ]
   );
 
@@ -10703,21 +10366,6 @@ async function ensureSchema() {
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      user_id INT NOT NULL,
-      token_jti VARCHAR(120) NOT NULL UNIQUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      expires_at DATETIME NOT NULL,
-      revoked_at DATETIME DEFAULT NULL,
-      user_agent TEXT DEFAULT NULL,
-      ip_address VARCHAR(120) DEFAULT NULL,
-      INDEX idx_auth_sessions_user_active (user_id, revoked_at, expires_at),
-      INDEX idx_auth_sessions_expires (expires_at)
-    )
-  `);
-
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS stock (
       id INT AUTO_INCREMENT PRIMARY KEY,
       serial VARCHAR(50) DEFAULT '',
@@ -10795,9 +10443,16 @@ async function ensureSchema() {
       customer_name VARCHAR(255) DEFAULT '',
       mobile VARCHAR(20) DEFAULT '',
       gst_number VARCHAR(100) DEFAULT '',
+      customer_address TEXT DEFAULT NULL,
       invoice_date VARCHAR(50) DEFAULT '',
       payment_mode VARCHAR(50) DEFAULT '',
       payment_status VARCHAR(50) DEFAULT '',
+      bill_type VARCHAR(50) DEFAULT '',
+      tax_type VARCHAR(50) DEFAULT '',
+      cgst_amount DECIMAL(12,2) DEFAULT 0.00,
+      sgst_amount DECIMAL(12,2) DEFAULT 0.00,
+      igst_amount DECIMAL(12,2) DEFAULT 0.00,
+      gst_amount DECIMAL(12,2) DEFAULT 0.00,
       paid_amount DECIMAL(12,2) DEFAULT 0.00,
       due_amount DECIMAL(12,2) DEFAULT 0.00,
       total_items INT DEFAULT 0,
@@ -12211,19 +11866,6 @@ async function ensureSchema() {
     await addIndexIfMissing("users", "idx_users_force_logout_after", "(force_logout_after)");
   }
 
-  if (await tableExists("auth_sessions")) {
-    await addColumnIfMissing("auth_sessions", "user_id", "INT NOT NULL");
-    await addColumnIfMissing("auth_sessions", "token_jti", "VARCHAR(120) NOT NULL");
-    await addColumnIfMissing("auth_sessions", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
-    await addColumnIfMissing("auth_sessions", "expires_at", "DATETIME NOT NULL");
-    await addColumnIfMissing("auth_sessions", "revoked_at", "DATETIME DEFAULT NULL");
-    await addColumnIfMissing("auth_sessions", "user_agent", "TEXT DEFAULT NULL");
-    await addColumnIfMissing("auth_sessions", "ip_address", "VARCHAR(120) DEFAULT NULL");
-    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_token_jti", "(token_jti)");
-    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_user_active", "(user_id, revoked_at, expires_at)");
-    await addIndexIfMissing("auth_sessions", "idx_auth_sessions_expires", "(expires_at)");
-  }
-
   if (await tableExists("companies")) {
     await addColumnIfMissing("companies", "owner_name", "VARCHAR(255) DEFAULT ''");
     await addColumnIfMissing("companies", "owner_email", "VARCHAR(255) DEFAULT ''");
@@ -12304,6 +11946,13 @@ async function ensureSchema() {
     await addColumnIfMissing("sales_history", "total_weight", "DECIMAL(12,3) DEFAULT 0.000");
     await addColumnIfMissing("sales_history", "status", "VARCHAR(50) DEFAULT 'ACTIVE'");
     await addColumnIfMissing("sales_history", "employee_name", "VARCHAR(255) DEFAULT ''");
+    await addColumnIfMissing("sales_history", "customer_address", "TEXT NULL");
+    await addColumnIfMissing("sales_history", "bill_type", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("sales_history", "tax_type", "VARCHAR(50) DEFAULT ''");
+    await addColumnIfMissing("sales_history", "cgst_amount", "DECIMAL(12,2) DEFAULT 0.00");
+    await addColumnIfMissing("sales_history", "sgst_amount", "DECIMAL(12,2) DEFAULT 0.00");
+    await addColumnIfMissing("sales_history", "igst_amount", "DECIMAL(12,2) DEFAULT 0.00");
+    await addColumnIfMissing("sales_history", "gst_amount", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_history", "company_rate_per_gram", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_history", "selling_rate_per_gram", "DECIMAL(12,2) DEFAULT 0.00");
     await addColumnIfMissing("sales_history", "margin_per_gram", "DECIMAL(12,2) DEFAULT 0.00");
@@ -15048,6 +14697,44 @@ function getBackupDir() {
   return path.resolve(FRONTEND_ROOT, process.env.BACKUP_DIR || "backups");
 }
 
+function getBackupRetentionCount() {
+  const configured = Number(process.env.BACKUP_RETENTION_COUNT || 7);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 7;
+}
+
+function isAutoBackupEnabled() {
+  return String(process.env.BACKUP_AUTO_ENABLED || "true").trim().toLowerCase() !== "false";
+}
+
+function listBackupFiles() {
+  const backupDir = getBackupDir();
+  if (!fs.existsSync(backupDir)) return [];
+  return fs.readdirSync(backupDir)
+    .filter((file) => file.toLowerCase().endsWith(".sql"))
+    .map((file) => {
+      const stat = fs.statSync(path.join(backupDir, file));
+      return { file, size: stat.size, modifiedAt: stat.mtime };
+    })
+    .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+}
+
+function pruneOldBackups() {
+  const backupDir = getBackupDir();
+  const retentionCount = getBackupRetentionCount();
+  const backups = listBackupFiles();
+  const removed = [];
+  backups.slice(retentionCount).forEach((backup) => {
+    const filePath = path.join(backupDir, backup.file);
+    try {
+      fs.unlinkSync(filePath);
+      removed.push(backup.file);
+    } catch (error) {
+      console.warn(`[BACKUP] Could not remove old backup ${backup.file}: ${error.message}`);
+    }
+  });
+  return removed;
+}
+
 function getMysqlToolPath(toolName) {
   const mysqlBinDir = String(process.env.MYSQL_BIN_DIR || "").trim();
   if (!mysqlBinDir) return toolName;
@@ -15092,6 +14779,61 @@ function runMysqlProcess(command, args, { inputFile = null, outputFile = null } 
   });
 }
 
+async function createMysqlBackup({ reason = "manual" } = {}) {
+  const backupDir = getBackupDir();
+  fs.mkdirSync(backupDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(backupDir, `${MYSQL_CONFIG.database}-backup-${timestamp}.sql`);
+  const result = await runMysqlProcess(
+    getMysqlToolPath("mysqldump"),
+    ["-h", MYSQL_CONFIG.host, "-P", String(MYSQL_CONFIG.port || 3306), "-u", MYSQL_CONFIG.user, "--single-transaction", "--routines", "--triggers", "--events", MYSQL_CONFIG.database],
+    { outputFile: backupFile }
+  );
+
+  if (!result.ok) {
+    try {
+      if (fs.existsSync(backupFile) && fs.statSync(backupFile).size === 0) fs.unlinkSync(backupFile);
+    } catch (_) {}
+    return { ...result, file: path.basename(backupFile), reason };
+  }
+
+  const removed = pruneOldBackups();
+  const size = fs.existsSync(backupFile) ? fs.statSync(backupFile).size : 0;
+  return { ok: true, file: path.basename(backupFile), size, removed, reason };
+}
+
+async function createBackupIfStale(reason = "scheduled") {
+  const latestBackup = listBackupFiles()[0] || null;
+  const latestAgeMs = latestBackup ? Date.now() - new Date(latestBackup.modifiedAt).getTime() : Infinity;
+  if (latestBackup && latestAgeMs < 24 * 60 * 60 * 1000) {
+    return { ok: true, skipped: true, reason: "Latest backup is less than 24 hours old", latestBackup };
+  }
+  return createMysqlBackup({ reason });
+}
+
+function scheduleDailyBackups() {
+  if (!isAutoBackupEnabled()) {
+    console.log("[BACKUP] Daily automatic backup disabled by BACKUP_AUTO_ENABLED=false");
+    return;
+  }
+  const runScheduledBackup = async () => {
+    try {
+      const result = await createBackupIfStale("scheduled");
+      if (result.skipped) {
+        console.log(`[BACKUP] Scheduled backup skipped: ${result.reason}`);
+      } else if (result.ok) {
+        console.log(`[BACKUP] Scheduled backup created: ${result.file}`);
+      } else {
+        console.warn(`[BACKUP] Scheduled backup failed: ${result.message}`);
+      }
+    } catch (error) {
+      console.warn(`[BACKUP] Scheduled backup error: ${error.message}`);
+    }
+  };
+  setTimeout(runScheduledBackup, 60 * 1000);
+  setInterval(runScheduledBackup, 24 * 60 * 60 * 1000);
+}
+
 async function getEffectiveModuleCountDefaults() {
   const moduleRows = await getSaasModuleCatalogRows();
   const fullErpModuleKeys = new Set(ERP_PLAN_MODULES.FULL_ERP.map((moduleKey) => normalizeModuleKey(moduleKey)));
@@ -15103,40 +14845,35 @@ async function getEffectiveModuleCountDefaults() {
 
 app.get("/backup/health", authMiddleware, checkRole(["OWNER", "ACCOUNTS"]), async (_req, res) => {
   const backupDir = getBackupDir();
-  const backups = fs.existsSync(backupDir)
-    ? fs.readdirSync(backupDir)
-        .filter((file) => file.toLowerCase().endsWith(".sql"))
-        .map((file) => {
-          const stat = fs.statSync(path.join(backupDir, file));
-          return { file, size: stat.size, modifiedAt: stat.mtime };
-        })
-        .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
-    : [];
+  const backups = listBackupFiles();
+  const latestBackup = backups[0] || null;
+  const latestBackupAgeHours = latestBackup
+    ? Number(((Date.now() - new Date(latestBackup.modifiedAt).getTime()) / 36e5).toFixed(2))
+    : null;
+  const backupAgeWarning = !latestBackup || latestBackupAgeHours > 24;
 
   return res.json({
     success: true,
     backupDir,
     mysqlCliConfigured: Boolean(process.env.MYSQL_BIN_DIR),
+    autoBackupEnabled: isAutoBackupEnabled(),
+    retentionCount: getBackupRetentionCount(),
     backupCount: backups.length,
-    latestBackup: backups[0] || null,
+    totalBackupSize: backups.reduce((total, backup) => total + Number(backup.size || 0), 0),
+    latestBackup,
+    latestBackupAgeHours,
+    backupAgeWarning,
+    warning: backupAgeWarning ? "Latest backup is older than 24 hours or missing." : "",
     backups: backups.slice(0, 20)
   });
 });
 
 app.post("/backup/create", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
   if (isSuperAdminUser(req.user)) return sendSuperAdminReadOnlyError(res);
-  const backupDir = getBackupDir();
-  fs.mkdirSync(backupDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupFile = path.join(backupDir, `${MYSQL_CONFIG.database}-backup-${timestamp}.sql`);
-  const result = await runMysqlProcess(
-    getMysqlToolPath("mysqldump"),
-    ["-h", MYSQL_CONFIG.host, "-P", String(MYSQL_CONFIG.port || 3306), "-u", MYSQL_CONFIG.user, "--single-transaction", "--routines", "--triggers", "--events", MYSQL_CONFIG.database],
-    { outputFile: backupFile }
-  );
+  const result = await createMysqlBackup({ reason: "manual" });
 
   if (!result.ok) return res.status(500).json({ success: false, message: "Backup create failed", error: result.message });
-  return res.json({ success: true, message: "Backup created", file: path.basename(backupFile) });
+  return res.json({ success: true, message: "Backup created", file: result.file, size: result.size, removedOldBackups: result.removed || [] });
 });
 
 app.get("/backup/download", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
@@ -18344,6 +18081,358 @@ function getStickerCommercialWeights(item = {}, allowance = {}) {
   };
 }
 
+async function countRowsForTestLotDelete(connection, sql, params = []) {
+  const [rows] = await connection.query(sql, params);
+  return Number(rows[0]?.count || 0);
+}
+
+async function scanTestProcessLotDeleteDependencies(connection, companyId, lotNo, workCategory = "REGULAR_SANKHA") {
+  const cleanLotNo = normalizeProcessLotNo(lotNo);
+  const category = normalizeWorkCategory(workCategory);
+  const blockers = [];
+  const counts = {};
+
+  const processLot = await getProcessLotForSteps(connection, companyId, cleanLotNo, category);
+  if (!processLot) {
+    return {
+      ok: false,
+      status: 404,
+      message: "Process lot not found",
+      blockers: ["Process lot not found"],
+      counts,
+      processLot: null,
+      stepIds: []
+    };
+  }
+
+  const normalizedStatus = normalizeProcessLotStatus(processLot.status);
+  if (normalizedStatus !== "OPEN") {
+    blockers.push("Lot status is COMPLETED. Only OPEN test lots can be deleted.");
+  }
+
+  if (isManualProcessLot(processLot)) {
+    blockers.push("Manual process lots cannot be deleted by this testing tool.");
+  }
+
+  const [stepRows] = await connection.query(
+    `
+    SELECT id
+    FROM process_steps
+    WHERE company_id = ?
+      AND process_lot_id = ?
+    `,
+    [companyId, processLot.id]
+  );
+  const stepIds = stepRows.map((row) => Number(row.id || 0)).filter(Boolean);
+  const stepIdStrings = stepIds.map((id) => String(id));
+  counts.processSteps = stepIds.length;
+
+  const stockWhereParts = [
+    "lot_number = ?",
+    "manual_lot_id = ?"
+  ];
+  const stockParams = [companyId, cleanLotNo, processLot.id];
+  if (stepIdStrings.length) {
+    stockWhereParts.push(`reference_step_id IN (${stepIdStrings.map(() => "?").join(", ")})`);
+    stockParams.push(...stepIdStrings);
+    stockWhereParts.push(`used_in_process_step_id IN (${stepIds.map(() => "?").join(", ")})`);
+    stockParams.push(...stepIds);
+  }
+
+  const [stockRows] = await connection.query(
+    `
+    SELECT id, barcode, status, stock_state, invoice_number, sold_at, source, category, qty,
+      used_in_process_step_id, deleted_at
+    FROM stock
+    WHERE company_id = ?
+      AND (${stockWhereParts.join(" OR ")})
+    `,
+    stockParams
+  );
+  const stockIds = stockRows.map((row) => Number(row.id || 0)).filter(Boolean);
+  const stockBarcodes = stockRows.map((row) => String(row.barcode || "").trim()).filter(Boolean);
+  const safeRecoveryStockRows = stockRows.filter((row) => {
+    const status = String(row.status || "").trim().toUpperCase();
+    const stockState = String(row.stock_state || "").trim().toUpperCase();
+    return (
+      String(row.source || "").trim().toUpperCase() === "PROCESS_RECOVERY" &&
+      String(row.category || "").trim().toUpperCase() === "RECOVERY" &&
+      status === "IN_STOCK" &&
+      (!stockState || stockState === "IN_STOCK") &&
+      toNumber(row.qty) === 0 &&
+      !String(row.barcode || "").trim() &&
+      !String(row.invoice_number || "").trim() &&
+      !row.sold_at &&
+      !row.deleted_at &&
+      !Number(row.used_in_process_step_id || 0)
+    );
+  });
+  const safeRecoveryStockIds = safeRecoveryStockRows.map((row) => Number(row.id || 0)).filter(Boolean);
+  const unsafeStockIds = stockRows
+    .map((row) => Number(row.id || 0))
+    .filter((id) => id && !safeRecoveryStockIds.includes(id));
+  counts.stock = stockRows.length;
+  counts.safeRecoveryStock = safeRecoveryStockIds.length;
+  counts.unsafeStock = unsafeStockIds.length;
+  counts.soldStock = stockRows.filter((row) => {
+    return String(row.status || "").trim().toUpperCase() === "SOLD" || String(row.invoice_number || "").trim() || row.sold_at;
+  }).length;
+
+  if (counts.unsafeStock > 0) {
+    blockers.push("Lot has stock records that are not safe test recovery stock.");
+  }
+  if (counts.soldStock > 0) {
+    blockers.push("Barcode already sold or linked to an invoice.");
+  }
+
+  const barcodeInSql = stockBarcodes.length ? stockBarcodes.map(() => "?").join(", ") : "";
+  const stockIdInSql = stockIds.length ? stockIds.map(() => "?").join(", ") : "";
+
+  const salesWhereParts = ["lot_number = ?"];
+  const salesParams = [companyId, cleanLotNo];
+  if (stockBarcodes.length) {
+    salesWhereParts.push(`barcode IN (${barcodeInSql})`);
+    salesParams.push(...stockBarcodes);
+  }
+  counts.salesItems = await countRowsForTestLotDelete(
+    connection,
+    `
+    SELECT COUNT(*) AS count
+    FROM sales_items
+    WHERE company_id = ?
+      AND (${salesWhereParts.join(" OR ")})
+    `,
+    salesParams
+  );
+  if (counts.salesItems > 0) {
+    blockers.push("Sales history exists.");
+  }
+
+  const returnWhereParts = ["lot_number = ?"];
+  const returnParams = [companyId, cleanLotNo];
+  if (stockBarcodes.length) {
+    returnWhereParts.push(`barcode IN (${barcodeInSql})`);
+    returnParams.push(...stockBarcodes);
+  }
+  counts.returnHistory = await countRowsForTestLotDelete(
+    connection,
+    `
+    SELECT COUNT(*) AS count
+    FROM return_history
+    WHERE company_id = ?
+      AND (${returnWhereParts.join(" OR ")})
+    `,
+    returnParams
+  );
+  if (counts.returnHistory > 0) {
+    blockers.push("Return history exists.");
+  }
+
+  const transferWhereParts = [];
+  const transferParams = [companyId];
+  if (stockIds.length) {
+    transferWhereParts.push(`stock_id IN (${stockIdInSql})`);
+    transferParams.push(...stockIds);
+  }
+  if (stockBarcodes.length) {
+    transferWhereParts.push(`barcode IN (${barcodeInSql})`);
+    transferParams.push(...stockBarcodes);
+  }
+  counts.branchTransferItems = transferWhereParts.length
+    ? await countRowsForTestLotDelete(
+      connection,
+      `
+      SELECT COUNT(*) AS count
+      FROM branch_transfer_items
+      WHERE company_id = ?
+        AND (${transferWhereParts.join(" OR ")})
+      `,
+      transferParams
+    )
+    : 0;
+  if (counts.branchTransferItems > 0) {
+    blockers.push("Branch transfer activity exists.");
+  }
+
+  const draftWhereParts = ["lot_number = ?"];
+  const draftParams = [companyId, cleanLotNo];
+  if (stockBarcodes.length) {
+    draftWhereParts.push(`barcode IN (${barcodeInSql})`);
+    draftParams.push(...stockBarcodes);
+  }
+  counts.invoiceDraftItems = await countRowsForTestLotDelete(
+    connection,
+    `
+    SELECT COUNT(*) AS count
+    FROM invoice_draft_items
+    WHERE company_id = ?
+      AND (${draftWhereParts.join(" OR ")})
+    `,
+    draftParams
+  );
+  if (counts.invoiceDraftItems > 0) {
+    blockers.push("Invoice draft items exist.");
+  }
+
+  const lifecycleWhereParts = ["process_lot_id = ?", "lot_no = ?"];
+  const lifecycleParams = [companyId, processLot.id, cleanLotNo];
+  if (stockIds.length) {
+    lifecycleWhereParts.push(`stock_id IN (${stockIdInSql})`);
+    lifecycleParams.push(...stockIds);
+  }
+  if (stockBarcodes.length) {
+    lifecycleWhereParts.push(`barcode IN (${barcodeInSql})`);
+    lifecycleParams.push(...stockBarcodes);
+  }
+  counts.barcodeLifecycleEvents = await countRowsForTestLotDelete(
+    connection,
+    `
+    SELECT COUNT(*) AS count
+    FROM barcode_lifecycle_events
+    WHERE company_id = ?
+      AND (${lifecycleWhereParts.join(" OR ")})
+    `,
+    lifecycleParams
+  );
+  if (counts.barcodeLifecycleEvents > 0) {
+    blockers.push("Barcode lifecycle activity exists.");
+  }
+
+  counts.karigarWork = await countRowsForTestLotDelete(
+    connection,
+    `
+    SELECT COUNT(*) AS count
+    FROM karigar_work
+    WHERE company_id = ?
+      AND lot_no = ?
+    `,
+    [companyId, cleanLotNo]
+  );
+  if (counts.karigarWork > 0) {
+    blockers.push("Karigar work entries exist and cannot be safely scoped by process category.");
+  }
+
+  return {
+    ok: blockers.length === 0,
+    status: blockers.length ? 400 : 200,
+    message: blockers.length ? "Cannot delete lot." : "Lot can be deleted.",
+    blockers,
+    counts,
+    safeRecoveryStockIds,
+    unsafeStockIds,
+    processLot: normalizeProcessLotRow(processLot),
+    stepIds
+  };
+}
+
+async function deleteTestProcessLotRecords(connection, companyId, processLot, stepIds = [], safeRecoveryStockIds = []) {
+  const lotNo = normalizeProcessLotNo(processLot?.lot_no || processLot?.lotNo);
+  const processLotId = Number(processLot?.id || 0);
+  const workCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory);
+  const deleted = {};
+
+  async function deleteAndCount(key, sql, params = []) {
+    const [result] = await connection.query(sql, params);
+    deleted[key] = Number(result.affectedRows || 0);
+  }
+
+  if (safeRecoveryStockIds.length) {
+    const stockPlaceholders = safeRecoveryStockIds.map(() => "?").join(", ");
+    await deleteAndCount(
+      "safeRecoveryStock",
+      `
+      DELETE FROM stock
+      WHERE company_id = ?
+        AND id IN (${stockPlaceholders})
+        AND UPPER(COALESCE(source, '')) = 'PROCESS_RECOVERY'
+        AND UPPER(COALESCE(category, '')) = 'RECOVERY'
+        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+        AND COALESCE(qty, 0) = 0
+        AND TRIM(COALESCE(barcode, '')) = ''
+        AND TRIM(COALESCE(invoice_number, '')) = ''
+        AND sold_at IS NULL
+        AND deleted_at IS NULL
+        AND COALESCE(used_in_process_step_id, 0) = 0
+      `,
+      [companyId, ...safeRecoveryStockIds]
+    );
+  } else {
+    deleted.safeRecoveryStock = 0;
+  }
+
+  if (stepIds.length) {
+    const stepPlaceholders = stepIds.map(() => "?").join(", ");
+    await deleteAndCount(
+      "processStepRecoveryInputs",
+      `DELETE FROM process_step_recovery_inputs WHERE company_id = ? AND process_step_id IN (${stepPlaceholders})`,
+      [companyId, ...stepIds]
+    );
+    await deleteAndCount(
+      "processAdditiveStockMovements",
+      `DELETE FROM process_additive_stock_movements WHERE company_id = ? AND process_step_id IN (${stepPlaceholders})`,
+      [companyId, ...stepIds]
+    );
+    await deleteAndCount(
+      "processStepAdditiveIssues",
+      `DELETE FROM process_step_additive_issues WHERE company_id = ? AND process_step_id IN (${stepPlaceholders})`,
+      [companyId, ...stepIds]
+    );
+    await deleteAndCount(
+      "processMaterialIssues",
+      `DELETE FROM process_material_issues WHERE company_id = ? AND process_step_id IN (${stepPlaceholders})`,
+      [companyId, ...stepIds]
+    );
+    await deleteAndCount(
+      "processJobSlips",
+      `DELETE FROM process_job_slips WHERE company_id = ? AND process_step_id IN (${stepPlaceholders})`,
+      [companyId, ...stepIds]
+    );
+  }
+
+  await deleteAndCount(
+    "processStepReversalEntries",
+    "DELETE FROM process_step_reversal_entries WHERE company_id = ? AND process_lot_id = ?",
+    [companyId, processLotId]
+  );
+  await deleteAndCount(
+    "processStepCorrectionBatches",
+    "DELETE FROM process_step_correction_batches WHERE company_id = ? AND process_lot_id = ?",
+    [companyId, processLotId]
+  );
+  await deleteAndCount(
+    "processLaminationWeights",
+    "DELETE FROM process_lamination_weights WHERE company_id = ? AND process_lot_id = ?",
+    [companyId, processLotId]
+  );
+  await deleteAndCount(
+    "outsideKarigarLedger",
+    "DELETE FROM outside_karigar_ledger WHERE company_id = ? AND process_lot_id = ?",
+    [companyId, processLotId]
+  );
+  await deleteAndCount(
+    "processMaterialIssuesByLot",
+    "DELETE FROM process_material_issues WHERE company_id = ? AND lot_no = ? AND work_category = ?",
+    [companyId, lotNo, workCategory]
+  );
+  await deleteAndCount(
+    "processJobSlipsByLot",
+    "DELETE FROM process_job_slips WHERE company_id = ? AND lot_no = ? AND work_category = ?",
+    [companyId, lotNo, workCategory]
+  );
+  await deleteAndCount(
+    "processSteps",
+    "DELETE FROM process_steps WHERE company_id = ? AND process_lot_id = ?",
+    [companyId, processLotId]
+  );
+  await deleteAndCount(
+    "processLots",
+    "DELETE FROM process_lots WHERE company_id = ? AND id = ? AND status = 'OPEN'",
+    [companyId, processLotId]
+  );
+
+  return deleted;
+}
+
 app.get("/process/lots/:lotNo/sticker-allowance", authMiddleware, async (req, res) => {
   let connection;
   try {
@@ -18381,7 +18470,248 @@ app.get("/process/lots/:lotNo/sticker-allowance", authMiddleware, async (req, re
   }
 });
 
-async function moveCompletedProcessLotToStock(connection, companyId, processLot, finalStep, userId = null) {
+app.get("/process/test-lot-delete/config", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ADMIN"]), async (req, res) => {
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: true,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    const roleAllowed = isTestProcessLotDeleteRoleAllowed(access.actingUser?.role || "");
+    return res.json({
+      success: true,
+      enabled: isTestProcessLotDeleteEnabled(),
+      allowed: Boolean(!access.isSuperAdmin && roleAllowed),
+      superAdminReadOnly: Boolean(access.isSuperAdmin)
+    });
+  } catch (error) {
+    console.error("Test process lot delete config error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lot delete config failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/process/lots/:lotNo/test-delete-scan", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ADMIN"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!isTestProcessLotDeleteEnabled()) {
+      return res.status(403).json({
+        success: false,
+        message: "Testing process lot delete is disabled"
+      });
+    }
+    if (!isTestProcessLotDeleteRoleAllowed(access.actingUser?.role || "")) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Owner/Admin can delete test process lots"
+      });
+    }
+    if (!access.companyScope) {
+      return res.status(400).json({
+        success: false,
+        message: "companyId is required"
+      });
+    }
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.query.lotNo || req.query.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || "REGULAR_SANKHA");
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "lotNo is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    const scan = await scanTestProcessLotDeleteDependencies(connection, access.companyScope, lotNo, workCategory);
+    return res.status(scan.status || 200).json({
+      success: scan.ok,
+      canDelete: scan.ok,
+      message: scan.message,
+      blockers: scan.blockers,
+      counts: scan.counts,
+      safeRecoveryStockIds: scan.safeRecoveryStockIds || [],
+      unsafeStockIds: scan.unsafeStockIds || [],
+      lot: scan.processLot
+    });
+  } catch (error) {
+    console.error("Test process lot delete scan error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lot delete dependency scan failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+app.delete("/process/lots/:lotNo/test-delete", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ADMIN"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveAccessContext(req, {
+      requireActingUser: true,
+      requireCompanyScope: false,
+      allowSuperAdminAll: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!isTestProcessLotDeleteEnabled()) {
+      return res.status(403).json({
+        success: false,
+        message: "Testing process lot delete is disabled"
+      });
+    }
+    if (!isTestProcessLotDeleteRoleAllowed(access.actingUser?.role || "")) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Owner/Admin can delete test process lots"
+      });
+    }
+    if (!access.companyScope) {
+      return res.status(400).json({
+        success: false,
+        message: "companyId is required"
+      });
+    }
+
+    const confirmation = String(req.body?.confirmation || "").trim();
+    if (confirmation !== "DELETE") {
+      return res.status(400).json({
+        success: false,
+        message: "Type DELETE to confirm permanent test lot deletion"
+      });
+    }
+
+    const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
+    const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
+    if (!lotNo) {
+      return res.status(400).json({
+        success: false,
+        message: "lotNo is required"
+      });
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const processLot = await getProcessLotForSteps(connection, access.companyScope, lotNo, workCategory);
+    if (processLot) {
+      await connection.query(
+        `
+        SELECT id
+        FROM process_lots
+        WHERE company_id = ?
+          AND id = ?
+        FOR UPDATE
+        `,
+        [access.companyScope, processLot.id]
+      );
+    }
+
+    const scan = await scanTestProcessLotDeleteDependencies(connection, access.companyScope, lotNo, workCategory);
+    if (!scan.ok) {
+      await connection.rollback();
+      return res.status(scan.status || 400).json({
+        success: false,
+        canDelete: false,
+        message: scan.message,
+        blockers: scan.blockers,
+        counts: scan.counts,
+        safeRecoveryStockIds: scan.safeRecoveryStockIds || [],
+        unsafeStockIds: scan.unsafeStockIds || [],
+        lot: scan.processLot
+      });
+    }
+
+    const beforeData = {
+      lot: scan.processLot,
+      counts: scan.counts,
+      safeRecoveryStockIds: scan.safeRecoveryStockIds || [],
+      unsafeStockIds: scan.unsafeStockIds || [],
+      stepIds: scan.stepIds
+    };
+    const deleted = await deleteTestProcessLotRecords(
+      connection,
+      access.companyScope,
+      scan.processLot,
+      scan.stepIds,
+      scan.safeRecoveryStockIds || []
+    );
+
+    if (toNumber(deleted.safeRecoveryStock) !== (scan.safeRecoveryStockIds || []).length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Safe recovery stock changed during delete. Please scan and try again."
+      });
+    }
+
+    if (toNumber(deleted.processLots) !== 1) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Process lot was not deleted. It may no longer be OPEN."
+      });
+    }
+
+    await logActivitySafe(connection, req, access, {
+      actionType: "DELETE",
+      entityType: "PROCESS_LOT",
+      entityId: lotNo,
+      moduleName: "process",
+      status: "success",
+      message: "Testing process lot permanently deleted",
+      beforeData,
+      afterData: {
+        deleted,
+        deletedAt: new Date().toISOString()
+      },
+      metadata: {
+        testingOnly: true,
+        lotNo,
+        workCategory,
+        safeRecoveryStockIds: scan.safeRecoveryStockIds || [],
+        deletedSafeRecoveryStockCount: toNumber(deleted.safeRecoveryStock),
+        userId: access.actingUserId || null
+      }
+    });
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      message: "Test process lot deleted permanently.",
+      deleted
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("Test process lot delete error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Process lot delete failed",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
+async function moveCompletedProcessLotToStock(connection, companyId, processLot, finalStep, userId = null, branchId = null) {
   const workCategory = normalizeWorkCategory(processLot?.work_category || processLot?.workCategory);
   if (getWorkCategoryDestination(workCategory) !== "STOCK") return null;
 
@@ -18391,13 +18721,22 @@ async function moveCompletedProcessLotToStock(connection, companyId, processLot,
   const lotNo = normalizeProcessLotNo(processLot?.lot_no || processLot?.lotNo);
   const source = workCategory === "PIN" ? "PROCESS_PIN" : "PROCESS_KDM";
   const referenceStepId = String(finalStep?.id || "").trim();
+  const stockBranchId = Number(branchId || 0) || null;
+  if (!stockBranchId) {
+    return {
+      ok: false,
+      message: "Stock branch could not be resolved for completed process lot"
+    };
+  }
+
   const outputQty = toNumber(finalStep?.output_qty);
   const expectedQty = toNumber(processLot?.expected_total_qty);
   const qty = Math.max(1, Math.round(outputQty > 0 ? outputQty : expectedQty > 0 ? expectedQty : 1));
+  const barcode = `${source}-${Number(processLot?.id || 0)}-${referenceStepId || "0"}`;
 
   const [existingRows] = await connection.query(
     `
-    SELECT id
+    SELECT id, barcode, current_branch_id, stock_state
     FROM stock
     WHERE company_id = ?
       AND source = ?
@@ -18408,8 +18747,75 @@ async function moveCompletedProcessLotToStock(connection, companyId, processLot,
   );
 
   if (existingRows.length) {
+    const existingStock = existingRows[0];
+    const existingBranchId = Number(existingStock.current_branch_id || 0) || null;
+    if (existingBranchId && existingBranchId !== stockBranchId) {
+      return {
+        ok: false,
+        message: "Existing process stock belongs to a different branch"
+      };
+    }
+
+    const existingBarcode = String(existingStock.barcode || "").trim();
+    const existingStockState = String(existingStock.stock_state || "").trim().toUpperCase();
+    if (!existingBarcode || !existingBranchId || existingStockState !== "IN_STOCK") {
+      await connection.query(
+        `
+        UPDATE stock
+        SET barcode = COALESCE(NULLIF(TRIM(barcode), ''), ?),
+            stock_state = 'IN_STOCK',
+            current_branch_id = COALESCE(current_branch_id, ?),
+            updated_at = NOW()
+        WHERE company_id = ?
+          AND id = ?
+        `,
+        [barcode, stockBranchId, companyId, existingStock.id]
+      );
+    }
+
+    const lifecycleBarcode = existingBarcode || barcode;
+    const [eventRows] = await connection.query(
+      `
+      SELECT id
+      FROM barcode_lifecycle_events
+      WHERE company_id = ?
+        AND stock_id = ?
+        AND event_type = ?
+      LIMIT 1
+      `,
+      [companyId, existingStock.id, BARCODE_LIFECYCLE_EVENT_TYPES.PROCESS_STOCK_CREATED]
+    );
+    if (!eventRows.length) {
+      await appendBarcodeLifecycleEvent(connection, {
+        companyId,
+        barcode: lifecycleBarcode,
+        stockId: Number(existingStock.id || 0),
+        lotNo,
+        serial: "",
+        processLotId: Number(processLot?.id || 0) || null,
+        branchId: existingBranchId || stockBranchId,
+        eventType: BARCODE_LIFECYCLE_EVENT_TYPES.PROCESS_STOCK_CREATED,
+        eventTitle: "Process Stock Created",
+        eventDescription: "Completed process lot moved directly into stock",
+        eventPayload: {
+          workCategory,
+          source,
+          processType: workCategory,
+          weight: Number(format3(outputWeight)),
+          qty,
+          stockState: "IN_STOCK",
+          backfilled: true
+        },
+        sourceTable: "stock",
+        sourceId: Number(existingStock.id || 0),
+        createdBy: userId
+      });
+    }
+
     return {
-      stockId: Number(existingRows[0].id || 0),
+      stockId: Number(existingStock.id || 0),
+      barcode: lifecycleBarcode,
+      branchId: existingBranchId || stockBranchId,
       alreadyMoved: true
     };
   }
@@ -18434,10 +18840,12 @@ async function moveCompletedProcessLotToStock(connection, companyId, processLot,
       manual_lot_id,
       reference_step_id,
       status,
+      stock_state,
+      current_branch_id,
       company_id,
       created_by,
       deleted_at
-    ) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, NULL, '', ?, ?, ?, ?, 'IN_STOCK', ?, ?, NULL)
+    ) VALUES (?, ?, '', '', '', '', ?, ?, ?, ?, ?, '', ?, ?, ?, ?, 'IN_STOCK', 'IN_STOCK', ?, ?, ?, NULL)
     `,
     [
       "",
@@ -18446,17 +18854,46 @@ async function moveCompletedProcessLotToStock(connection, companyId, processLot,
       qty,
       workCategory,
       lotNo,
+      barcode,
       workCategory,
       source,
       Number(processLot?.id || 0) || null,
       referenceStepId,
+      stockBranchId,
       companyId,
       userId
     ]
   );
 
+  const stockId = Number(insertResult.insertId || 0);
+  await appendBarcodeLifecycleEvent(connection, {
+    companyId,
+    barcode,
+    stockId,
+    lotNo,
+    serial: "",
+    processLotId: Number(processLot?.id || 0) || null,
+    branchId: stockBranchId,
+    eventType: BARCODE_LIFECYCLE_EVENT_TYPES.PROCESS_STOCK_CREATED,
+    eventTitle: "Process Stock Created",
+    eventDescription: "Completed process lot moved directly into stock",
+    eventPayload: {
+      workCategory,
+      source,
+      processType: workCategory,
+      weight: Number(format3(outputWeight)),
+      qty,
+      stockState: "IN_STOCK"
+    },
+    sourceTable: "stock",
+    sourceId: stockId,
+    createdBy: userId
+  });
+
   return {
-    stockId: Number(insertResult.insertId || 0),
+    stockId,
+    barcode,
+    branchId: stockBranchId,
     alreadyMoved: false
   };
 }
@@ -19967,11 +20404,15 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (requestedStatus === "COMPLETED" && outputQty > inputQty) {
+    if (
+      inputQty > 0 &&
+      outputQty > inputQty + PROCESS_QTY_TOLERANCE &&
+      !isQuantityIncreaseAllowedProcessStep(processName)
+    ) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output quantity cannot be greater than input quantity"
+        message: PROCESS_QTY_INCREASE_MESSAGE
       });
     }
 
@@ -19981,7 +20422,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const rawLossWeight = finalStatus === "COMPLETED" ? weightValidation.balanceWeight : 0;
     const lossWeight = Math.max(rawLossWeight, 0);
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
-    const lossQty = finalStatus === "COMPLETED" ? inputQty - finalOutputQty : 0;
+    const lossQty = finalStatus === "COMPLETED" ? Math.max(0, inputQty - finalOutputQty) : 0;
     const warnings = [];
 
     if (rawLossWeight < -0.0005) {
@@ -20334,17 +20775,21 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    if (outputQty > step.input_qty) {
+    if (
+      step.input_qty > 0 &&
+      outputQty > step.input_qty + PROCESS_QTY_TOLERANCE &&
+      !isQuantityIncreaseAllowedProcessStep(step.process_name || step.processName)
+    ) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output quantity cannot be greater than input quantity"
+        message: PROCESS_QTY_INCREASE_MESSAGE
       });
     }
 
     const rawLossWeight = weightValidation.balanceWeight;
     const lossWeight = weightValidation.lossWeight;
-    const lossQty = step.input_qty - outputQty;
+    const lossQty = Math.max(0, step.input_qty - outputQty);
     const warnings = [];
 
     if (rawLossWeight < -0.0005) {
@@ -21136,11 +21581,15 @@ app.put("/process/steps/:id/correct", authMiddleware, checkRole(["SUPERADMIN", "
       });
     }
 
-    if (inputQty > 0 && outputQty > inputQty + 0.0005) {
+    if (
+      inputQty > 0 &&
+      outputQty > inputQty + PROCESS_QTY_TOLERANCE &&
+      !isQuantityIncreaseAllowedProcessStep(processName)
+    ) {
       await connection.rollback();
       return res.status(400).json({
         success: false,
-        message: "Output quantity cannot be greater than input quantity"
+        message: PROCESS_QTY_INCREASE_MESSAGE
       });
     }
 
@@ -25300,7 +25749,7 @@ async function insertStickerStockRow(connection, item, {
   const isManualStickerLot = isManualProcessLot(processLot);
   const commercialWeights = getStickerCommercialWeights(item, stickerAllowance);
 
-  await connection.query(
+  const [insertResult] = await connection.query(
     `
     INSERT INTO stock (
       serial,
@@ -27311,6 +27760,7 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       customerName = "",
       mobile = "",
       gstNo = "",
+      customerAddress = "",
       billDate = "",
       paymentMode = "",
       paymentStatus = "",
@@ -27318,6 +27768,10 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       dueAmount = 0,
       billType = "",
       taxType = "",
+      cgstAmount = 0,
+      sgstAmount = 0,
+      igstAmount = 0,
+      gstAmount = 0,
       totalAmount = 0,
       totalItems = 0,
       totalCount = 0,
@@ -27484,9 +27938,16 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         customer_name,
         mobile,
         gst_number,
+        customer_address,
         invoice_date,
         payment_mode,
         payment_status,
+        bill_type,
+        tax_type,
+        cgst_amount,
+        sgst_amount,
+        igst_amount,
+        gst_amount,
         paid_amount,
         due_amount,
         total_items,
@@ -27510,16 +27971,23 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
         company_id,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, NOW())
       `,
       [
         cleanInvoiceNumber,
         String(customerName || "").trim(),
         String(mobile || "").trim(),
         String(gstNo || "").trim(),
+        String(customerAddress || "").trim() || null,
         String(billDate || "").trim(),
         String(paymentMode || "").trim(),
         String(paymentStatus || "").trim(),
+        String(billType || billingTotals.billType || "").trim().toUpperCase(),
+        String(taxType || billingTotals.taxType || "").trim().toUpperCase(),
+        Number(cgstAmount || billingTotals.cgst || 0),
+        Number(sgstAmount || billingTotals.sgst || 0),
+        Number(igstAmount || billingTotals.igst || 0),
+        Number(gstAmount || billingTotals.gstAmount || 0),
         Number(paidAmount || 0),
         Number(dueAmount || 0),
         Number(billingTotals.totalItems || 0),
@@ -28134,15 +28602,43 @@ app.put("/process/lots/:lotNo/complete", authMiddleware, checkRole(["SUPERADMIN"
       [access.actingUserId || null, processLot.id]
     );
 
-    const directStockItem = destination === "STOCK"
-      ? await moveCompletedProcessLotToStock(
+    let directStockItem = null;
+    if (destination === "STOCK") {
+      const stockBranch = await resolveStockCreationBranch(connection, access, req);
+      if (!stockBranch.ok) {
+        await connection.rollback();
+        return res.status(stockBranch.status || 400).json({
+          success: false,
+          message: stockBranch.message || "Stock branch could not be resolved"
+        });
+      }
+
+      const activeStockBranch = await requireActiveBranchForCompany(connection, access.companyScope, stockBranch.branchId);
+      if (!activeStockBranch.ok) {
+        await connection.rollback();
+        return res.status(activeStockBranch.status || 400).json({
+          success: false,
+          message: activeStockBranch.message || "Branch is inactive"
+        });
+      }
+
+      directStockItem = await moveCompletedProcessLotToStock(
         connection,
         access.companyScope,
         processLot,
         finalStep,
-        access.actingUserId || null
-      )
-      : null;
+        access.actingUserId || null,
+        stockBranch.branchId
+      );
+
+      if (directStockItem && directStockItem.ok === false) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: directStockItem.message || "Direct process stock creation failed"
+        });
+      }
+    }
 
     const [savedRows] = await connection.query(
       `
@@ -33473,7 +33969,7 @@ function canApproveBranchAudit(access = {}) {
 
 function canPerformFinanceAdminAction(access = {}) {
   if (!access?.ok || access.isSuperAdmin) return false;
-  return ["OWNER", "ACCOUNTS"].includes(normalizeRoleValue(access.role || access.actingUser?.role || ""));
+  return ["OWNER", "ADMIN", "ACCOUNTS"].includes(normalizeRoleValue(access.role || access.actingUser?.role || ""));
 }
 
 function sendSensitiveActionPermissionError(res) {
@@ -38189,7 +38685,6 @@ app.post("/superadmin/users/:id/force-logout", authMiddleware, checkRole(["SUPER
         `,
         [reason, access.actingUserId, targetId]
       );
-      await revokeAllAuthSessionsForUser(connection, targetId);
       return { ok: true };
     }
   });
@@ -38654,8 +39149,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
       return res.status(200).json({ success: false, message: "Role not assigned yet" });
     }
 
-    const authSession = await createAuthSession(req, user);
-    const token = signAuthToken(user, authSession);
+    const token = signAuthToken(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
 
@@ -38714,42 +39208,8 @@ app.post("/login", loginRateLimiter, async (req, res) => {
   }
 });
 
-app.get("/auth/csrf", authMiddleware, async (req, res) => {
-  try {
-    const sessionJti = getAuthTokenJti(req.user);
-    if (!sessionJti) {
-      return res.status(401).json({
-        success: false,
-        message: "Session expired. Please login again."
-      });
-    }
-
-    const token = createSignedCsrfToken(sessionJti);
-    setCsrfCookie(res, token);
-    return res.json({
-      success: true,
-      csrfToken: token
-    });
-  } catch (error) {
-    console.error("CSRF token issue error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "CSRF token request failed",
-      error: getErrorDetail(error)
-    });
-  }
-});
-
 app.post("/auth/logout", async (req, res) => {
   const logoutUserId = getRequestedUserId(req);
-  if (req.user) {
-    try {
-      await revokeAuthSessionForPayload(req.user);
-    } catch (error) {
-      console.warn("Auth session logout revocation failed:", getErrorDetail(error));
-    }
-  }
-
   await logActivitySafe(pool, req, null, {
     userId: logoutUserId,
     actorRole: req.user?.role || "",
@@ -39884,6 +40344,10 @@ const CUSTOMER_LEDGER_TRANSACTION_TYPES = [
   "METAL_SETTLEMENT_RECEIVED"
 ];
 
+function getBillingCustomerPaymentScopeSql(alias = "tm") {
+  return `(UPPER(${alias}.transaction_type) NOT IN ('PAYMENT_RECEIVED', 'PAYMENT_RECEIVED_REVERSAL') OR LOWER(COALESCE(${alias}.source_module, '')) <> 'party-metal-account')`;
+}
+
 function sqlInList(values = []) {
   return values.map(() => "?").join(", ");
 }
@@ -40362,6 +40826,115 @@ async function buildTransactionReversalPreview(connection, companyId, transactio
   };
 }
 
+function getRefundPayableIdFromReference(referenceNo = "") {
+  const match = String(referenceNo || "").trim().match(/^RFPAYABLE-(\d+)$/i);
+  return match ? Number(match[1] || 0) : 0;
+}
+
+function getSalesPaymentStatusFromAmounts(totalAmount, paidAmount, dueAmount) {
+  const due = toNumber(dueAmount);
+  const paid = toNumber(paidAmount);
+  if (due <= 0.009) return "PAID";
+  if (paid > 0.009 && paid < toNumber(totalAmount) - 0.009) return "PARTIAL";
+  return "DUE";
+}
+
+function getRefundPayableStatusFromRemaining(payable = {}, settledCashAmount, remainingCashAmount) {
+  const settledCash = toNumber(settledCashAmount);
+  const remainingCash = toNumber(remainingCashAmount);
+  const settledMetal = toNumber(payable.settled_metal_weight);
+  const remainingMetal = toNumber(payable.remaining_metal_weight);
+  if (remainingCash <= 0.009 && remainingMetal <= 0.0005) return "SETTLED";
+  if (settledCash > 0.009 || settledMetal > 0.0005) return "PARTIALLY_SETTLED";
+  return "OPEN";
+}
+
+async function applyCommercialReversalSideEffects(connection, {
+  companyId,
+  original = {},
+  cashRows = [],
+  settlementRows = []
+} = {}) {
+  const originalType = String(original.transaction_type || "").trim().toUpperCase();
+  const invoiceNo = String(original.invoice_no || "").trim();
+
+  if (originalType === "PAYMENT_RECEIVED" && invoiceNo) {
+    const cashAmount = cashRows.reduce((sum, row) => sum + toNumber(row.credit_amount), 0);
+    const settlementAmount = settlementRows.reduce((sum, row) => sum + Math.max(toNumber(row.cash_amount), 0), 0);
+    const reversalAmount = Math.max(cashAmount, settlementAmount);
+    if (reversalAmount > 0.009) {
+      const [saleRows] = await connection.query(
+        `
+        SELECT id, total_amount, paid_amount, due_amount
+        FROM sales_history
+        WHERE company_id = ?
+          AND invoice_number = ?
+          AND COALESCE(is_deleted, 0) = 0
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [companyId, invoiceNo]
+      );
+      const sale = saleRows[0] || null;
+      if (sale) {
+        const totalAmount = toNumber(sale.total_amount);
+        const newPaid = Math.max(roundMoney(toNumber(sale.paid_amount) - reversalAmount), 0);
+        const newDue = Math.min(roundMoney(toNumber(sale.due_amount) + reversalAmount), totalAmount);
+        const newStatus = getSalesPaymentStatusFromAmounts(totalAmount, newPaid, newDue);
+        await connection.query(
+          `
+          UPDATE sales_history
+          SET paid_amount = ?,
+              due_amount = ?,
+              payment_status = ?,
+              updated_at = NOW()
+          WHERE id = ?
+          `,
+          [newPaid, newDue, newStatus, sale.id]
+        );
+      }
+    }
+  }
+
+  if (originalType === "CASH_REFUND_PAID") {
+    const payableId = getRefundPayableIdFromReference(original.reference_no);
+    const reversalAmount = cashRows.reduce((sum, row) => sum + toNumber(row.debit_amount), 0);
+    if (payableId && reversalAmount > 0.009) {
+      const [payableRows] = await connection.query(
+        `
+        SELECT *
+        FROM return_refund_payables
+        WHERE company_id = ?
+          AND id = ?
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [companyId, payableId]
+      );
+      const payable = payableRows[0] || null;
+      if (payable) {
+        const refundCashAmount = toNumber(payable.refund_cash_amount);
+        const newSettledCash = Math.max(roundMoney(toNumber(payable.settled_cash_amount) - reversalAmount), 0);
+        const newRemainingCash = Math.max(roundMoney(refundCashAmount - newSettledCash), 0);
+        const newStatus = getRefundPayableStatusFromRemaining(payable, newSettledCash, newRemainingCash);
+        await connection.query(
+          `
+          UPDATE return_refund_payables
+          SET settled_cash_amount = ?,
+              remaining_cash_amount = ?,
+              payable_status = ?,
+              updated_at = NOW()
+          WHERE company_id = ?
+            AND id = ?
+          `,
+          [newSettledCash, newRemainingCash, newStatus, companyId, payableId]
+        );
+      }
+    }
+  }
+}
+
 async function copyInvoiceLinksForReversal(connection, companyId, originalTransactionId, reversalTransactionId, reversalType, createdBy) {
   const [linkRows] = await connection.query(
     `
@@ -40417,6 +40990,7 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
     if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+    if (!canPerformFinanceAdminAction(access)) return sendSensitiveActionPermissionError(res);
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
@@ -40601,6 +41175,13 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
       });
     }
 
+    await applyCommercialReversalSideEffects(connection, {
+      companyId: access.companyScope,
+      original,
+      cashRows,
+      settlementRows
+    });
+
     await connection.query(
       `
       UPDATE transaction_master
@@ -40647,6 +41228,10 @@ const PARTY_METAL_TRANSACTION_TYPES = new Set([
   "METAL_RECEIVED_REVERSAL",
   "METAL_GIVEN",
   "METAL_GIVEN_REVERSAL",
+  "FINISHED_GOODS_SENT",
+  "FINISHED_GOODS_SENT_REVERSAL",
+  "PAYMENT_RECEIVED",
+  "PAYMENT_RECEIVED_REVERSAL",
   "PAYMENT_GIVEN",
   "PAYMENT_GIVEN_REVERSAL"
 ]);
@@ -40775,6 +41360,7 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
 
   let metalDetails = null;
   let paymentDetails = null;
+  let finishedGoodsDetails = null;
   if (config.kind === "METAL") {
     const metalType = normalizeMetalType(req.body.metalType || req.body.metal_type);
     const purity = toNumber(req.body.purity ?? 0);
@@ -40824,6 +41410,64 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
       throw error;
     }
     paymentDetails = { amount, accountId, paymentMode: String(account.account_type || "").trim() };
+  }
+
+  if (config.kind === "FINISHED_GOODS") {
+    const explicitVoucherDate = String(req.body.date || req.body.voucher_date || req.body.voucherDate || "").trim();
+    const productName = String(req.body.productName || req.body.product_name || req.body.description || "").trim();
+    const qty = toNumber(req.body.quantity ?? req.body.qty ?? 0);
+    const lotNumber = String(req.body.lotNumber || req.body.lot_number || req.body.lotNo || req.body.lot_no || "").trim();
+    const invoiceReference = String(req.body.invoiceReference || req.body.invoice_reference || req.body.invoiceNo || req.body.invoice_no || "").trim();
+    const metalType = normalizeMetalType(req.body.metalType || req.body.metal_type);
+    const purity = toNumber(req.body.purity ?? 0);
+    const grossWeight = toNumber(req.body.grossWeight ?? req.body.gross_weight ?? 0);
+    const fineWeight = validatePartyMetalFineWeight(grossWeight, purity, req.body.fineWeight ?? req.body.fine_weight);
+    const ratePerGram = toNumber(req.body.ratePerGram ?? req.body.rate_per_gram ?? 0);
+    const metalValue = toNumber(req.body.metalValue ?? req.body.metal_value ?? fineWeight * ratePerGram);
+    const makingCharge = toNumber(req.body.makingCharge ?? req.body.making_charge ?? 0);
+    const makingBasisRaw = String(req.body.makingBasis || req.body.making_basis || "PER_GRAM").trim().toUpperCase();
+    const makingBasis = makingBasisRaw === "PER_PAIR" ? "PER_PAIR" : "PER_GRAM";
+    const makingValue = toNumber(req.body.makingValue ?? req.body.making_value ?? (makingBasis === "PER_PAIR" ? qty * makingCharge : grossWeight * makingCharge));
+    const totalValue = toNumber(req.body.totalValue ?? req.body.total_value ?? req.body.lineAmount ?? req.body.line_amount ?? metalValue + makingValue);
+    const expectedMetalValue = roundMoney(fineWeight * ratePerGram);
+    const expectedMakingValue = roundMoney(makingBasis === "PER_PAIR" ? qty * makingCharge : grossWeight * makingCharge);
+    const expectedTotalValue = roundMoney(expectedMetalValue + expectedMakingValue);
+    if (!explicitVoucherDate || !productName || qty <= 0 || !metalType || purity <= 0 || grossWeight <= 0 || ratePerGram < 0 || makingCharge < 0 || totalValue < 0) {
+      const error = new Error("Party, date, branch, product, qty, metal type, purity, gross weight, rate, making charge, and total value are required for finished goods sent");
+      error.status = 400;
+      throw error;
+    }
+    if (!isAmountClose(metalValue, expectedMetalValue)) {
+      const error = new Error(`Metal value mismatch. Expected ${expectedMetalValue.toFixed(2)} for fine weight and rate.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!isAmountClose(makingValue, expectedMakingValue)) {
+      const error = new Error(`Making value mismatch. Expected ${expectedMakingValue.toFixed(2)} for selected making basis.`);
+      error.status = 400;
+      throw error;
+    }
+    if (!isAmountClose(totalValue, expectedTotalValue)) {
+      const error = new Error(`Total value mismatch. Expected ${expectedTotalValue.toFixed(2)} from metal and making value.`);
+      error.status = 400;
+      throw error;
+    }
+    finishedGoodsDetails = {
+      productName,
+      qty,
+      lotNumber,
+      invoiceReference,
+      metalType,
+      purity,
+      grossWeight,
+      fineWeight,
+      ratePerGram,
+      metalValue: expectedMetalValue,
+      makingCharge,
+      makingBasis,
+      makingValue: expectedMakingValue,
+      totalValue: expectedTotalValue
+    };
   }
 
   const existingTransaction = await getExistingTransactionForRetry(connection, access.companyScope, {
@@ -40913,9 +41557,9 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
       `
       INSERT INTO transaction_lines
       (transaction_id, line_no, item_name, qty, line_amount, remarks)
-      VALUES (?, 1, 'Payment Given To Party', 1, ?, ?)
+      VALUES (?, 1, ?, 1, ?, ?)
       `,
-      [transactionId, paymentDetails.amount, remarks]
+      [transactionId, config.lineItemName || "Party Payment", paymentDetails.amount, remarks]
     );
 
     await createCashLedgerEntry(connection, {
@@ -40923,9 +41567,9 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
       partyId,
       transactionId,
       entryDate: voucherDate,
-      entryType: "DEBIT",
-      debitAmount: paymentDetails.amount,
-      creditAmount: 0,
+      entryType: config.cashEntryType || "DEBIT",
+      debitAmount: config.cashEntryType === "CREDIT" ? 0 : paymentDetails.amount,
+      creditAmount: config.cashEntryType === "CREDIT" ? paymentDetails.amount : 0,
       referenceType: config.transactionType,
       referenceNo: voucherNo,
       remarks,
@@ -40934,6 +41578,42 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
       branchId,
       createdBy: finalUserId
     });
+  }
+
+  if (config.kind === "FINISHED_GOODS") {
+    const finishedRemarks = [
+      remarks,
+      `Making Basis: ${finishedGoodsDetails.makingBasis}`,
+      `Making Value: ${finishedGoodsDetails.makingValue.toFixed(2)}`,
+      finishedGoodsDetails.invoiceReference ? `Invoice Reference: ${finishedGoodsDetails.invoiceReference}` : "",
+      finishedGoodsDetails.lotNumber ? `Lot: ${finishedGoodsDetails.lotNumber}` : ""
+    ].filter(Boolean).join(" | ");
+    await connection.query(
+      `
+      INSERT INTO transaction_lines
+      (
+        transaction_id, line_no, item_name, lot_no, metal_type, purity,
+        gross_weight, fine_weight, qty, rate_per_gram,
+        metal_value, making_charge, line_amount, remarks
+      )
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        transactionId,
+        finishedGoodsDetails.productName,
+        finishedGoodsDetails.lotNumber,
+        finishedGoodsDetails.metalType,
+        finishedGoodsDetails.purity,
+        finishedGoodsDetails.grossWeight,
+        finishedGoodsDetails.fineWeight,
+        finishedGoodsDetails.qty,
+        finishedGoodsDetails.ratePerGram,
+        finishedGoodsDetails.metalValue,
+        finishedGoodsDetails.makingCharge,
+        finishedGoodsDetails.totalValue,
+        finishedRemarks
+      ]
+    );
   }
 
   await connection.query(
@@ -41000,11 +41680,30 @@ app.post("/transaction/party-metal/returned", authMiddleware, (req, res) => hand
   note: "Metal returned to party"
 }));
 
+app.post("/transaction/party-metal/finished-goods-sent", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
+  kind: "FINISHED_GOODS",
+  prefix: "PMFG",
+  transactionType: "FINISHED_GOODS_SENT",
+  note: "Finished goods sent to party"
+}));
+
+app.post("/transaction/party-metal/payment-received", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
+  kind: "PAYMENT",
+  prefix: "PMPR",
+  transactionType: "PAYMENT_RECEIVED",
+  cashEntryType: "CREDIT",
+  paymentStatus: "PAID",
+  lineItemName: "Payment Received From Party",
+  note: "Payment received from party"
+}));
+
 app.post("/transaction/party-metal/payment", authMiddleware, (req, res) => handlePartyMetalCreate(req, res, {
   kind: "PAYMENT",
   prefix: "PMP",
   transactionType: "PAYMENT_GIVEN",
+  cashEntryType: "DEBIT",
   paymentStatus: "PAID",
+  lineItemName: "Payment Given To Party",
   note: "Payment given to party"
 }));
 
@@ -41017,6 +41716,7 @@ function getPartyMetalReportWhere(access, branchScope, req, alias = "tm") {
   const search = String(req.query.search || "").trim().toLowerCase();
   const whereParts = [`${alias}.company_id = ?`, `UPPER(${alias}.transaction_type) IN (${sqlInList(Array.from(PARTY_METAL_TRANSACTION_TYPES))})`];
   const params = [access.companyScope, ...Array.from(PARTY_METAL_TRANSACTION_TYPES)];
+  whereParts.push(`(UPPER(${alias}.transaction_type) NOT IN ('FINISHED_GOODS_SENT', 'FINISHED_GOODS_SENT_REVERSAL', 'PAYMENT_RECEIVED', 'PAYMENT_RECEIVED_REVERSAL') OR ${alias}.source_module = 'party-metal-account')`);
   if (branchScope.isBranchFiltered) {
     whereParts.push(`COALESCE(${alias}.branch_id, itlb.branch_id, 0) = ?`);
     params.push(branchScope.branchId);
@@ -41051,15 +41751,93 @@ function getPartyMetalReportWhere(access, branchScope, req, alias = "tm") {
 function getPartyMetalAmountEffects(row = {}) {
   const type = String(row.transaction_type || "").trim().toUpperCase();
   const lineValue = toNumber(row.metal_value);
+  const totalLineAmount = toNumber(row.line_amount ?? row.metal_value);
   const cashDebit = toNumber(row.cash_debit ?? row.payment_amount);
   const cashCredit = toNumber(row.cash_credit);
   if (type === "METAL_RECEIVED") return { receivedValue: lineValue, returnedValue: 0, paid: 0, dueEffect: lineValue };
   if (type === "METAL_RECEIVED_REVERSAL") return { receivedValue: -lineValue, returnedValue: 0, paid: 0, dueEffect: -lineValue };
   if (type === "METAL_GIVEN") return { receivedValue: 0, returnedValue: lineValue, paid: 0, dueEffect: -lineValue };
   if (type === "METAL_GIVEN_REVERSAL") return { receivedValue: 0, returnedValue: -lineValue, paid: 0, dueEffect: lineValue };
+  if (type === "FINISHED_GOODS_SENT") return { receivedValue: totalLineAmount, returnedValue: 0, paid: 0, dueEffect: totalLineAmount };
+  if (type === "FINISHED_GOODS_SENT_REVERSAL") return { receivedValue: -totalLineAmount, returnedValue: 0, paid: 0, dueEffect: -totalLineAmount };
+  if (type === "PAYMENT_RECEIVED") return { receivedValue: 0, returnedValue: 0, paid: cashCredit, dueEffect: -cashCredit };
+  if (type === "PAYMENT_RECEIVED_REVERSAL") return { receivedValue: 0, returnedValue: 0, paid: -cashDebit, dueEffect: cashDebit };
   if (type === "PAYMENT_GIVEN") return { receivedValue: 0, returnedValue: 0, paid: cashDebit, dueEffect: -cashDebit };
   if (type === "PAYMENT_GIVEN_REVERSAL") return { receivedValue: 0, returnedValue: 0, paid: -cashCredit, dueEffect: cashCredit };
   return { receivedValue: 0, returnedValue: 0, paid: 0, dueEffect: 0 };
+}
+
+async function getPartyMetalReportRows(connection, whereParts, params) {
+  const [rows] = await connection.query(
+    `
+    SELECT
+      tm.id,
+      tm.voucher_date,
+      tm.voucher_no,
+      tm.reference_no,
+      tm.transaction_type,
+      tm.party_id,
+      pm.party_name,
+      pm.party_type,
+      COALESCE(tm.branch_id, itlb.branch_id, NULL) AS branch_id,
+      b.branch_name,
+      b.branch_code,
+      COALESCE(line_totals.metal_type, metal_totals.metal_type, '') AS metal_type,
+      COALESCE(line_totals.purity, metal_totals.purity, 0) AS purity,
+      COALESCE(line_totals.item_name, '') AS item_name,
+      COALESCE(line_totals.lot_no, '') AS lot_no,
+      COALESCE(line_totals.qty, 0) AS qty,
+      COALESCE(line_totals.line_gross_weight, 0) AS line_gross_weight,
+      COALESCE(line_totals.line_fine_weight, 0) AS line_fine_weight,
+      COALESCE(line_totals.rate_per_gram, 0) AS rate_per_gram,
+      COALESCE(line_totals.making_charge, 0) AS making_charge,
+      COALESCE(line_totals.line_remarks, '') AS line_remarks,
+      COALESCE(metal_totals.gross_in, 0) AS gross_in,
+      COALESCE(metal_totals.gross_out, 0) AS gross_out,
+      COALESCE(metal_totals.fine_in, 0) AS fine_in,
+      COALESCE(metal_totals.fine_out, 0) AS fine_out,
+      COALESCE(line_totals.metal_value, 0) AS metal_value,
+      COALESCE(line_totals.line_amount, 0) AS line_amount,
+      COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
+      COALESCE(cash_totals.cash_credit, 0) AS cash_credit
+    FROM transaction_master tm
+    LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+    ${getTransactionBranchJoinSql("tm")}
+    LEFT JOIN branches b ON b.id = COALESCE(tm.branch_id, itlb.branch_id) AND b.company_id = tm.company_id
+    LEFT JOIN (
+      SELECT transaction_id,
+        MAX(item_name) AS item_name,
+        MAX(lot_no) AS lot_no,
+        MAX(metal_type) AS metal_type,
+        MAX(purity) AS purity,
+        SUM(qty) AS qty,
+        SUM(gross_weight) AS line_gross_weight,
+        SUM(fine_weight) AS line_fine_weight,
+        MAX(rate_per_gram) AS rate_per_gram,
+        SUM(metal_value) AS metal_value,
+        MAX(making_charge) AS making_charge,
+        SUM(line_amount) AS line_amount,
+        MAX(remarks) AS line_remarks
+      FROM transaction_lines
+      GROUP BY transaction_id
+    ) line_totals ON line_totals.transaction_id = tm.id
+    LEFT JOIN (
+      SELECT transaction_id, MAX(metal_type) AS metal_type, MAX(purity) AS purity,
+        SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out, SUM(fine_in) AS fine_in, SUM(fine_out) AS fine_out
+      FROM metal_ledger
+      GROUP BY transaction_id
+    ) metal_totals ON metal_totals.transaction_id = tm.id
+    LEFT JOIN (
+      SELECT transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+      FROM cash_ledger
+      GROUP BY transaction_id
+    ) cash_totals ON cash_totals.transaction_id = tm.id
+    WHERE ${whereParts.join(" AND ")}
+    ORDER BY tm.voucher_date ASC, tm.id ASC
+    `,
+    params
+  );
+  return rows;
 }
 
 app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
@@ -41070,57 +41848,97 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
     const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
-    const [rows] = await pool.query(
-      `
-      SELECT
-        tm.id,
-        tm.voucher_date,
-        tm.voucher_no,
-        tm.reference_no,
-        tm.transaction_type,
-        tm.party_id,
-        pm.party_name,
-        pm.party_type,
-        COALESCE(tm.branch_id, itlb.branch_id, NULL) AS branch_id,
-        b.branch_name,
-        b.branch_code,
-        COALESCE(line_totals.metal_type, metal_totals.metal_type, '') AS metal_type,
-        COALESCE(line_totals.purity, metal_totals.purity, 0) AS purity,
-        COALESCE(metal_totals.gross_in, 0) AS gross_in,
-        COALESCE(metal_totals.gross_out, 0) AS gross_out,
-        COALESCE(metal_totals.fine_in, 0) AS fine_in,
-        COALESCE(metal_totals.fine_out, 0) AS fine_out,
-        COALESCE(line_totals.metal_value, 0) AS metal_value,
-        COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
-        COALESCE(cash_totals.cash_credit, 0) AS cash_credit
-      FROM transaction_master tm
-      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
-      ${getTransactionBranchJoinSql("tm")}
-      LEFT JOIN branches b ON b.id = COALESCE(tm.branch_id, itlb.branch_id) AND b.company_id = tm.company_id
-      LEFT JOIN (
-        SELECT transaction_id, MAX(metal_type) AS metal_type, MAX(purity) AS purity, SUM(metal_value) AS metal_value
-        FROM transaction_lines
-        GROUP BY transaction_id
-      ) line_totals ON line_totals.transaction_id = tm.id
-      LEFT JOIN (
-        SELECT transaction_id, MAX(metal_type) AS metal_type, MAX(purity) AS purity,
-          SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out, SUM(fine_in) AS fine_in, SUM(fine_out) AS fine_out
-        FROM metal_ledger
-        GROUP BY transaction_id
-      ) metal_totals ON metal_totals.transaction_id = tm.id
-      LEFT JOIN (
-        SELECT transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
-        FROM cash_ledger
-        GROUP BY transaction_id
-      ) cash_totals ON cash_totals.transaction_id = tm.id
-      WHERE ${whereParts.join(" AND ")}
-      ORDER BY tm.voucher_date ASC, tm.id ASC
-      `,
-      params
-    );
+    const rows = await getPartyMetalReportRows(pool, whereParts, params);
 
     const runningMetalByPartyType = new Map();
     const runningDueByParty = new Map();
+    const openingRows = [];
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+
+    if (fromDate) {
+      const openingReq = {
+        query: {
+          ...req.query,
+          fromDate: "",
+          from_date: "",
+          toDate: "",
+          to_date: ""
+        }
+      };
+      const openingWhere = getPartyMetalReportWhere(access, branchScope, openingReq);
+      openingWhere.whereParts.push("tm.voucher_date < ?");
+      openingWhere.params.push(fromDate);
+      const openingTransactions = await getPartyMetalReportRows(pool, openingWhere.whereParts, openingWhere.params);
+      const partyNames = new Map();
+      const partyTypes = new Map();
+
+      for (const row of openingTransactions) {
+        const partyId = Number(row.party_id || 0);
+        if (!partyId) continue;
+        partyNames.set(String(partyId), row.party_name || "");
+        partyTypes.set(String(partyId), row.party_type || "");
+        const effects = getPartyMetalAmountEffects(row);
+        const grossIn = toNumber(row.gross_in);
+        const grossOut = toNumber(row.gross_out);
+        const fineIn = toNumber(row.fine_in);
+        const fineOut = toNumber(row.fine_out);
+        const metalType = normalizeMetalType(row.metal_type) || "CASH";
+        const metalBalanceKey = `${partyId}|${metalType}`;
+        const previousMetal = runningMetalByPartyType.get(metalBalanceKey) || { gross: 0, fine: 0 };
+        runningMetalByPartyType.set(metalBalanceKey, {
+          gross: previousMetal.gross + grossIn - grossOut,
+          fine: previousMetal.fine + fineIn - fineOut
+        });
+        const dueBalanceKey = String(partyId);
+        runningDueByParty.set(dueBalanceKey, toNumber(runningDueByParty.get(dueBalanceKey)) + effects.dueEffect);
+      }
+
+      const openingPartyIds = new Set([
+        ...[...runningDueByParty.keys()],
+        ...[...runningMetalByPartyType.keys()].map((key) => key.split("|")[0])
+      ]);
+      const requestedPartyId = Number(req.query.partyId || req.query.party_id || 0);
+      if (!openingPartyIds.size && requestedPartyId) {
+        openingPartyIds.add(String(requestedPartyId));
+        const visibleParty = rows.find((row) => Number(row.party_id || 0) === requestedPartyId);
+        if (visibleParty) {
+          partyNames.set(String(requestedPartyId), visibleParty.party_name || "");
+          partyTypes.set(String(requestedPartyId), visibleParty.party_type || "");
+        }
+      }
+      for (const partyKey of openingPartyIds) {
+        const metalEntries = [...runningMetalByPartyType.entries()]
+          .filter(([key]) => key.startsWith(`${partyKey}|`) && !key.endsWith("|CASH"));
+        if (!metalEntries.length) metalEntries.push([`${partyKey}|`, { gross: 0, fine: 0 }]);
+        metalEntries.forEach(([key, metal]) => {
+          const metalType = key.split("|")[1] || "";
+          openingRows.push({
+            id: `opening-${partyKey}-${metalType || "cash"}`,
+            voucher_date: fromDate,
+            voucher_no: "Opening Balance",
+            reference_no: "",
+            transaction_type: "OPENING_BALANCE",
+            party_id: Number(partyKey),
+            party_name: partyNames.get(partyKey) || "",
+            party_type: partyTypes.get(partyKey) || "",
+            metal_type: metalType,
+            gross_in: 0,
+            gross_out: 0,
+            fine_in: 0,
+            fine_out: 0,
+            net_gross: 0,
+            net_fine: 0,
+            value: 0,
+            payment: 0,
+            running_gross_balance: metal.gross,
+            running_fine_balance: metal.fine,
+            due_balance: toNumber(runningDueByParty.get(partyKey)),
+            branch_label: "Opening"
+          });
+        });
+      }
+    }
+
     const ledgerRows = rows.map((row) => {
       const effects = getPartyMetalAmountEffects(row);
       const grossIn = toNumber(row.gross_in);
@@ -41158,7 +41976,7 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
 
     return res.json({
       success: true,
-      rows: ledgerRows,
+      rows: [...openingRows, ...ledgerRows],
       summary: {
         partyDueBalances: Object.fromEntries(runningDueByParty),
         partyMetalBalances: Object.fromEntries([...runningMetalByPartyType.entries()].map(([key, value]) => [key, value]))
@@ -41168,6 +41986,152 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("Party metal ledger error:", error);
     return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal ledger failed", error: getErrorDetail(error) });
+  }
+});
+
+function getPartyMetalStatementLine(row = {}, runningDue = 0) {
+  const type = String(row.transaction_type || "").trim().toUpperCase();
+  const effects = getPartyMetalAmountEffects(row);
+  const lineAmount = toNumber(row.line_amount);
+  const metalValue = toNumber(row.metal_value);
+  const makingValue = Math.max(lineAmount - metalValue, 0);
+  const grossWeight = toNumber(row.line_gross_weight) || toNumber(row.gross_in) || toNumber(row.gross_out);
+  const fineWeight = toNumber(row.line_fine_weight) || toNumber(row.fine_in) || toNumber(row.fine_out);
+  const productOrMetal = String(row.item_name || "").trim() || normalizeMetalType(row.metal_type) || String(row.transaction_type || "").replace(/_/g, " ");
+  return {
+    id: row.id,
+    transactionId: row.id,
+    voucherNo: row.voucher_no || "",
+    date: row.voucher_date || "",
+    transactionType: type,
+    reference: row.reference_no || "",
+    partyId: row.party_id,
+    partyName: row.party_name || "",
+    partyType: row.party_type || "",
+    productOrMetal,
+    metalType: normalizeMetalType(row.metal_type),
+    lotNumber: row.lot_no || "",
+    qty: toNumber(row.qty),
+    grossWeight,
+    fineWeight,
+    metalValue,
+    makingValue,
+    totalValue: effects.receivedValue - effects.returnedValue,
+    payment: effects.paid,
+    balance: runningDue,
+    branchLabel: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned"),
+    remarks: row.line_remarks || "",
+    ratePerGram: toNumber(row.rate_per_gram),
+    makingCharge: toNumber(row.making_charge),
+    reversalUrl: `transaction-reversal.html?search=${encodeURIComponent(row.voucher_no || row.id || "")}`
+  };
+}
+
+app.get("/transaction/party-metal/statement", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
+    const rows = await getPartyMetalReportRows(pool, whereParts, params);
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    let openingDue = 0;
+    const openingMetal = { GOLD: { gross: 0, fine: 0 }, SILVER: { gross: 0, fine: 0 } };
+
+    if (fromDate) {
+      const openingReq = { query: { ...req.query, fromDate: "", from_date: "", toDate: "", to_date: "" } };
+      const openingWhere = getPartyMetalReportWhere(access, branchScope, openingReq);
+      openingWhere.whereParts.push("tm.voucher_date < ?");
+      openingWhere.params.push(fromDate);
+      const openingRows = await getPartyMetalReportRows(pool, openingWhere.whereParts, openingWhere.params);
+      openingRows.forEach((row) => {
+        const effects = getPartyMetalAmountEffects(row);
+        openingDue += effects.dueEffect;
+        const metalType = normalizeMetalType(row.metal_type);
+        if (openingMetal[metalType]) {
+          openingMetal[metalType].gross += toNumber(row.gross_in) - toNumber(row.gross_out);
+          openingMetal[metalType].fine += toNumber(row.fine_in) - toNumber(row.fine_out);
+        }
+      });
+    }
+
+    let runningDue = openingDue;
+    const statementRows = [];
+    if (fromDate) {
+      statementRows.push({
+        id: "opening",
+        transactionId: null,
+        voucherNo: "Opening Balance",
+        date: fromDate,
+        transactionType: "OPENING_BALANCE",
+        reference: "",
+        partyId: Number(req.query.partyId || req.query.party_id || 0) || null,
+        partyName: "",
+        partyType: "",
+        productOrMetal: "Opening Balance",
+        metalType: "",
+        lotNumber: "",
+        qty: 0,
+        grossWeight: 0,
+        fineWeight: 0,
+        metalValue: 0,
+        makingValue: 0,
+        totalValue: 0,
+        payment: 0,
+        balance: openingDue,
+        branchLabel: "Opening",
+        remarks: "Opening balance before selected From Date",
+        ratePerGram: 0,
+        makingCharge: 0,
+        reversalUrl: ""
+      });
+    }
+
+    rows.forEach((row) => {
+      const effects = getPartyMetalAmountEffects(row);
+      runningDue += effects.dueEffect;
+      statementRows.push(getPartyMetalStatementLine(row, runningDue));
+    });
+
+    const summary = statementRows.reduce((acc, row) => {
+      const type = String(row.transactionType || "").toUpperCase();
+      if (type === "FINISHED_GOODS_SENT") acc.totalFinishedGoodsSent += toNumber(row.totalValue);
+      if (type === "PAYMENT_RECEIVED") acc.totalPaymentReceived += toNumber(row.payment);
+      if (type === "PAYMENT_GIVEN") acc.totalPaymentGiven += toNumber(row.payment);
+      if (type === "METAL_RECEIVED") acc.totalMetalReceived += toNumber(row.totalValue);
+      if (type === "METAL_GIVEN") acc.totalMetalReturned += Math.abs(toNumber(row.totalValue));
+      return acc;
+    }, {
+      openingBalance: openingDue,
+      totalFinishedGoodsSent: 0,
+      totalPaymentReceived: 0,
+      totalPaymentGiven: 0,
+      totalMetalReceived: 0,
+      totalMetalReturned: 0,
+      currentDue: runningDue,
+      silverBalance: openingMetal.SILVER.gross,
+      goldBalance: openingMetal.GOLD.gross
+    });
+
+    rows.forEach((row) => {
+      const metalType = normalizeMetalType(row.metal_type);
+      if (metalType === "SILVER") summary.silverBalance += toNumber(row.gross_in) - toNumber(row.gross_out);
+      if (metalType === "GOLD") summary.goldBalance += toNumber(row.gross_in) - toNumber(row.gross_out);
+    });
+
+    const finishedGoodsHistory = statementRows.filter((row) => row.transactionType === "FINISHED_GOODS_SENT");
+    return res.json({
+      success: true,
+      rows: statementRows,
+      finishedGoodsHistory,
+      summary,
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Party metal statement error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal statement failed", error: getErrorDetail(error) });
   }
 });
 
@@ -41194,13 +42158,14 @@ app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => 
         COALESCE(metal_totals.fine_in, 0) AS fine_in,
         COALESCE(metal_totals.fine_out, 0) AS fine_out,
         COALESCE(line_totals.metal_value, 0) AS metal_value,
+        COALESCE(line_totals.line_amount, 0) AS line_amount,
         COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
         COALESCE(cash_totals.cash_credit, 0) AS cash_credit
       FROM transaction_master tm
       LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
       ${getTransactionBranchJoinSql("tm")}
       LEFT JOIN (
-        SELECT transaction_id, MAX(metal_type) AS metal_type, SUM(metal_value) AS metal_value
+        SELECT transaction_id, MAX(metal_type) AS metal_type, SUM(metal_value) AS metal_value, SUM(line_amount) AS line_amount
         FROM transaction_lines
         GROUP BY transaction_id
       ) line_totals ON line_totals.transaction_id = tm.id
@@ -41293,6 +42258,8 @@ const CASH_BOOK_TRANSACTION_TYPES = [
   "EXPENSE_PAYMENT_REVERSAL",
   "CASH_ADJUSTMENT",
   "CASH_ADJUSTMENT_REVERSAL",
+  "PAYMENT_GIVEN",
+  "PAYMENT_GIVEN_REVERSAL",
   "METAL_SETTLEMENT_RECEIVED",
   "METAL_SETTLEMENT_REVERSAL"
 ];
@@ -41311,6 +42278,8 @@ function getCashBookMovement(row = {}) {
   if (type === "CASH_REFUND_REVERSAL") movement.refunds = -credit;
   if (type === "CASH_ADJUSTMENT") movement.adjustments = credit - debit;
   if (type === "CASH_ADJUSTMENT_REVERSAL") movement.adjustments = credit - debit;
+  if (type === "PAYMENT_GIVEN") movement.adjustments = -debit;
+  if (type === "PAYMENT_GIVEN_REVERSAL") movement.adjustments = credit;
 
   const net = movement.collections - movement.expenses - movement.refunds + movement.adjustments;
   movement.cashIn = net >= 0 ? net : 0;
@@ -41335,9 +42304,9 @@ async function computeDailyClosingSummary(connection, access, branchScope, closi
   const dayParams = [access.companyScope, ...CASH_BOOK_TRANSACTION_TYPES, cleanDate];
 
   if (branchScope.isBranchFiltered) {
-    openingWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+    openingWhere.push("COALESCE(cl.branch_id, itlb.branch_id, 0) = ?");
     openingParams.push(branchScope.branchId);
-    dayWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+    dayWhere.push("COALESCE(cl.branch_id, itlb.branch_id, 0) = ?");
     dayParams.push(branchScope.branchId);
   }
 
@@ -41374,6 +42343,7 @@ async function computeDailyClosingSummary(connection, access, branchScope, closi
     branchId: branchScope.isBranchFiltered ? branchScope.branchId : null,
     openingBalance,
     collections: 0,
+    cashPaid: 0,
     expenses: 0,
     refunds: 0,
     adjustments: 0,
@@ -41390,6 +42360,7 @@ async function computeDailyClosingSummary(connection, access, branchScope, closi
   dayRows.forEach((row) => {
     const movement = getCashBookMovement(row);
     summary.collections += movement.collections;
+    summary.cashPaid += movement.cashOut;
     summary.expenses += movement.expenses;
     summary.refunds += movement.refunds;
     summary.adjustments += movement.adjustments;
@@ -41408,8 +42379,7 @@ app.get("/transaction/daily-closing/summary", authMiddleware, async (req, res) =
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = normalizeStrictDateOnly(req.query.date || req.query.closingDate || req.query.closing_date);
-    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
+    const closingDate = String(req.query.date || req.query.closingDate || req.query.closing_date || getTodayDateOnly()).trim();
     const summary = await computeDailyClosingSummary(pool, access, branchScope, closingDate);
     const [closingRows] = await pool.query(
       `
@@ -41439,8 +42409,7 @@ app.post("/transaction/daily-closing/close", authMiddleware, async (req, res) =>
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = normalizeStrictDateOnly(req.body.date || req.body.closingDate || req.body.closing_date);
-    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
+    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
     const remarks = String(req.body.remarks || "").trim();
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -41526,8 +42495,7 @@ app.post("/transaction/daily-closing/reopen", authMiddleware, async (req, res) =
     const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
-    const closingDate = normalizeStrictDateOnly(req.body.date || req.body.closingDate || req.body.closing_date);
-    if (!closingDate) return res.status(400).json({ success: false, message: "Invalid closing date. Use YYYY-MM-DD." });
+    const closingDate = String(req.body.date || req.body.closingDate || req.body.closing_date || getTodayDateOnly()).trim();
     const reason = String(req.body.reason || req.body.reopenReason || req.body.reopen_reason || "").trim();
     if (!reason) return res.status(400).json({ success: false, message: "Reopen reason is required" });
 
@@ -41607,7 +42575,8 @@ app.get("/transaction/customer-ledger", authMiddleware, async (req, res) => {
     const params = [access.companyScope];
     const whereParts = [
       "tm.company_id = ?",
-      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`
+      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`,
+      getBillingCustomerPaymentScopeSql("tm")
     ];
     params.push(...ledgerTypes);
 
@@ -41638,7 +42607,8 @@ app.get("/transaction/customer-ledger", authMiddleware, async (req, res) => {
 
     const baseWhereParts = [
       "tm.company_id = ?",
-      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`
+      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`,
+      getBillingCustomerPaymentScopeSql("tm")
     ];
     const baseParams = [access.companyScope, ...ledgerTypes];
     if (partyId) {
@@ -41792,7 +42762,7 @@ app.get("/transaction/customer-ledger", authMiddleware, async (req, res) => {
       totalMetalSettlements: 0,
       currentDue: 0
     });
-    summary.currentDue = runningBalance;
+    summary.currentDue = Math.max(runningBalance, 0);
 
     return res.json({ success: true, summary: { ...summary, openingBalance }, rows, branchScope: getBranchScopeResponse(branchScope) });
   } catch (error) {
@@ -41825,7 +42795,7 @@ app.get("/transaction/branch-cash-book", authMiddleware, async (req, res) => {
       params.push(toDate);
     }
     if (branchScope.isBranchFiltered) {
-      whereParts.push("COALESCE(itlb.branch_id, 0) = ?");
+      whereParts.push("COALESCE(cl.branch_id, itlb.branch_id, 0) = ?");
       params.push(branchScope.branchId);
     }
 
@@ -41848,13 +42818,13 @@ app.get("/transaction/branch-cash-book", authMiddleware, async (req, res) => {
         tm.reference_no,
         cl.debit_amount,
         cl.credit_amount,
-        COALESCE(itlb.branch_id, NULL) AS branch_id,
+        COALESCE(cl.branch_id, itlb.branch_id, NULL) AS branch_id,
         b.branch_name,
         b.branch_code
       FROM cash_ledger cl
       INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
       ${branchJoinSql}
-      LEFT JOIN branches b ON b.id = itlb.branch_id AND b.company_id = tm.company_id
+      LEFT JOIN branches b ON b.id = COALESCE(cl.branch_id, itlb.branch_id) AND b.company_id = tm.company_id
       WHERE ${whereParts.join(" AND ")}
       ORDER BY cl.entry_date ASC, cl.id ASC
       `,
@@ -41868,7 +42838,7 @@ app.get("/transaction/branch-cash-book", authMiddleware, async (req, res) => {
       openingParams.push(fromDate);
     }
     if (branchScope.isBranchFiltered) {
-      openingWhere.push("COALESCE(itlb.branch_id, 0) = ?");
+      openingWhere.push("COALESCE(cl.branch_id, itlb.branch_id, 0) = ?");
       openingParams.push(branchScope.branchId);
     }
     const [openingRows] = await pool.query(
@@ -41882,6 +42852,8 @@ app.get("/transaction/branch-cash-book", authMiddleware, async (req, res) => {
           WHEN tm.transaction_type = 'CASH_REFUND_PAID' THEN -cl.debit_amount
           WHEN tm.transaction_type = 'CASH_REFUND_REVERSAL' THEN cl.credit_amount
           WHEN tm.transaction_type IN ('CASH_ADJUSTMENT', 'CASH_ADJUSTMENT_REVERSAL') THEN cl.credit_amount - cl.debit_amount
+          WHEN tm.transaction_type = 'PAYMENT_GIVEN' THEN -cl.debit_amount
+          WHEN tm.transaction_type = 'PAYMENT_GIVEN_REVERSAL' THEN cl.credit_amount
           ELSE 0
         END
       ), 0) AS opening_cash
@@ -41940,7 +42912,8 @@ app.get("/transaction/summary-dashboard", authMiddleware, async (req, res) => {
     const params = [access.companyScope, ...ledgerTypes];
     const whereParts = ["tm.company_id = ?"];
     whereParts.push(`tm.transaction_type IN (${sqlInList(ledgerTypes)})`);
-    const openingWhereParts = ["tm.company_id = ?", `tm.transaction_type IN (${sqlInList(ledgerTypes)})`];
+    whereParts.push(getBillingCustomerPaymentScopeSql("tm"));
+    const openingWhereParts = ["tm.company_id = ?", `tm.transaction_type IN (${sqlInList(ledgerTypes)})`, getBillingCustomerPaymentScopeSql("tm")];
     const openingParams = [access.companyScope, ...ledgerTypes];
     if (fromDate) {
       whereParts.push("tm.voucher_date >= ?");
@@ -42122,10 +43095,10 @@ app.get("/transaction/summary-dashboard", authMiddleware, async (req, res) => {
       trendsByDate.set(dateKey, trend);
     });
 
-    summary.totalDue = rows.reduce((total, row) => {
+    summary.totalDue = Math.max(rows.reduce((total, row) => {
       const type = String(row.transaction_type || "").trim().toUpperCase();
       return type === "EXPENSE_PAYMENT" || type === "EXPENSE_PAYMENT_REVERSAL" || type === "CASH_ADJUSTMENT" || type === "CASH_ADJUSTMENT_REVERSAL" ? total : total + getCustomerLedgerDueEffect(row);
-    }, openingDue);
+    }, openingDue), 0);
     summary.netCashFlow = summary.totalCollections - summary.totalExpenses - summary.totalRefunds;
 
     const accountWhereParts = ["pa.company_id = ?", "pa.active = 1"];
@@ -42335,7 +43308,7 @@ async function buildStockSalesReconciliation(companyId, branchScope) {
   const groups = [];
 
   {
-    const params = [companyId];
+    const params = isBranchFiltered ? [branchId, companyId, branchId] : [companyId];
     const rows = await runReconQuery(`
       SELECT si.id AS sales_item_id, si.invoice_number, si.barcode, si.item_status, s.id AS stock_id, s.status AS stock_status, s.stock_state
       FROM sales_items si
@@ -42760,6 +43733,32 @@ async function buildProcessReconciliation(companyId, branchScope) {
     columnExists("process_lots", "total_khadi_count")
   ]);
   const hasProcessLotOutputColumns = Boolean(hasExpectedTotalQtyColumn && hasTotalKhadiCountColumn);
+  const isBranchFiltered = Boolean(branchScope?.isBranchFiltered && branchScope.branchId !== null && branchScope.branchId !== undefined);
+  const branchId = isBranchFiltered ? Number(branchScope.branchId) : null;
+  const stickerStockWhereSql = (alias = "s") => `
+        AND UPPER(COALESCE(${alias}.status, 'IN_STOCK')) <> 'DELETED'
+        AND UPPER(COALESCE(${alias}.source, '')) NOT IN ('PROCESS_KDM', 'PROCESS_PIN', 'PROCESS_RECOVERY')
+        AND UPPER(COALESCE(${alias}.category, '')) NOT IN ('KDM', 'PIN', 'RECOVERY')
+        ${isBranchFiltered ? `AND ${alias}.current_branch_id = ?` : ""}
+      `;
+  const processLotBranchScopeSql = (alias = "pl") => isBranchFiltered ? `
+        AND EXISTS (
+          SELECT 1
+          FROM stock s_scope
+          WHERE s_scope.company_id = ${alias}.company_id
+            AND s_scope.lot_number = ${alias}.lot_no
+            ${stickerStockWhereSql("s_scope")}
+        )
+      ` : "";
+  const processStepBranchScopeSql = (alias = "ps") => isBranchFiltered ? `
+        AND EXISTS (
+          SELECT 1
+          FROM stock s_scope
+          WHERE s_scope.company_id = ${alias}.company_id
+            AND s_scope.lot_number = ${alias}.lot_no
+            ${stickerStockWhereSql("s_scope")}
+        )
+      ` : "";
 
   if (!hasProcessLotOutputColumns) {
     groups.push(createReconciliationGroup("process", "PROCESS_SCHEMA_FALLBACK_ACTIVE", "Process schema fallback active", [
@@ -42776,9 +43775,10 @@ async function buildProcessReconciliation(companyId, branchScope) {
       SELECT id AS process_step_id, lot_no, step_no, input_weight, output_weight, additive_used_weight
       FROM process_steps
       WHERE company_id = ?
+        ${processStepBranchScopeSql("process_steps")}
         AND output_weight > input_weight + additive_used_weight + 0.001
       LIMIT 200
-    `, [companyId]);
+    `, isBranchFiltered ? [companyId, branchId] : [companyId]);
     groups.push(createReconciliationGroup("process", "OUTPUT_EXCEEDS_INPUT_ADDITIVE", "Output > input + additive", rows.map((row) => createReconciliationIssue("process", "OUTPUT_EXCEEDS_INPUT_ADDITIVE", "HIGH", "Process output exceeds input plus additive", row))));
   }
 
@@ -42787,9 +43787,10 @@ async function buildProcessReconciliation(companyId, branchScope) {
       SELECT id AS process_step_id, lot_no, step_no, loss_weight, loss_qty
       FROM process_steps
       WHERE company_id = ?
+        ${processStepBranchScopeSql("process_steps")}
         AND (loss_weight < 0 OR loss_qty < 0)
       LIMIT 200
-    `, [companyId]);
+    `, isBranchFiltered ? [companyId, branchId] : [companyId]);
     groups.push(createReconciliationGroup("process", "NEGATIVE_LOSS", "Negative loss", rows.map((row) => createReconciliationIssue("process", "NEGATIVE_LOSS", "HIGH", "Process step has negative loss", row))));
   }
 
@@ -42799,15 +43800,16 @@ async function buildProcessReconciliation(companyId, branchScope) {
       FROM process_steps ps
       LEFT JOIN process_step_recovery_inputs pri ON pri.company_id = ps.company_id AND pri.process_step_id = ps.id
       WHERE ps.company_id = ?
+        ${processStepBranchScopeSql("ps")}
       GROUP BY ps.id, ps.lot_no, ps.recovery_weight
       HAVING ABS(COALESCE(ps.recovery_weight, 0) - linked_recovery_weight) > 0.001
       LIMIT 200
-    `, [companyId]);
+    `, isBranchFiltered ? [companyId, branchId] : [companyId]);
     groups.push(createReconciliationGroup("process", "RECOVERY_STOCK_MISMATCH", "Recovery stock mismatch", rows.map((row) => createReconciliationIssue("process", "RECOVERY_STOCK_MISMATCH", "MEDIUM", "Process recovery weight does not match linked recovery stock", row))));
   }
 
   {
-    const params = [companyId];
+    const params = isBranchFiltered ? [branchId, companyId, branchId] : [companyId];
     const processOutputSelect = hasProcessLotOutputColumns
       ? `
           COALESCE(pl.expected_total_qty, 0) AS expected_total_qty,
@@ -42830,10 +43832,13 @@ async function buildProcessReconciliation(companyId, branchScope) {
           pl.lot_no,
           pl.final_weight,
           ${processOutputSelect},
-          COUNT(s.id) AS stock_output_count
+          COALESCE(SUM(COALESCE(NULLIF(s.qty, 0), CASE WHEN s.id IS NULL THEN 0 ELSE 1 END)), 0) AS stock_output_count
         FROM process_lots pl
-        LEFT JOIN stock s ON s.company_id = pl.company_id AND s.lot_number = pl.lot_no AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        LEFT JOIN stock s ON s.company_id = pl.company_id
+          AND s.lot_number = pl.lot_no
+          ${stickerStockWhereSql("s")}
         WHERE pl.company_id = ?
+          ${processLotBranchScopeSql("pl")}
         GROUP BY ${processOutputGroupBy}
       ) process_output
       WHERE stock_output_count > output_limit
@@ -42843,6 +43848,53 @@ async function buildProcessReconciliation(companyId, branchScope) {
   }
 
   {
+    const params = isBranchFiltered
+      ? [companyId, companyId, branchId, companyId, branchId]
+      : [companyId, companyId, companyId];
+    const rows = await runReconQuery(`
+      SELECT *
+      FROM (
+        SELECT
+          pl.id AS process_lot_id,
+          pl.lot_no,
+          final_step.output_qty AS expected_sticker_qty,
+          COALESCE(SUM(COALESCE(NULLIF(s.qty, 0), CASE WHEN s.id IS NULL THEN 0 ELSE 1 END)), 0) AS sticker_qty,
+          GREATEST(final_step.output_qty - COALESCE(SUM(COALESCE(NULLIF(s.qty, 0), CASE WHEN s.id IS NULL THEN 0 ELSE 1 END)), 0), 0) AS missing_sticker_qty
+        FROM process_lots pl
+        INNER JOIN (
+          SELECT ps.*
+          FROM process_steps ps
+          INNER JOIN (
+            SELECT company_id, process_lot_id, MAX(step_no) AS max_step_no
+            FROM process_steps
+            WHERE company_id = ?
+              AND status = 'COMPLETED'
+            GROUP BY company_id, process_lot_id
+          ) latest ON latest.company_id = ps.company_id
+            AND latest.process_lot_id = ps.process_lot_id
+            AND latest.max_step_no = ps.step_no
+          WHERE ps.company_id = ?
+            AND ps.status = 'COMPLETED'
+        ) final_step ON final_step.company_id = pl.company_id AND final_step.process_lot_id = pl.id
+        LEFT JOIN stock s ON s.company_id = pl.company_id
+          AND s.lot_number = pl.lot_no
+          ${stickerStockWhereSql("s")}
+        WHERE pl.company_id = ?
+          AND UPPER(COALESCE(pl.status, 'OPEN')) = 'COMPLETED'
+          ${processLotBranchScopeSql("pl")}
+        GROUP BY pl.id, pl.lot_no, final_step.output_qty
+      ) process_output
+      WHERE expected_sticker_qty > 0
+        AND missing_sticker_qty > 0.0005
+      LIMIT 200
+    `, params);
+    groups.push(createReconciliationGroup("process", "MISSING_STICKER_QTY", "Missing sticker quantity", rows.map((row) => createReconciliationIssue("process", "MISSING_STICKER_QTY", "HIGH", "Sticker quantity is less than final process output quantity", row))));
+  }
+
+  {
+    const params = isBranchFiltered
+      ? [companyId, companyId, branchId, companyId, branchId]
+      : [companyId, companyId, companyId];
     const rows = await runReconQuery(`
       SELECT
         pl.id AS process_lot_id,
@@ -42867,16 +43919,20 @@ async function buildProcessReconciliation(companyId, branchScope) {
       ) final_step ON final_step.company_id = pl.company_id AND final_step.process_lot_id = pl.id
       LEFT JOIN stock s ON s.company_id = pl.company_id
         AND s.lot_number = pl.lot_no
-        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        ${stickerStockWhereSql("s")}
       WHERE pl.company_id = ?
+        ${processLotBranchScopeSql("pl")}
       GROUP BY pl.id, pl.lot_no, final_step.output_weight
       HAVING sticker_actual_weight > actual_process_weight + 0.001
       LIMIT 200
-    `, [companyId, companyId, companyId]);
+    `, params);
     groups.push(createReconciliationGroup("process", "STICKER_ACTUAL_WEIGHT_EXCEEDS_PROCESS_OUTPUT", "Sticker actual weight exceeds process output", rows.map((row) => createReconciliationIssue("process", "STICKER_ACTUAL_WEIGHT_EXCEEDS_PROCESS_OUTPUT", "HIGH", "Physical sticker actual weight exceeds final process output", row))));
   }
 
   {
+    const params = isBranchFiltered
+      ? [companyId, companyId, branchId, companyId, branchId]
+      : [companyId, companyId, companyId];
     const rows = await runReconQuery(`
       SELECT
         pl.id AS process_lot_id,
@@ -42906,16 +43962,20 @@ async function buildProcessReconciliation(companyId, branchScope) {
         AND UPPER(COALESCE(lw.status, '')) = 'APPROVED'
       LEFT JOIN stock s ON s.company_id = pl.company_id
         AND s.lot_number = pl.lot_no
-        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        ${stickerStockWhereSql("s")}
       WHERE pl.company_id = ?
+        ${processLotBranchScopeSql("pl")}
       GROUP BY pl.id, pl.lot_no, final_step.output_weight, lw.lamination_gain_weight
       HAVING sticker_billable_weight > billable_allowed_weight + 0.001
       LIMIT 200
-    `, [companyId, companyId, companyId]);
+    `, params);
     groups.push(createReconciliationGroup("process", "STICKER_BILLABLE_EXCEEDS_LAMINATION_ALLOWANCE", "Sticker billable exceeds lamination allowance", rows.map((row) => createReconciliationIssue("process", "STICKER_BILLABLE_EXCEEDS_LAMINATION_ALLOWANCE", "HIGH", "Sticker billable weight exceeds process output plus approved lamination gain", row))));
   }
 
   {
+    const params = isBranchFiltered
+      ? [companyId, companyId, branchId, companyId, branchId]
+      : [companyId, companyId, companyId];
     const rows = await runReconQuery(`
       SELECT
         pl.id AS process_lot_id,
@@ -42943,13 +44003,14 @@ async function buildProcessReconciliation(companyId, branchScope) {
         AND UPPER(COALESCE(lw.status, '')) = 'APPROVED'
       LEFT JOIN stock s ON s.company_id = pl.company_id
         AND s.lot_number = pl.lot_no
-        AND UPPER(COALESCE(s.status, '')) <> 'DELETED'
+        ${stickerStockWhereSql("s")}
       WHERE pl.company_id = ?
         AND lw.id IS NULL
+        ${processLotBranchScopeSql("pl")}
       GROUP BY pl.id, pl.lot_no, final_step.output_weight
       HAVING sticker_billable_weight > actual_process_weight + 0.001
       LIMIT 200
-    `, [companyId, companyId, companyId]);
+    `, params);
     groups.push(createReconciliationGroup("process", "STICKER_BILLABLE_EXCEEDS_OUTPUT_WITHOUT_LAMINATION", "Sticker billable exceeds output without lamination", rows.map((row) => createReconciliationIssue("process", "STICKER_BILLABLE_EXCEEDS_OUTPUT_WITHOUT_LAMINATION", "MEDIUM", "Sticker billable weight exceeds process output without approved lamination gain", row))));
   }
 
@@ -42959,9 +44020,10 @@ async function buildProcessReconciliation(companyId, branchScope) {
       FROM process_steps ps
       INNER JOIN process_steps prev ON prev.company_id = ps.company_id AND prev.process_lot_id = ps.process_lot_id AND prev.step_no = ps.step_no - 1
       WHERE ps.company_id = ?
+        ${processStepBranchScopeSql("ps")}
         AND ps.input_weight > prev.output_weight + ps.additive_used_weight + 0.001
       LIMIT 200
-    `, [companyId]);
+    `, isBranchFiltered ? [companyId, branchId] : [companyId]);
     groups.push(createReconciliationGroup("process", "DOWNSTREAM_DEPENDENCY_INCONSISTENCY", "Downstream dependency inconsistency", rows.map((row) => createReconciliationIssue("process", "DOWNSTREAM_DEPENDENCY_INCONSISTENCY", "MEDIUM", "Process step input exceeds previous output plus additive", row))));
   }
 
@@ -44180,8 +45242,14 @@ app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) =>
     const overdueOnly = parseBooleanLike(req.query.overdueOnly || req.query.overdue_only);
     const openOnly = parseBooleanLike(req.query.openOnly || req.query.open_only);
 
+    const ledgerTypes = CUSTOMER_LEDGER_TRANSACTION_TYPES;
     const params = [];
-    const whereParts = ["tm.transaction_type = 'SALE_INVOICE'"];
+    const whereParts = [
+      `tm.transaction_type IN (${sqlInList(ledgerTypes)})`,
+      getBillingCustomerPaymentScopeSql("tm"),
+      "COALESCE(tm.invoice_no, '') <> ''"
+    ];
+    params.push(...ledgerTypes);
 
     if (companyId !== null) {
       whereParts.push("tm.company_id = ?");
@@ -44201,52 +45269,86 @@ app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) =>
       params.push(`%${invoiceNo}%`);
     }
 
-    const settlementParams = [];
-    const settlementCompanyFilter = companyId !== null ? "ts.company_id = ? AND" : "";
-    if (companyId !== null) {
-      settlementParams.push(companyId);
-    }
-    settlementParams.push(asOnDate);
-
     const [rows] = await pool.query(
       `
       SELECT
         tm.id AS transaction_id,
         pm.party_name AS customer_name,
+        tm.party_id,
         tm.invoice_no,
         tm.voucher_date AS invoice_date,
+        tm.transaction_type,
         tm.payment_status,
         tm.reference_no,
-        COALESCE(lines.bill_amount, 0) AS bill_amount,
-        COALESCE(settle.settled_amount, 0) AS settled_amount,
-        settle.last_settlement_date
+        COALESCE(clt.cash_debit, 0) AS cash_debit,
+        COALESCE(clt.cash_credit, 0) AS cash_credit,
+        COALESCE(tlt.line_amount, 0) AS line_amount,
+        COALESCE(tst.settlement_amount, 0) AS settlement_amount
       FROM transaction_master tm
-      LEFT JOIN party_master pm ON pm.id = tm.party_id
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
       LEFT JOIN (
-        SELECT transaction_id, SUM(line_amount) AS bill_amount
+        SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
+        FROM cash_ledger
+        GROUP BY company_id, transaction_id
+      ) clt ON clt.transaction_id = tm.id AND clt.company_id = tm.company_id
+      LEFT JOIN (
+        SELECT transaction_id, SUM(line_amount) AS line_amount
         FROM transaction_lines
         GROUP BY transaction_id
-      ) lines ON lines.transaction_id = tm.id
+      ) tlt ON tlt.transaction_id = tm.id
       LEFT JOIN (
-        SELECT
-          against_transaction_id,
-          SUM(COALESCE(cash_amount, 0)) AS settled_amount,
-          MAX(settlement_date) AS last_settlement_date
-        FROM transaction_settlements ts
-        WHERE ${settlementCompanyFilter} settlement_date <= ?
-        GROUP BY against_transaction_id
-      ) settle ON settle.against_transaction_id = tm.id
+        SELECT company_id, transaction_id, SUM(cash_amount) AS settlement_amount
+        FROM transaction_settlements
+        GROUP BY company_id, transaction_id
+      ) tst ON tst.transaction_id = tm.id AND tst.company_id = tm.company_id
       WHERE ${whereParts.join(" AND ")}
-      ORDER BY tm.voucher_date DESC, tm.id DESC
+      ORDER BY tm.invoice_no ASC, tm.voucher_date ASC, tm.id ASC
       `,
-      [...settlementParams, ...params]
+      params
     );
 
-    const filteredRows = rows
+    const invoiceMap = new Map();
+    rows.forEach((row) => {
+      const invoiceKey = String(row.invoice_no || "").trim();
+      if (!invoiceKey) return;
+      const current = invoiceMap.get(invoiceKey) || {
+        transaction_id: null,
+        customer_name: row.customer_name || "",
+        party_id: row.party_id || null,
+        invoice_no: invoiceKey,
+        invoice_date: row.invoice_date,
+        payment_status: row.payment_status || "",
+        reference_no: row.reference_no || "",
+        bill_amount: 0,
+        balance_effect: 0,
+        has_sale_invoice: false,
+        last_settlement_date: null
+      };
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      const effect = getCustomerLedgerDueEffect(row);
+      current.balance_effect += effect;
+      if (type === "SALE_INVOICE") {
+        const { debit } = getCustomerLedgerDebitCredit(row);
+        current.transaction_id = row.transaction_id;
+        current.customer_name = row.customer_name || current.customer_name;
+        current.party_id = row.party_id || current.party_id;
+        current.invoice_date = row.invoice_date || current.invoice_date;
+        current.payment_status = row.payment_status || current.payment_status;
+        current.reference_no = row.reference_no || current.reference_no;
+        current.bill_amount += debit;
+        current.has_sale_invoice = true;
+      } else if (type === "PAYMENT_RECEIVED" || type === "METAL_SETTLEMENT_RECEIVED") {
+        current.last_settlement_date = row.invoice_date || current.last_settlement_date;
+      }
+      invoiceMap.set(invoiceKey, current);
+    });
+
+    const filteredRows = [...invoiceMap.values()]
+      .filter((row) => row.has_sale_invoice)
       .map((row) => {
         const billAmount = toNumber(row.bill_amount);
-        const settledAmount = toNumber(row.settled_amount);
-        const openDue = Math.max(billAmount - settledAmount, 0);
+        const openDue = Math.max(toNumber(row.balance_effect), 0);
+        const settledAmount = Math.max(billAmount - openDue, 0);
         const isOverdue = openDue > 0.009 && !!asOnDate && String(row.invoice_date || "") < asOnDate;
 
         return {
@@ -44497,6 +45599,7 @@ async function runBackgroundStartupTasks() {
     console.log("[STARTUP] Ensuring SuperAdmin account...");
     await ensureSuperAdminExists();
     console.log("[STARTUP] SuperAdmin startup sync completed");
+    scheduleDailyBackups();
   } catch (error) {
     startupStatus.db = "failed";
     console.error("[STARTUP] Fatal DB/schema startup failure:", error);
@@ -44544,5 +45647,3 @@ bootstrapServer().catch((error) => {
   console.error("[STARTUP] Unhandled bootstrap failure:", error);
   process.exit(1);
 });
-
-

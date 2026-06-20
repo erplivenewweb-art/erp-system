@@ -142,6 +142,24 @@
       color: #9a7418;
     }
 
+    .danger-btn {
+      background: #b91c1c;
+      color: #fff;
+      border: 1px solid #991b1b;
+    }
+
+    .danger-btn:hover {
+      background: #991b1b;
+    }
+
+    .danger-btn:disabled {
+      opacity: 0.58;
+      cursor: not-allowed;
+      filter: grayscale(0.2);
+      transform: none;
+      box-shadow: none;
+    }
+
     .process-destination-badge {
       display: inline-flex;
       align-items: center;
@@ -487,6 +505,92 @@
 
     .job-slip-history-body {
       padding: 14px 16px 16px;
+    }
+
+    .delete-test-lot-panel {
+      width: min(560px, 100%);
+      border-color: #fecaca;
+    }
+
+    .delete-test-lot-head {
+      background: #fff1f2;
+      border-bottom-color: #fecaca;
+      color: #7f1d1d;
+    }
+
+    .delete-test-lot-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .delete-test-lot-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: #dc2626;
+      color: #fff;
+      font-size: 16px;
+    }
+
+    .delete-test-lot-warning {
+      border: 1px solid #fecaca;
+      border-left: 4px solid #dc2626;
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff7f7;
+      color: #7f1d1d;
+      margin-bottom: 12px;
+    }
+
+    .delete-test-lot-warning p {
+      margin: 4px 0;
+    }
+
+    .delete-test-lot-scan {
+      display: grid;
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    .delete-test-lot-scan-item {
+      border: 1px solid #eadfca;
+      border-radius: 8px;
+      padding: 10px;
+      background: #fffaf1;
+    }
+
+    .delete-test-lot-scan-item.danger {
+      border-color: #fecaca;
+      background: #fff1f2;
+      color: #7f1d1d;
+    }
+
+    .delete-test-lot-scan-item strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .delete-test-lot-list {
+      margin: 6px 0 0;
+      padding-left: 18px;
+    }
+
+    .delete-test-lot-list li {
+      margin: 3px 0;
+    }
+
+    @media (max-width: 640px) {
+      .delete-test-lot-head {
+        align-items: flex-start;
+      }
+
+      .delete-test-lot-head .secondary-btn {
+        padding: 8px 10px;
+      }
     }
 
     .job-slip-preview-grid {
@@ -1007,8 +1111,14 @@
                 </div>
 
                 <div class="input-box">
-                  <label for="processExpectedQty">Expected Total Qty</label>
-                  <input id="processExpectedQty" type="number" step="1" placeholder="Optional" />
+                  <label for="processExpectedQtyMode">Quantity Mode</label>
+                  <select id="processExpectedQtyMode" style="margin-bottom:8px;">
+                    <option value="PAIR" selected>Pair</option>
+                    <option value="PIECE">Piece</option>
+                  </select>
+                  <label for="processExpectedQty">Expected Qty (Pair)</label>
+                  <input id="processExpectedQty" type="number" step="1" placeholder="Qty input" />
+                  <p id="processExpectedQtyHelper" class="work-category-note">Equivalent Pieces = 0</p>
                 </div>
 
                 <div class="input-box work-category-select">
@@ -1039,7 +1149,7 @@
                 </div>
 
                 <div class="input-box">
-                  <label for="jobSlipExpectedQty">Expected Qty</label>
+                  <label for="jobSlipExpectedQty">Expected Qty (Pair)</label>
                   <input id="jobSlipExpectedQty" type="number" step="1" min="0" placeholder="Auto or edit" />
                 </div>
 
@@ -1082,7 +1192,7 @@
                       <th>Category</th>
                       <th>Raw Weight</th>
                       <th>Khadi</th>
-                      <th>Expected Qty</th>
+                      <th>Expected Qty (Pair)</th>
                       <th>Loss Weight</th>
                       <th>Final Weight</th>
                       <th>Used Weight</th>
@@ -1112,7 +1222,7 @@
                         <th>Lot No</th>
                         <th>Karigar</th>
                         <th>Given Weight</th>
-                        <th>Expected Qty</th>
+                        <th>Expected Qty (Pair)</th>
                         <th>Print/Reprint</th>
                       </tr>
                     </thead>
@@ -1150,7 +1260,7 @@
                     <input id="correctStepRecoveryWeight" type="number" step="0.001" />
                   </div>
                   <div class="input-box">
-                    <label for="correctStepOutputQty">Output Qty</label>
+                    <label for="correctStepOutputQty">Output Qty (Pair)</label>
                     <input id="correctStepOutputQty" type="number" step="1" />
                   </div>
                   <div class="input-box">
@@ -1162,7 +1272,7 @@
                     <input id="correctStepLossWeight" type="number" step="0.001" readonly />
                   </div>
                   <div class="input-box">
-                    <label for="correctStepLossQty">Loss Qty</label>
+                    <label for="correctStepLossQty">Loss Qty (Pair)</label>
                     <input id="correctStepLossQty" type="number" step="1" readonly />
                   </div>
                   <div class="input-box" style="grid-column:1 / -1;">
@@ -1227,8 +1337,9 @@
                 </div>
 
                 <div class="input-box">
-                  <label for="stepInputQty">Input Qty</label>
-                  <input id="stepInputQty" type="number" step="1" placeholder="Pair/count" />
+                  <label for="stepInputQty">Input Qty (Pair)</label>
+                  <input id="stepInputQty" type="number" step="1" placeholder="Pair count" />
+                  <p class="work-category-note">Qty is in Pair. 1 Pair = 2 Pieces.</p>
                 </div>
               </div>
             </div>
@@ -1322,8 +1433,9 @@
                 </div>
 
                 <div id="stepOutputQtyBox" class="input-box">
-                  <label for="stepOutputQty">Output Qty</label>
-                  <input id="stepOutputQty" type="number" step="1" placeholder="Returned count" />
+                  <label for="stepOutputQty">Output Qty (Pair)</label>
+                  <input id="stepOutputQty" type="number" step="1" placeholder="Returned pair count" />
+                  <p id="stepOutputPieceHelper" class="work-category-note">Equivalent Pieces = 0</p>
                 </div>
 
                 <div id="stepLossWeightBox" class="input-box">
@@ -1332,7 +1444,7 @@
                 </div>
 
                 <div id="stepLossQtyBox" class="input-box">
-                  <label for="stepLossQty">Loss Qty</label>
+                  <label for="stepLossQty">Loss Qty (Pair)</label>
                   <input id="stepLossQty" type="number" step="1" readonly />
                 </div>
 
@@ -1363,12 +1475,12 @@
                     <th>Process</th>
                     <th>Karigar</th>
                     <th>Input Wt</th>
-                    <th>Input Qty</th>
+                    <th>Input Qty (Pair)</th>
                     <th>Output Wt</th>
                     <th>Recovery Wt</th>
-                    <th>Output Qty</th>
+                    <th>Output Qty (Pair)</th>
                     <th>Loss Wt</th>
-                    <th>Loss Qty</th>
+                    <th>Loss Qty (Pair)</th>
                     <th>Status</th>
                     <th>Completed</th>
                     <th>Correction</th>
@@ -1430,7 +1542,43 @@
               </div>
             </div>
           </div>
+
+          <div id="deleteTestLotModal" class="job-slip-history-modal" aria-hidden="true">
+            <div class="job-slip-history-panel delete-test-lot-panel" role="dialog" aria-modal="true" aria-labelledby="deleteTestLotTitle">
+              <div class="job-slip-history-head delete-test-lot-head">
+                <div class="delete-test-lot-title">
+                  <span class="delete-test-lot-icon"><i class="fas fa-triangle-exclamation"></i></span>
+                  <h3 id="deleteTestLotTitle">Delete Test Lot</h3>
+                </div>
+                <button class="secondary-btn" type="button" onclick="closeDeleteTestLotModal()">Cancel</button>
+              </div>
+              <div class="job-slip-history-body">
+                <div class="delete-test-lot-warning">
+                  <p><strong>Lot:</strong> <span id="deleteTestLotNo">-</span></p>
+                  <p>This will permanently delete this testing lot and related safe test process records.</p>
+                  <p>This action cannot be undone.</p>
+                </div>
+
+                <div id="deleteTestLotScanResult" class="delete-test-lot-scan">
+                  <div class="delete-test-lot-scan-item">
+                    <strong>Dependency Scan</strong>
+                    <span>Checking lot dependencies...</span>
+                  </div>
+                </div>
+
+                <div class="input-box">
+                  <label for="deleteTestLotConfirmInput">Type DELETE to confirm</label>
+                  <input id="deleteTestLotConfirmInput" type="text" autocomplete="off" placeholder="DELETE" />
+                </div>
+
+                <div class="btn-row" style="margin-top:12px;">
+                  <button class="secondary-btn" type="button" onclick="closeDeleteTestLotModal()">Cancel</button>
+                  <button id="confirmDeleteTestLotBtn" class="danger-btn" type="button" disabled>Delete Test Lot</button>
+                </div>
+              </div>
             </div>
+          </div>
+          </div>
 
             <aside class="process-side-column process-side-stack">
               <div class="sub-card" id="processLiveSummaryPanel">
@@ -1469,15 +1617,15 @@
                     <input id="liveTotalWeightLoss" type="text" readonly />
                   </div>
                   <div class="input-box">
-                    <label>Total Input Qty</label>
+                    <label>Total Input Qty (Pair)</label>
                     <input id="liveTotalInputQty" type="text" readonly />
                   </div>
                   <div class="input-box">
-                    <label>Current Output Qty</label>
+                    <label>Current Output Qty (Pair)</label>
                     <input id="liveCurrentOutputQty" type="text" readonly />
                   </div>
                   <div class="input-box">
-                    <label>Total Qty Loss</label>
+                    <label>Total Qty Loss (Pair)</label>
                     <input id="liveTotalQtyLoss" type="text" readonly />
                   </div>
                 </div>
@@ -1514,6 +1662,9 @@
                     <span id="processLotActionHint" class="additive-issue-note">Select a lot to see completion status.</span>
                     <button id="completeLotButton" class="primary-btn" type="button" onclick="completeCurrentProcessLot()" style="display:none;">
                       Complete Lot
+                    </button>
+                    <button id="deleteTestLotButton" class="danger-btn" type="button" onclick="deleteCurrentTestProcessLot()" style="display:none;">
+                      Delete Test Lot
                     </button>
                   </div>
                 </div>
@@ -1609,7 +1760,7 @@
                         <th>Process</th>
                         <th>Steps</th>
                         <th>Total Loss</th>
-                        <th>Qty Loss</th>
+                        <th>Qty Loss (Pair)</th>
                       </tr>
                     </thead>
                     <tbody id="processNameSummaryBody"></tbody>
@@ -1626,7 +1777,7 @@
                         <th>Karigar</th>
                         <th>Steps</th>
                         <th>Total Loss</th>
-                        <th>Qty Loss</th>
+                        <th>Qty Loss (Pair)</th>
                       </tr>
                     </thead>
                     <tbody id="processKarigarSummaryBody"></tbody>
@@ -1645,9 +1796,9 @@
                         <th>Total Input</th>
                         <th>Total Output</th>
                         <th>Total Loss</th>
-                        <th>Input Qty</th>
-                        <th>Output Qty</th>
-                        <th>Qty Loss</th>
+                        <th>Input Qty (Pair)</th>
+                        <th>Output Qty (Pair)</th>
+                        <th>Qty Loss (Pair)</th>
                       </tr>
                     </thead>
                     <tbody id="processLotSummaryBody"></tbody>
@@ -1738,6 +1889,17 @@
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processGuideData = null;
+    let testProcessLotDeleteConfig = {
+      loaded: false,
+      enabled: false,
+      allowed: false
+    };
+    let deleteTestLotModalState = {
+      lotNo: "",
+      workCategory: "REGULAR_SANKHA",
+      scanData: null,
+      isSubmitting: false
+    };
     let lotAdditiveStatus = {
       pendingWeight: 0,
       loaded: false
@@ -1846,6 +2008,7 @@
       if (event.key === "Escape") closeJobSlipHistory();
       if (event.key === "Escape") closeProcessStepCorrectionModal();
       if (event.key === "Escape") closeProcessStepLockDetailsModal();
+      if (event.key === "Escape") closeDeleteTestLotModal();
       if (event.key === "Escape") closeSidebarMobile();
     });
 
@@ -1973,6 +2136,45 @@
       return Number.isInteger(num) ? String(num) : num.toFixed(3);
     }
 
+    function getExpectedQtyMode() {
+      return String(document.getElementById("processExpectedQtyMode")?.value || "PAIR").trim().toUpperCase() === "PIECE"
+        ? "PIECE"
+        : "PAIR";
+    }
+
+    function getExpectedQtyInputValue() {
+      return Number(document.getElementById("processExpectedQty")?.value || 0);
+    }
+
+    function getExpectedQtyPairValue() {
+      const qty = getExpectedQtyInputValue();
+      return getExpectedQtyMode() === "PIECE" ? qty / 2 : qty;
+    }
+
+    function isExpectedPieceQtyEven() {
+      const qty = getExpectedQtyInputValue();
+      return getExpectedQtyMode() !== "PIECE" || Math.abs(qty % 2) < 0.0005;
+    }
+
+    function updateExpectedQtyHelper() {
+      const helper = document.getElementById("processExpectedQtyHelper");
+      if (!helper) return;
+
+      const qty = getExpectedQtyInputValue();
+      if (getExpectedQtyMode() === "PIECE") {
+        helper.textContent = `Auto Pair = ${formatProcessQty(qty / 2)}`;
+      } else {
+        helper.textContent = `Equivalent Pieces = ${formatProcessQty(qty * 2)}`;
+      }
+    }
+
+    function updateStepOutputPieceHelper() {
+      const helper = document.getElementById("stepOutputPieceHelper");
+      if (!helper) return;
+      const outputQty = Number(document.getElementById("stepOutputQty")?.value || 0);
+      helper.textContent = `Equivalent Pieces = ${formatProcessQty(outputQty * 2)}`;
+    }
+
     function getCurrentJobSlipSource() {
       const lotNo = document.getElementById("processLotNo")?.value?.trim()
         || document.getElementById("stepLotNo")?.value?.trim()
@@ -1990,7 +2192,8 @@
       const karigarGivenWeight = Number(document.getElementById("karigarGivenWeight")?.value || 0);
       const rawWeight = Number(document.getElementById("processRawWeight")?.value || 0);
       const givenWeight = rawWeight > 0 ? rawWeight : (stepInputWeight > 0 ? stepInputWeight : karigarGivenWeight);
-      const existingExpectedQty = Number(document.getElementById("processExpectedQty")?.value || document.getElementById("stepInputQty")?.value || 0);
+      const expectedPairQty = getExpectedQtyPairValue();
+      const existingExpectedQty = expectedPairQty || Number(document.getElementById("stepInputQty")?.value || 0);
       const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const outputWeight = Number(document.getElementById("stepOutputWeight")?.value || 0);
       const outputQty = Number(document.getElementById("stepOutputQty")?.value || 0);
@@ -2070,7 +2273,7 @@
             <div class="job-slip-field"><span class="job-slip-label">Target Weight</span><span class="job-slip-value">${formatProcessWeight(data.targetWeight)}g</span></div>
             <div class="job-slip-field"><span class="job-slip-label">Allowance</span><span class="job-slip-value">${formatProcessWeight(data.allowance)}g</span></div>
             <div class="job-slip-field"><span class="job-slip-label">Divisor</span><span class="job-slip-value">${formatProcessWeight(data.divisor)}g</span></div>
-            <div class="job-slip-field"><span class="job-slip-label">Expected Qty</span><span class="job-slip-value">${formatProcessQty(data.expectedQty)}</span></div>
+            <div class="job-slip-field"><span class="job-slip-label">Expected Qty (Pair)</span><span class="job-slip-value">${formatProcessQty(data.expectedQty)}</span></div>
             <div class="job-slip-field"><span class="job-slip-label">Expected Output</span><span class="job-slip-value">${formatProcessWeight(data.expectedOutput)}g</span></div>
             <div class="job-slip-field job-slip-wide"><span class="job-slip-label">Expected Return/Loss</span><span class="job-slip-value">${formatProcessWeight(data.expectedReturnLoss)}g</span></div>
           </div>
@@ -2229,7 +2432,7 @@
         expectedQty: data.expectedQty,
         expectedOutputWeight: data.expectedOutput,
         expectedReturnLossWeight: data.expectedReturnLoss,
-        calculationNote: "Expected Qty = floor(Given Weight / (Target Weight + Allowance))",
+        calculationNote: "Expected Qty (Pair) = floor(Given Weight / (Target Weight + Allowance))",
         remarks: data.remarks
       });
     }
@@ -2394,6 +2597,44 @@
       return `${normalizeWorkCategory(workCategory)}::${String(lotNo || "").trim()}`;
     }
 
+    async function loadTestProcessLotDeleteConfig() {
+      try {
+        const params = buildAuthParams();
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const res = await fetch(`${API_BASE}/process/test-lot-delete/config${query}`, {
+          cache: "no-store"
+        });
+        const data = await res.json().catch(() => ({}));
+        testProcessLotDeleteConfig = {
+          loaded: true,
+          enabled: Boolean(res.ok && data?.enabled),
+          allowed: Boolean(res.ok && data?.allowed)
+        };
+      } catch (error) {
+        console.log("Test process lot delete config error:", error);
+        testProcessLotDeleteConfig = {
+          loaded: true,
+          enabled: false,
+          allowed: false
+        };
+      }
+      renderProcessGuide();
+    }
+
+    function canShowDeleteTestLotButton() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const lot = getSelectedProcessLot();
+      const lotStatus = String(lot?.status || "").trim().toUpperCase();
+      return Boolean(
+        testProcessLotDeleteConfig.enabled &&
+        testProcessLotDeleteConfig.allowed &&
+        lotNo &&
+        lot &&
+        !lot.isManualLot &&
+        lotStatus !== "COMPLETED"
+      );
+    }
+
     function getActiveStepWorkCategory() {
       return normalizeWorkCategory(selectedStepWorkCategory || getSelectedWorkCategory());
     }
@@ -2500,6 +2741,7 @@
       const categoryEl = document.getElementById("processGuideCategory");
       const destinationEl = document.getElementById("processGuideDestination");
       const completeButton = document.getElementById("completeLotButton");
+      const deleteTestLotButton = document.getElementById("deleteTestLotButton");
       const actionHint = document.getElementById("processLotActionHint");
       if (!completedEl || !nextEl || !progressEl) return;
 
@@ -2537,6 +2779,9 @@
       }
       if (completeButton) {
         completeButton.style.display = canCompleteLot ? "" : "none";
+      }
+      if (deleteTestLotButton) {
+        deleteTestLotButton.style.display = canShowDeleteTestLotButton() ? "" : "none";
       }
       if (actionHint) {
         if (!lotNo) {
@@ -2602,6 +2847,14 @@
 
     function normalizeStepNameForMatch(value = "") {
       return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+    }
+
+    function normalizeStepNameForQuantityRule(value = "") {
+      return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+    }
+
+    function isQuantityIncreaseAllowedProcessStep(processName = "") {
+      return ["baton", "batton", "batan", "patta", "patti"].includes(normalizeStepNameForQuantityRule(processName));
     }
 
     function isSolderingLikeStepName(value = "") {
@@ -3618,7 +3871,8 @@
       const raw = Number(document.getElementById("processRawWeight")?.value || 0);
       const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const loss = raw - finalWeight;
-      const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
+      const expectedQty = getExpectedQtyPairValue();
+      updateExpectedQtyHelper();
       const categorySelect = document.getElementById("processWorkCategory");
 
       if (!lotNo && categorySelect) {
@@ -3630,7 +3884,7 @@
       if (summary) {
         summary.innerHTML = `
           <h3>Summary</h3>
-          <p>Raw: ${raw.toFixed(3)} | Final: ${finalWeight.toFixed(3)} | Loss: ${Math.max(loss, 0).toFixed(3)} | Expected Qty: ${formatProcessQty(expectedQty)}</p>
+          <p>Raw: ${raw.toFixed(3)} | Final: ${finalWeight.toFixed(3)} | Loss: ${Math.max(loss, 0).toFixed(3)} | Expected Qty (Pair): ${formatProcessQty(expectedQty)}</p>
         `;
       }
 
@@ -3645,7 +3899,7 @@
       const finalWeight = Number(document.getElementById("processFinalWeight")?.value || 0);
       const loss = raw - finalWeight;
       const khadiCount = Number(document.getElementById("khadiCount")?.value || 0);
-      const expectedQty = Number(document.getElementById("processExpectedQty")?.value || 0);
+      const expectedQty = getExpectedQtyPairValue();
 
       if (!lotNo) {
         showToast("Please enter the lot number.", "error", "Missing Field");
@@ -3669,6 +3923,11 @@
 
       if (!khadiCount) {
         showToast("Enter khadi count", "error");
+        return;
+      }
+
+      if (!isExpectedPieceQtyEven()) {
+        showToast("Piece quantity must be even because 2 pieces = 1 pair.", "error", "Invalid Quantity");
         return;
       }
 
@@ -3732,8 +3991,10 @@
       document.getElementById("processRawWeight").value = "";
       document.getElementById("khadiCount").value = "";
       document.getElementById("processExpectedQty").value = "";
+      document.getElementById("processExpectedQtyMode").value = "PAIR";
       document.getElementById("processWorkCategory").value = "REGULAR_SANKHA";
       document.getElementById("processFinalWeight").value = "";
+      updateExpectedQtyHelper();
       resetJobSlipCalculationFields();
       applyWorkCategoryMode();
 
@@ -3815,8 +4076,9 @@
         lossQtyInput.value = "";
       } else if (lossQtyInput) {
         const outputQty = Number(outputQtyRaw || 0);
-        lossQtyInput.value = formatProcessQty(inputQty - outputQty);
+        lossQtyInput.value = formatProcessQty(Math.max(inputQty - outputQty, 0));
       }
+      updateStepOutputPieceHelper();
     }
 
     function fillProcessStepFormFromOpenStep(step) {
@@ -4214,6 +4476,7 @@
       const outputWeight = Number(document.getElementById("correctStepOutputWeight")?.value || 0);
       const recoveryWeight = Number(document.getElementById("correctStepRecoveryWeight")?.value || 0);
       const outputQty = Number(document.getElementById("correctStepOutputQty")?.value || 0);
+      const inputQty = Number(correctingProcessStep.inputQty || 0);
       const lossReason = document.getElementById("correctStepLossReason")?.value?.trim() || "";
       const correctionReason = document.getElementById("correctStepReason")?.value?.trim() || "";
       const weightValidation = validateProcessWeightBalance({
@@ -4243,8 +4506,12 @@
         return;
       }
 
-      if (Number(correctingProcessStep.inputQty || 0) > 0 && outputQty > Number(correctingProcessStep.inputQty || 0)) {
-        showToast("Output quantity cannot be greater than input quantity", "error", "Invalid Value");
+      if (
+        inputQty > 0 &&
+        outputQty > inputQty + 0.0005 &&
+        !isQuantityIncreaseAllowedProcessStep(processName)
+      ) {
+        showToast("Output quantity can increase only in Baton/Patta process.", "error", "Invalid Value");
         return;
       }
 
@@ -4363,7 +4630,7 @@
         document.getElementById("stepOutputQty").value = "";
         document.getElementById("stepLossWeight").value = "";
         document.getElementById("stepLossQty").value = "";
-        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty: ${formatProcessQty(data?.inputQty || 0)}`);
+        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty (Pair): ${formatProcessQty(data?.inputQty || 0)}`);
         renderRecoveryStockOptions();
         renderProcessGuide();
         renderJobSlipPreview();
@@ -4494,6 +4761,234 @@
       }
     }
 
+    function renderDeleteTestLotScanResult(scanData = {}) {
+      const container = document.getElementById("deleteTestLotScanResult");
+      if (!container) return;
+
+      const counts = scanData.counts || {};
+      const safeRecoveryIds = Array.isArray(scanData.safeRecoveryStockIds) ? scanData.safeRecoveryStockIds : [];
+      const unsafeIds = Array.isArray(scanData.unsafeStockIds) ? scanData.unsafeStockIds : [];
+      const blockers = Array.isArray(scanData.blockers) ? scanData.blockers : [];
+      const safeRecoveryCount = Number(counts.safeRecoveryStock ?? safeRecoveryIds.length ?? 0);
+      const unsafeStockCount = Number(counts.unsafeStock ?? unsafeIds.length ?? 0);
+      const safeIdsText = safeRecoveryIds.length ? ` IDs: ${safeRecoveryIds.map((id) => escapeHtml(id)).join(", ")}` : "";
+      const unsafeIdsText = unsafeIds.length ? ` IDs: ${unsafeIds.map((id) => escapeHtml(id)).join(", ")}` : "";
+      const isBlocked = Boolean(scanData.canDelete === false || blockers.length || unsafeStockCount);
+      const blockerHtml = blockers.length
+        ? `<ul class="delete-test-lot-list">${blockers.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+        : "<span>No unsafe blockers found.</span>";
+
+      container.innerHTML = `
+        <div class="delete-test-lot-scan-item">
+          <strong>Safe recovery stock rows that will be cleaned</strong>
+          <span>${safeRecoveryCount} row(s)${safeIdsText}</span>
+        </div>
+        <div class="delete-test-lot-scan-item ${blockers.length || unsafeStockCount ? "danger" : ""}">
+          <strong>Unsafe blockers</strong>
+          ${isBlocked ? `<p class="additive-issue-note"><strong>Deletion blocked by dependency scan.</strong></p>` : ""}
+          ${blockerHtml}
+          ${unsafeStockCount ? `<p class="additive-issue-note">Unsafe stock/sticker rows: ${unsafeStockCount}${unsafeIdsText}</p>` : ""}
+        </div>
+      `;
+    }
+
+    function updateDeleteTestLotModalState() {
+      const input = document.getElementById("deleteTestLotConfirmInput");
+      const button = document.getElementById("confirmDeleteTestLotBtn");
+      if (button) {
+        button.disabled = deleteTestLotModalState.isSubmitting || String(input?.value || "").trim() !== "DELETE";
+      }
+    }
+
+    function bindDeleteTestLotModalControls() {
+      const input = document.getElementById("deleteTestLotConfirmInput");
+      const button = document.getElementById("confirmDeleteTestLotBtn");
+      if (input && !input.dataset.deleteTestLotBound) {
+        input.addEventListener("input", updateDeleteTestLotModalState);
+        input.dataset.deleteTestLotBound = "true";
+      }
+      if (button && !button.dataset.deleteTestLotBound) {
+        button.addEventListener("click", submitDeleteTestLotModal);
+        button.dataset.deleteTestLotBound = "true";
+      }
+    }
+
+    function openDeleteTestLotModal(lotNo, workCategory, scanData) {
+      bindDeleteTestLotModalControls();
+      deleteTestLotModalState = {
+        lotNo,
+        workCategory,
+        scanData,
+        isSubmitting: false
+      };
+
+      const modal = document.getElementById("deleteTestLotModal");
+      const lotNoEl = document.getElementById("deleteTestLotNo");
+      const input = document.getElementById("deleteTestLotConfirmInput");
+      const button = document.getElementById("confirmDeleteTestLotBtn");
+
+      if (lotNoEl) lotNoEl.textContent = lotNo || "-";
+      if (input) input.value = "";
+      if (button) button.textContent = "Delete Test Lot";
+      renderDeleteTestLotScanResult(scanData);
+      updateDeleteTestLotModalState();
+
+      if (modal) {
+        modal.classList.add("show");
+        modal.setAttribute("aria-hidden", "false");
+      }
+      setTimeout(() => input?.focus(), 0);
+    }
+
+    function closeDeleteTestLotModal() {
+      if (deleteTestLotModalState.isSubmitting) return;
+      const modal = document.getElementById("deleteTestLotModal");
+      if (modal) {
+        modal.classList.remove("show");
+        modal.setAttribute("aria-hidden", "true");
+      }
+      deleteTestLotModalState = {
+        lotNo: "",
+        workCategory: "REGULAR_SANKHA",
+        scanData: null,
+        isSubmitting: false
+      };
+      const input = document.getElementById("deleteTestLotConfirmInput");
+      if (input) input.value = "";
+      updateDeleteTestLotModalState();
+    }
+
+    async function deleteCurrentTestProcessLot() {
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const workCategory = getActiveStepWorkCategory();
+      const button = document.getElementById("deleteTestLotButton");
+
+      if (!lotNo) {
+        showToast("Please select a lot first.", "error", "Missing Lot");
+        return;
+      }
+
+      if (!canShowDeleteTestLotButton()) {
+        showToast("Test lot delete is not available for this lot.", "error", "Delete Blocked");
+        renderProcessGuide();
+        return;
+      }
+
+      if (button) button.disabled = true;
+
+      try {
+        const params = buildAuthParams();
+        addWorkCategoryParam(params, workCategory);
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const scanRes = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/test-delete-scan${query}`, {
+          cache: "no-store"
+        });
+        const scanData = await scanRes.json().catch(() => ({}));
+
+        if (!scanRes.ok || scanData?.success === false || !scanData?.canDelete) {
+          const reason = Array.isArray(scanData?.blockers) && scanData.blockers.length
+            ? scanData.blockers.join("\n")
+            : (scanData?.message || "Dependency exists.");
+          openDeleteTestLotModal(lotNo, workCategory, {
+            ...scanData,
+            canDelete: false,
+            blockers: Array.isArray(scanData?.blockers) && scanData.blockers.length ? scanData.blockers : [reason]
+          });
+          return;
+        }
+
+        openDeleteTestLotModal(lotNo, workCategory, scanData);
+      } catch (error) {
+        console.log("Delete test process lot scan error:", error);
+        showToast(error.message || "Process lot delete scan failed", "error", "Delete Failed");
+      } finally {
+        if (button) button.disabled = false;
+        renderProcessGuide();
+      }
+    }
+
+    async function submitDeleteTestLotModal() {
+      const lotNo = deleteTestLotModalState.lotNo;
+      const workCategory = deleteTestLotModalState.workCategory;
+      const input = document.getElementById("deleteTestLotConfirmInput");
+      const button = document.getElementById("confirmDeleteTestLotBtn");
+      const confirmation = String(input?.value || "").trim();
+
+      updateDeleteTestLotModalState();
+      if (deleteTestLotModalState.isSubmitting) return;
+      if (!lotNo) {
+        showToast("No test lot is selected for deletion.", "error", "Delete Failed");
+        return;
+      }
+      if (confirmation !== "DELETE") {
+        showToast("Type DELETE to confirm permanent test lot deletion.", "error", "Delete Blocked");
+        return;
+      }
+      const scanData = deleteTestLotModalState.scanData || {};
+      const blockers = Array.isArray(scanData.blockers) ? scanData.blockers : [];
+      const canDelete = Boolean(scanData.canDelete && !blockers.length);
+      if (!canDelete) {
+        const reason = blockers.length ? blockers.join("\n") : "Deletion blocked by dependency scan.";
+        showToast(reason, "error", "Delete Blocked");
+        return;
+      }
+      if (button?.disabled) {
+        const reason = blockers.length ? blockers.join("\n") : "Dependency scan has not approved this delete.";
+        showToast(reason, "error", "Delete Blocked");
+        return;
+      }
+
+      deleteTestLotModalState.isSubmitting = true;
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Deleting...";
+      }
+
+      try {
+        const params = buildAuthParams();
+        addWorkCategoryParam(params, workCategory);
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const deleteRes = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/test-delete${query}`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildAuthPayload({
+            lotNo,
+            workCategory,
+            confirmation
+          }))
+        });
+        const deleteData = await deleteRes.json().catch(() => ({}));
+
+        if (!deleteRes.ok || deleteData?.success === false) {
+          const reason = Array.isArray(deleteData?.blockers) && deleteData.blockers.length
+            ? deleteData.blockers.join("\n")
+            : (deleteData?.message || "Process lot delete failed");
+          throw new Error(reason);
+        }
+
+        showToast("Test lot deleted successfully", "success", "Deleted");
+        deleteTestLotModalState.isSubmitting = false;
+        closeDeleteTestLotModal();
+        document.getElementById("stepLotNo").value = "";
+        clearProcessStepForm();
+        await loadProcessData();
+        renderProcessTable();
+        loadKarigarLotDropdown();
+        await loadOutsideKarigarLedger();
+        await loadProcessStepContext();
+      } catch (error) {
+        console.log("Delete test process lot error:", error);
+        showToast(error.message || "Process lot delete failed", "error", "Delete Failed");
+      } finally {
+        deleteTestLotModalState.isSubmitting = false;
+        if (button) button.textContent = "Delete Test Lot";
+        updateDeleteTestLotModalState();
+        renderProcessGuide();
+      }
+    }
+
     async function saveOrCompleteProcessStep() {
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const workCategory = getActiveStepWorkCategory();
@@ -4549,6 +5044,22 @@
       if ((hasOutput || hasRecovery) && !weightValidation.ok) {
         showToast(PROCESS_WEIGHT_BALANCE_MESSAGE, "error");
         return;
+      }
+
+      if (hasInputQty && hasOutputQty) {
+        const inputQty = Number(inputQtyRaw || 0);
+        const outputQty = Number(outputQtyRaw || 0);
+        const activeProcessName = currentOpenProcessStep
+          ? currentOpenProcessStep.processName
+          : processName;
+        if (
+          inputQty > 0 &&
+          outputQty > inputQty + 0.0005 &&
+          !isQuantityIncreaseAllowedProcessStep(activeProcessName)
+        ) {
+          showToast("Output quantity can increase only in Baton/Patta process.", "error", "Invalid Value");
+          return;
+        }
       }
 
       try {
@@ -4937,6 +5448,7 @@
     document.getElementById("processRawWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("khadiCount")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("processExpectedQty")?.addEventListener("input", updateProcessCalculations);
+    document.getElementById("processExpectedQtyMode")?.addEventListener("change", updateProcessCalculations);
     document.getElementById("processFinalWeight")?.addEventListener("input", updateProcessCalculations);
     document.getElementById("jobSlipTargetWeight")?.addEventListener("input", () => {
       jobSlipTargetWeightEdited = true;
@@ -5001,6 +5513,7 @@
     document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", () => {
       updateProcessStepLoss();
+      updateStepOutputPieceHelper();
       renderJobSlipPreview();
     });
     document.getElementById("correctStepOutputWeight")?.addEventListener("input", updateProcessStepCorrectionPreview);
@@ -5013,6 +5526,8 @@
     window.addEventListener("load", async function () {
       renderProfileBox();
       syncLotLedgerResponsiveState();
+      bindDeleteTestLotModalControls();
+      await loadTestProcessLotDeleteConfig();
       await loadStockFromServer();
       await loadProcessData();
       renderProcessTable();

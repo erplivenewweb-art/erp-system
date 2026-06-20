@@ -178,7 +178,7 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", group: "accounting", pageKey: "payment-accounts", href: "payment-accounts.html", label: "Payment Accounts", icon: "fas fa-wallet", moduleKey: "PAYMENT_ACCOUNTS" },
   { mode: "sales", group: "accounting", pageKey: "daily-closing", href: "daily-closing.html", label: "Daily Closing", icon: "fas fa-lock", moduleKey: "DAILY_CLOSING" },
   { mode: "sales", group: "accounting", pageKey: "transaction-reversal", href: "transaction-reversal.html", label: "Reverse Transaction", icon: "fas fa-rotate-left", moduleKey: "TRANSACTION_REVERSAL" },
-  { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Profit Loss", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
+  { mode: "sales", pageKey: "profit-report", href: "profit-report.html", label: "Billing Margin", icon: "fas fa-coins", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "lot-commercial-analytics", href: "lot-commercial-analytics.html", label: "Lot Commercial Analytics", icon: "fas fa-chart-line", moduleKey: "PROFIT_REPORT" },
   { mode: "sales", pageKey: "barcode-lifecycle", href: "barcode-lifecycle.html", label: "Barcode Lifecycle", icon: "fas fa-timeline", moduleKey: "AUDIT" },
   { mode: "sales", pageKey: "reconciliation-dashboard", href: "reconciliation-dashboard.html", label: "ERP Health Check", icon: "fas fa-heart-pulse", moduleKey: "AUDIT" },

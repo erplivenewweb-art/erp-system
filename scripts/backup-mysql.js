@@ -15,6 +15,26 @@ if (missing.length) {
 const backupDir = path.resolve(process.cwd(), process.env.BACKUP_DIR || 'backups');
 fs.mkdirSync(backupDir, { recursive: true });
 
+function getBackupRetentionCount() {
+  const configured = Number(process.env.BACKUP_RETENTION_COUNT || 7);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 7;
+}
+
+function pruneOldBackups() {
+  const backups = fs.readdirSync(backupDir)
+    .filter((file) => file.toLowerCase().endsWith('.sql'))
+    .map((file) => {
+      const filePath = path.join(backupDir, file);
+      return { file, filePath, modifiedAt: fs.statSync(filePath).mtime };
+    })
+    .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+
+  backups.slice(getBackupRetentionCount()).forEach((backup) => {
+    fs.unlinkSync(backup.filePath);
+    console.log(`Removed old backup: ${backup.file}`);
+  });
+}
+
 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 const backupFile = path.join(
   backupDir,
@@ -57,5 +77,6 @@ child.on('close', (code) => {
     console.error(`Backup failed with exit code ${code}`);
     process.exit(code || 1);
   }
+  pruneOldBackups();
   console.log(`Backup created: ${backupFile}`);
 });

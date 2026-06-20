@@ -500,6 +500,11 @@
               </div>
 
               <div class="input-box">
+                <label>Address</label>
+                <textarea id="billCustomerAddress" rows="2" placeholder="Enter customer address"></textarea>
+              </div>
+
+              <div class="input-box">
                 <label>Invoice Number</label>
                 <input type="text" id="billInvoiceNumber" placeholder="Enter invoice number" />
               </div>
@@ -1645,6 +1650,8 @@
       const draft = result.draft || {};
       document.getElementById("billCustomerName").value = draft.customerName || "";
       document.getElementById("billMobile").value = draft.mobile || "";
+      const draftAddressEl = document.getElementById("billCustomerAddress");
+      if (draftAddressEl) draftAddressEl.value = buildPrintableCustomerAddress(draft);
       document.getElementById("billInvoiceNumber").value = draft.invoiceNumber || "";
       if (draft.invoiceDate) {
         document.getElementById("billDate").value = draft.invoiceDate;
@@ -1689,6 +1696,7 @@
         "billCustomerName",
         "billMobile",
         "billGst",
+        "billCustomerAddress",
         "billInvoiceNumber",
         "billDate",
         "billPaymentMode",
@@ -2156,6 +2164,7 @@
       const customerName = document.getElementById("billCustomerName").value.trim() || "";
       const mobile = document.getElementById("billMobile").value.trim() || "";
       const gstNo = document.getElementById("billGst").value.trim() || "";
+      const customerAddress = document.getElementById("billCustomerAddress")?.value.trim() || "";
       const invoiceNumber = document.getElementById("billInvoiceNumber").value.trim() || ("BILL-" + Date.now());
       const billDate = document.getElementById("billDate").value || getTodayDate();
       const paymentMode = document.getElementById("billPaymentMode").value || "";
@@ -2193,6 +2202,7 @@
         customerName,
         mobile,
         gstNo,
+        customerAddress,
         billDate,
         paymentMode,
         paymentStatus,
@@ -2289,11 +2299,18 @@
             customerName: record.customerName,
             mobile: record.mobile,
             gstNo: record.gstNo,
+            customerAddress: record.customerAddress,
             billDate: record.billDate,
             paymentMode: record.paymentMode,
             paymentStatus: record.paymentStatus,
             paidAmount: record.paidAmount,
             dueAmount: record.dueAmount,
+            billType: record.billType,
+            taxType: record.taxType,
+            cgstAmount: record.cgst,
+            sgstAmount: record.sgst,
+            igstAmount: record.igst,
+            gstAmount: record.cgst + record.sgst + record.igst,
             totalAmount: record.grandTotal,
             employeeName: record.employeeName,
             totalItems: record.totalCount,
@@ -2364,6 +2381,75 @@
       return `Rs. ${num(value).toFixed(2)}`;
     }
 
+    function buildPrintableCustomerAddress(customer = {}) {
+      const directAddress = String(customer.customerAddress || customer.customer_address || customer.address || "").trim();
+      if (directAddress) return directAddress;
+
+      const line1 = String(customer.address_line1 || customer.addressLine1 || "").trim();
+      const line2 = String(customer.address_line2 || customer.addressLine2 || "").trim();
+      const city = String(customer.city || "").trim();
+      const state = String(customer.state || "").trim();
+      const pinCode = String(customer.pin_code || customer.pinCode || "").trim();
+      const locality = [line1, line2, city].filter(Boolean).join(", ");
+      const statePin = [state, pinCode].filter(Boolean).join(" - ");
+
+      return [locality, statePin].filter(Boolean).join(", ");
+    }
+
+    function applyBillingCustomerDetails(customer = {}) {
+      const nameEl = document.getElementById("billCustomerName");
+      const mobileEl = document.getElementById("billMobile");
+      const gstEl = document.getElementById("billGst");
+      const addressEl = document.getElementById("billCustomerAddress");
+
+      if (nameEl && (customer.party_name || customer.customerName || customer.customer_name)) {
+        nameEl.value = customer.party_name || customer.customerName || customer.customer_name || "";
+      }
+      if (mobileEl && (customer.mobile || customer.phone)) {
+        mobileEl.value = customer.mobile || customer.phone || "";
+      }
+      if (gstEl && (customer.gst_no || customer.gstNo || customer.gst_number)) {
+        gstEl.value = customer.gst_no || customer.gstNo || customer.gst_number || "";
+      }
+      if (addressEl) {
+        addressEl.value = buildPrintableCustomerAddress(customer);
+      }
+    }
+
+    async function hydrateBillingCustomerAddressFromMaster() {
+      const nameValue = document.getElementById("billCustomerName")?.value.trim() || "";
+      const mobileValue = document.getElementById("billMobile")?.value.trim() || "";
+      const searchValue = nameValue || mobileValue;
+      if (!searchValue) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/transaction/parties?partyType=CUSTOMER&search=${encodeURIComponent(searchValue)}`);
+        const result = await res.json();
+        if (!result.success || !Array.isArray(result.parties)) return;
+
+        const cleanName = nameValue.toLowerCase();
+        const cleanMobile = mobileValue.toLowerCase();
+        const exactParty = result.parties.find((party) => {
+          const partyName = String(party.party_name || party.display_name || "").trim().toLowerCase();
+          const partyMobile = String(party.mobile || "").trim().toLowerCase();
+          return (cleanName && partyName === cleanName) || (cleanMobile && partyMobile === cleanMobile);
+        });
+
+        if (exactParty) applyBillingCustomerDetails(exactParty);
+      } catch (error) {
+        console.log("Customer address lookup error:", error);
+      }
+    }
+
+    function bindBillingCustomerAddressLookup() {
+      ["billCustomerName", "billMobile"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.addressLookupBound === "1") return;
+        el.dataset.addressLookupBound = "1";
+        el.addEventListener("blur", hydrateBillingCustomerAddressFromMaster);
+      });
+    }
+
     function numberToIndianWords(value) {
       const numValue = Math.max(0, Math.floor(num(value)));
       if (numValue === 0) return "Zero";
@@ -2413,6 +2499,7 @@
       const date = escapePrintHtml(record.billDate || "-");
       const customerName = escapePrintHtml(record.customerName || "-");
       const customerMobile = escapePrintHtml(record.mobile || "-");
+      const customerAddress = escapePrintHtml(buildPrintableCustomerAddress(record) || "-");
       const shopName = escapePrintHtml(company.company_name || "-");
       const invoiceTitle = escapePrintHtml(company.top_title || "-");
       const address = escapePrintHtml(company.address || "-");
@@ -2442,7 +2529,25 @@
       const avgPurity = totalGrossWeight > 0 ? purityWeightTotal / totalGrossWeight : 0;
       const metalTotal = items.reduce((sum, item) => sum + num(item.metalValue || 0), 0);
       const makingCharge = items.reduce((sum, item) => sum + num(item.makingChargeAmount || 0), 0);
-      const gstTotal = num(record.cgst) + num(record.sgst) + num(record.igst);
+      const cgstAmount = num(record.cgstAmount ?? record.cgst_amount ?? record.cgst);
+      const sgstAmount = num(record.sgstAmount ?? record.sgst_amount ?? record.sgst);
+      const igstAmount = num(record.igstAmount ?? record.igst_amount ?? record.igst);
+      const gstTotal = num(record.gstAmount ?? record.gst_amount ?? (cgstAmount + sgstAmount + igstAmount));
+      const printTaxType = String(record.taxType || record.tax_type || "").trim().toUpperCase();
+      const gstRows = gstTotal > 0
+        ? printTaxType === "CGST_SGST"
+          ? `
+            <tr><td>CGST (1.5%)</td><td>${formatCurrency(cgstAmount)}</td></tr>
+            <tr><td>SGST (1.5%)</td><td>${formatCurrency(sgstAmount)}</td></tr>
+            <tr><td>GST Total</td><td>${formatCurrency(gstTotal)}</td></tr>
+          `
+          : printTaxType === "IGST"
+            ? `
+            <tr><td>IGST (3%)</td><td>${formatCurrency(igstAmount || gstTotal)}</td></tr>
+            <tr><td>GST Total</td><td>${formatCurrency(gstTotal)}</td></tr>
+          `
+            : `<tr><td>GST (3%)</td><td>${formatCurrency(gstTotal)}</td></tr>`
+        : "";
       const adjustment = num(record.roundOff);
       const subtotalBase = metalTotal + makingCharge + adjustment;
       const amountInWords = escapePrintHtml(numberToIndianWords(record.grandTotal));
@@ -2893,6 +2998,7 @@
           <table class="info-table">
             <tr><td>Customer Name</td><td>${customerName}</td></tr>
             <tr><td>Mobile Number</td><td>${customerMobile}</td></tr>
+            <tr><td>Address</td><td>${customerAddress}</td></tr>
           </table>
         </div>
       </section>
@@ -2942,7 +3048,7 @@
             <tr><td>Metal Value</td><td>${formatCurrency(metalTotal)}</td></tr>
             <tr><td>Making Charge</td><td>${formatCurrency(makingCharge)}</td></tr>
             <tr><td>Subtotal</td><td>${formatCurrency(subtotalBase)}</td></tr>
-            ${gstTotal > 0 ? `<tr><td>GST (3%)</td><td>${formatCurrency(gstTotal)}</td></tr>` : ""}
+            ${gstRows}
           </table>
 
           <div class="grand-total">
@@ -3069,6 +3175,7 @@
       if (salesModeEl && !salesModeEl.dataset.previousMode) {
         salesModeEl.dataset.previousMode = salesModeEl.value || "OWNER";
       }
+      bindBillingCustomerAddressLookup();
       setBillingSummaryAdvancedVisible(false);
       await loadBillingBranchFilter();
 

@@ -4,7 +4,7 @@
   <script src="js/auth-guard.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Estimated Gross Profit / Billing Margin Report</title>
+  <title>Billing Margin Report</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="icons/icon-192.png">
   <script src="js/pwa.js" defer></script>
@@ -172,6 +172,18 @@
       line-height: 1.45;
     }
 
+    .profit-disclaimer {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid #f0c36a;
+      background: #fff8e6;
+      color: #745018;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
     @media (max-width: 1080px) {
       .profit-summary-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -270,7 +282,7 @@
           </button>
           <div class="title">
             <h1 id="pageCompanyTitle">RPJ MANUFACTURER</h1>
-            <p>Estimated Gross Profit / Billing Margin</p>
+            <p>Billing Margin Report</p>
           </div>
         </div>
 
@@ -286,10 +298,14 @@
 
           <div class="profit-hero">
             <div>
-              <h2>Estimated Gross Profit / Billing Margin</h2>
-              <p>Review sales, company cost, and estimated billing margin without changing billing data.</p>
+              <h2>Billing Margin Report</h2>
+              <p>Estimated billing margin based on customer sales value minus company billing value.</p>
             </div>
             <span class="profit-badge"><i class="fas fa-shield-halved"></i> Read Only</span>
+          </div>
+
+          <div class="profit-disclaimer">
+            This report shows billing margin only. It does not include expenses, labour, returns, inventory valuation, or accounting Profit &amp; Loss.
           </div>
 
           <div class="profit-toolbar">
@@ -324,7 +340,7 @@
             <div class="profit-card">
               <div class="profit-card-head">
                 <span class="profit-icon"><i class="fas fa-building"></i></span>
-                <h4>Total Cost</h4>
+                <h4>Company Billing Value</h4>
               </div>
               <p id="totalCost" class="profit-value">₹ 0.00</p>
             </div>
@@ -332,7 +348,7 @@
             <div class="profit-card">
               <div class="profit-card-head">
                 <span class="profit-icon"><i class="fas fa-coins"></i></span>
-                <h4>Estimated Gross Profit / Billing Margin</h4>
+                <h4>Total Margin</h4>
               </div>
               <p id="totalProfit" class="profit-value gold">₹ 0.00</p>
             </div>
@@ -346,7 +362,7 @@
             </div>
           </div>
 
-          <div id="profitMeta" class="profit-meta">Select dates and refresh to view the estimated gross profit / billing margin report.</div>
+          <div id="profitMeta" class="profit-meta">Select dates and refresh to view the billing margin report.</div>
         </div>
       </section>
     </main>
@@ -480,7 +496,7 @@
         const data = await res.json();
 
         if (!res.ok || data?.success === false) {
-          throw new Error(data?.message || "Estimated gross profit / billing margin report load failed");
+          throw new Error(data?.message || "Billing margin report load failed");
         }
 
         setText("totalSales", formatMoney(data.totalSales));
@@ -491,13 +507,13 @@
         const rangeLabel = from || to
           ? `${from || "Start"} to ${to || "Today"}`
           : "All available invoices";
-        setText("profitMeta", `Showing ${rangeLabel}. Estimated gross profit / billing margin is computed as Total Sales minus Total Cost.`);
+        setText("profitMeta", `Showing ${rangeLabel}. Estimated billing margin based on customer sales value minus company billing value.`);
 
         if (showToastOnSuccess) showToast("Billing margin report refreshed", "success");
       } catch (error) {
         console.log("Billing margin report error:", error);
-        setText("profitMeta", error.message || "Estimated gross profit / billing margin report load failed");
-        showToast(error.message || "Estimated gross profit / billing margin report load failed", "error");
+        setText("profitMeta", error.message || "Billing margin report load failed");
+        showToast(error.message || "Billing margin report load failed", "error");
       }
     }
 
