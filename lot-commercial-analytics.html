@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lot Commercial Analytics</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .filter-grid,.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .summary-grid{margin:16px 0}.panel-box,.summary-card{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}
+    .summary-card h4{margin:0 0 6px;font-size:12px;color:#64748b;text-transform:uppercase}.summary-card p{margin:0;font-size:20px;font-weight:800;color:#0f172a}
+    .panel-box{margin-top:14px}.state-box{border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#475569;padding:16px;margin-top:14px}
+    .status-chip{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800;text-transform:uppercase}
+    .status-chip.pass{background:#dcfce7;color:#166534}.status-chip.warn{background:#fef3c7;color:#92400e}.status-chip.fail{background:#fee2e2;color:#991b1b}
+    @media(max-width:900px){.filter-grid,.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.filter-grid,.summary-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="sales-dashboard.html"><i class="fas fa-store"></i> Store Dashboard</a></li>
+      <li><a href="profit-report.html"><i class="fas fa-coins"></i> Billing Margin</a></li>
+      <li><a href="lot-commercial-analytics.html" class="active"><i class="fas fa-chart-line"></i> Lot Commercial Analytics</a></li>
+      <li><a href="barcode-lifecycle.html"><i class="fas fa-timeline"></i> Barcode Lifecycle</a></li>
+      <li><a href="reconciliation-dashboard.html"><i class="fas fa-heart-pulse"></i> ERP Health Check</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>Lot Commercial Analytics</h1><p>Commercial gain, sales, returns, and movement view by lot</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <div class="filter-grid">
+          <div class="input-box"><label>Lot Number</label><input id="lotNo" placeholder="Enter lot number" /></div>
+          <div class="input-box"><label>From</label><input id="dateFrom" type="date" /></div>
+          <div class="input-box"><label>To</label><input id="dateTo" type="date" /></div>
+          <div class="input-box"><label>&nbsp;</label><button type="button" class="primary-btn" onclick="loadLot()">Search</button></div>
+        </div>
+
+        <div id="stateBox" class="state-box">Enter a lot number and search to view commercial analytics.</div>
+
+        <div id="resultArea" hidden>
+          <div class="summary-grid">
+            <div class="summary-card"><h4>Revenue</h4><p id="revenueText">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Cost</h4><p id="costText">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Profit</h4><p id="profitText">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Margin</h4><p id="marginText">0.00%</p></div>
+            <div class="summary-card"><h4>Actual Sold</h4><p id="actualSoldText">0.000 gm</p></div>
+            <div class="summary-card"><h4>Billable Sold</h4><p id="billableSoldText">0.000 gm</p></div>
+            <div class="summary-card"><h4>Remaining Actual</h4><p id="remainingActualText">0.000 gm</p></div>
+            <div class="summary-card"><h4>Status</h4><p id="statusText">-</p></div>
+          </div>
+
+          <div class="panel-box">
+            <h3>Warnings</h3>
+            <div id="warningsBox" class="state-box">No warnings.</div>
+          </div>
+
+          <div class="panel-box">
+            <h3>Invoices</h3>
+            <div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Status</th><th>Paid</th><th>Due</th><th>Actual</th><th>Billable</th><th>Gain Value</th></tr></thead><tbody id="invoiceBody"></tbody></table></div>
+          </div>
+
+          <div class="panel-box">
+            <h3>Barcodes</h3>
+            <div class="table-wrap"><table><thead><tr><th>Serial</th><th>Barcode</th><th>Status</th><th>Invoice</th><th>Customer</th><th>Actual</th><th>Billable</th><th>Gain</th><th>Gain Value</th></tr></thead><tbody id="barcodeBody"></tbody></table></div>
+          </div>
+        </div>
+      </div></section>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){return String(user()?.role||"").toLowerCase()==="superadmin"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());if(dateFrom.value)p.set("dateFrom",dateFrom.value);if(dateTo.value)p.set("dateTo",dateTo.value);return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    function money(v){return `Rs ${Number(v||0).toFixed(2)}`}
+    function weight(v){return `${Number(v||0).toFixed(3)} gm`}
+    function num(v){return Number(v||0)}
+    async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"});const d=await r.json().catch(()=>({}));if(!r.ok||!d.success)throw new Error(d.message||"Unable to load lot analytics");return d}
+    function setState(message,type="info"){stateBox.hidden=false;stateBox.textContent=message;stateBox.className="state-box";resultArea.hidden=true}
+    function firstNumber(source,keys){for(const key of keys){if(source&&source[key]!==undefined&&source[key]!==null&&source[key]!=="")return num(source[key])}return 0}
+    function renderRows(id,rows,render,cols){document.getElementById(id).innerHTML=(rows||[]).length?rows.map(render).join(""):`<tr><td colspan="${cols}">No data found</td></tr>`}
+    async function loadLot(){const lot=lotNo.value.trim();if(!lot){setState("Enter a lot number to search.");return}try{setState("Loading lot analytics...");const d=await fetchJson(`${API_BASE}/reports/lot-commercial-profit/${encodeURIComponent(lot)}?${params()}`);const s=d.lotSummary||{};const revenue=firstNumber(s,["revenue","totalRevenue","salesRevenue","paidAmount"]) + firstNumber(s,["dueAmount"]);const cost=firstNumber(s,["cost","totalCost","companyCost"]);const profit=firstNumber(s,["profit","grossProfit","estimatedCommercialGainValue"]);const margin=firstNumber(s,["margin","marginPercent"]) || (revenue>0?(profit/revenue)*100:0);stateBox.hidden=true;resultArea.hidden=false;revenueText.textContent=money(revenue);costText.textContent=money(cost);profitText.textContent=money(profit);marginText.textContent=`${margin.toFixed(2)}%`;actualSoldText.textContent=weight(s.actualSold);billableSoldText.textContent=weight(s.billableSold);remainingActualText.textContent=weight(s.remainingActualStock);statusText.innerHTML=`<span class="status-chip ${(d.warnings||[]).length?"warn":"pass"}">${esc(s.lotStatus||"Loaded")}</span>`;warningsBox.innerHTML=(d.warnings||[]).length?(d.warnings||[]).map(w=>`<div><b>${esc(w.code||"Warning")}</b>: ${esc(w.message||"")}</div>`).join(""):"No warnings.";renderRows("invoiceBody",d.invoices,r=>`<tr><td>${esc(r.invoiceNumber)}</td><td>${esc(r.date)}</td><td>${esc(r.customerName)}</td><td>${esc(r.paymentStatus)}</td><td>${money(r.paidAmount)}</td><td>${money(r.dueAmount)}</td><td>${weight(r.actualWeight)}</td><td>${weight(r.billableWeight)}</td><td>${money(r.estimatedCommercialGainValue)}</td></tr>`,9);renderRows("barcodeBody",d.barcodes,r=>`<tr><td>${esc(r.serial)}</td><td>${esc(r.barcode)}</td><td>${esc(r.status||r.stock_state)}</td><td>${esc(r.invoiceNumber)}</td><td>${esc(r.customerName)}</td><td>${weight(r.actualWeight)}</td><td>${weight(r.billableWeight)}</td><td>${weight(r.laminationGainWeight)}</td><td>${money(r.commercialGainValue)}</td></tr>`,9)}catch(e){setState(e.message||"Lot analytics could not be loaded.")}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",()=>{profileBox.textContent=user()?.name||user()?.email||"User";const q=new URLSearchParams(location.search);if(q.get("lotNo")){lotNo.value=q.get("lotNo");loadLot()}})
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("lot-commercial-analytics");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

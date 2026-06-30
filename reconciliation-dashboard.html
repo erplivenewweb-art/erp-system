@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="js/auth-guard.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ERP Health Check</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <script src="js/pwa.js" defer></script>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/toast.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:14px}
+    .summary-card,.panel-box{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:14px}
+    .summary-card h4{margin:0 0 6px;font-size:12px;color:#64748b;text-transform:uppercase}.summary-card p{margin:0;font-size:20px;font-weight:800}
+    .toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.panel-box{margin-top:14px}
+    .status-chip{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800;text-transform:uppercase}
+    .status-chip.pass{background:#dcfce7;color:#166534}.status-chip.warn{background:#fef3c7;color:#92400e}.status-chip.fail{background:#fee2e2;color:#991b1b}
+    .state-box{border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;color:#475569;padding:14px}
+    @media(max-width:1000px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.summary-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"><div class="sidebar-inner"><div class="brand"><h2>ERP PANEL</h2><p>Jewellery Management</p></div><ul class="menu">
+      <li><a href="sales-dashboard.html"><i class="fas fa-store"></i> Store Dashboard</a></li>
+      <li><a href="barcode-lifecycle.html"><i class="fas fa-timeline"></i> Barcode Lifecycle</a></li>
+      <li><a href="reconciliation-dashboard.html" class="active"><i class="fas fa-heart-pulse"></i> ERP Health Check</a></li>
+      <li><a href="backup-health.html"><i class="fas fa-database"></i> Backup Health</a></li>
+      <li><a href="branch-reconciliation.html"><i class="fas fa-scale-balanced"></i> Branch Reconciliation</a></li>
+    </ul></div></aside>
+    <main class="main">
+      <div class="topbar"><div class="top-left"><button class="hamburger" type="button" onclick="toggleSidebar()"><span></span><span></span><span></span></button><div class="title"><h1>ERP Health Check</h1><p>Reconciliation scan across sales, returns, transfers, process, and ledgers</p></div></div><div class="top-right"><div class="profile-box" id="profileBox"></div></div></div>
+      <section class="page active"><div class="section-box">
+        <div class="toolbar">
+          <div id="overallStatus"><span class="status-chip warn">Not Run</span></div>
+          <button type="button" class="primary-btn" onclick="loadAll()">Run Health Check</button>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-card"><h4>Health Score</h4><p id="healthScore">-</p></div>
+          <div class="summary-card"><h4>Total Issues</h4><p id="totalIssues">0</p></div>
+          <div class="summary-card"><h4>Critical</h4><p id="criticalIssues">0</p></div>
+          <div class="summary-card"><h4>High</h4><p id="highIssues">0</p></div>
+          <div class="summary-card"><h4>Modules Affected</h4><p id="modulesAffected">0</p></div>
+        </div>
+        <div id="sections"></div>
+      </div></section>
+    </main>
+  </div>
+
+  <script>
+    const API_BASE=window.ERP_API_BASE;
+    const CHECKS=[
+      ["overview","Overview","/reconciliation/overview"],
+      ["stock-sales","Stock / Sales","/reconciliation/stock-sales"],
+      ["returns","Returns","/reconciliation/returns"],
+      ["branch-transfer","Branch Transfer","/reconciliation/branch-transfer"],
+      ["process","Process","/reconciliation/process"],
+      ["refund-payables","Refund Payables","/reconciliation/refund-payables"]
+    ];
+    function user(){try{return JSON.parse(localStorage.getItem("erpLoggedInUser"))||null}catch(_){return null}}
+    function uid(){const n=Number(user()?.id||user()?.user_id||0);return Number.isFinite(n)&&n>0?n:null}
+    function cid(){const n=Number((typeof getEffectiveCompanyId==="function"?getEffectiveCompanyId():user()?.company_id)||0);return Number.isFinite(n)&&n>0?n:null}
+    function isSuperAdmin(){return String(user()?.role||"").toLowerCase()==="superadmin"}
+    function params(){const p=new URLSearchParams();if(uid())p.set("actingUserId",uid());if(cid()||isSuperAdmin())p.set("companyId",cid());return p}
+    function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}
+    async function fetchJson(path){const r=await fetch(`${API_BASE}${path}?${params()}`,{cache:"no-store",credentials:"include"});const d=await r.json().catch(()=>({}));if(!r.ok||!d.success)throw new Error(d.message||"Health check failed");return d}
+    function statusFor(summary){const total=Number(summary?.totalIssues||0);const critical=Number(summary?.criticalIssues||0);if(critical>0)return["FAIL","fail"];if(total>0)return["WARNING","warn"];return["PASS","pass"]}
+    function rowPreview(row){const entries=Object.entries(row||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=="").slice(0,6);return entries.map(([k,v])=>`${esc(k)}: ${esc(v)}`).join("<br>")||"-"}
+    function renderSection(key,title,data,error){if(error)return `<div class="panel-box"><h3>${esc(title)}</h3><div class="state-box">${esc(error)}</div></div>`;const groups=data.groups||data.issueGroups||[];const summary=data.summary||{};const [label,cls]=statusFor(summary);const rows=groups.flatMap(g=>(g.issues||[]).map(issue=>({group:g,issue})));return `<div class="panel-box"><h3>${esc(title)} <span class="status-chip ${cls}">${label}</span></h3>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Check</th><th>Severity</th><th>Message</th><th>Details</th></tr></thead><tbody>${rows.map(({group,issue})=>`<tr><td>${esc(group.title||group.check||issue.check)}</td><td>${esc(issue.severity)}</td><td>${esc(issue.message)}</td><td>${rowPreview(issue.row)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="state-box">No mismatches found.</div>`}</div>`}
+    async function loadAll(){sections.innerHTML='<div class="state-box">Running reconciliation checks...</div>';try{const loaded=[];for(const [key,title,path] of CHECKS){try{loaded.push({key,title,data:await fetchJson(path)})}catch(e){loaded.push({key,title,error:e.message||"Unable to load this section"})}}const overview=loaded.find(item=>item.key==="overview"&&item.data)?.data||{};const summary=overview.summary||{};const [label,cls]=statusFor(summary);overallStatus.innerHTML=`<span class="status-chip ${cls}">${label}</span>`;healthScore.textContent=summary.healthScore??"-";totalIssues.textContent=Number(summary.totalIssues||0);criticalIssues.textContent=Number(summary.criticalIssues||0);highIssues.textContent=Number(summary.severityCounts?.HIGH||0);modulesAffected.textContent=Number((summary.modulesAffected||[]).length);sections.innerHTML=loaded.map(item=>renderSection(item.key,item.title,item.data,item.error)).join("")}catch(e){sections.innerHTML=`<div class="state-box">${esc(e.message||"Health check could not be loaded.")}</div>`}}
+    function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed")}
+    window.addEventListener("load",()=>{profileBox.textContent=user()?.name||user()?.email||"User";loadAll()})
+  </script>
+  <script src="js/auth.js"></script>
+  <script>requireLogin();requirePageAccess("reconciliation-dashboard");filterSidebarMenuByRole();</script>
+  <script src="js/toast.js"></script>
+</body>
+</html>

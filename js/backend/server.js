@@ -10999,6 +10999,7 @@ async function ensureSchema() {
       rate_per_gram DECIMAL(14,2) DEFAULT 0.00,
       metal_value DECIMAL(14,2) DEFAULT 0.00,
       making_charge DECIMAL(14,2) DEFAULT 0.00,
+      making_basis VARCHAR(30) DEFAULT NULL,
       hallmark_charge DECIMAL(14,2) DEFAULT 0.00,
       labour_charge DECIMAL(14,2) DEFAULT 0.00,
       other_charge DECIMAL(14,2) DEFAULT 0.00,
@@ -12904,6 +12905,7 @@ async function ensureSchema() {
     await addColumnIfMissing("transaction_lines", "rate_per_gram", "DECIMAL(14,2) DEFAULT 0.00");
     await addColumnIfMissing("transaction_lines", "metal_value", "DECIMAL(14,2) DEFAULT 0.00");
     await addColumnIfMissing("transaction_lines", "making_charge", "DECIMAL(14,2) DEFAULT 0.00");
+    await addColumnIfMissing("transaction_lines", "making_basis", "VARCHAR(30) DEFAULT NULL");
     await addColumnIfMissing("transaction_lines", "hallmark_charge", "DECIMAL(14,2) DEFAULT 0.00");
     await addColumnIfMissing("transaction_lines", "labour_charge", "DECIMAL(14,2) DEFAULT 0.00");
     await addColumnIfMissing("transaction_lines", "other_charge", "DECIMAL(14,2) DEFAULT 0.00");
@@ -16383,10 +16385,8 @@ app.post("/settings/unlock/lock", authMiddleware, async (req, res) => {
 ========================= */
 app.get("/expenses", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
@@ -16394,13 +16394,20 @@ app.get("/expenses", authMiddleware, async (req, res) => {
     }
 
     const companyId = access.companyScope;
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
     const params = [];
-    let whereClause = "";
+    const whereParts = [];
 
     if (companyId !== null) {
-      whereClause = "WHERE e.company_id = ?";
+      whereParts.push("e.company_id = ?");
       params.push(companyId);
     }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("e.branch_id = ?");
+      params.push(branchScope.branchId);
+    }
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
 
     const [rows] = await pool.query(
       `
@@ -16421,7 +16428,8 @@ app.get("/expenses", authMiddleware, async (req, res) => {
 
     return res.json({
       success: true,
-      expenses: rows.map((row) => normalizeExpenseRow(row))
+      expenses: rows.map((row) => normalizeExpenseRow(row)),
+      branchScope: getBranchScopeResponse(branchScope)
     });
   } catch (error) {
     console.error("Expense fetch error:", error);
@@ -16823,6 +16831,73 @@ app.delete("/expenses/:id", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "A
   }
 });
 
+async function getNetExpenseLedgerRows(connection, { companyId = null, fromDate = "", toDate = "", branchScope = null } = {}) {
+  const whereParts = [
+    "tm.transaction_type IN ('EXPENSE_PAYMENT', 'EXPENSE_PAYMENT_REVERSAL')",
+    "UPPER(COALESCE(tm.status, 'POSTED')) <> 'CANCELLED'"
+  ];
+  const params = [];
+  if (companyId !== null) {
+    whereParts.push("tm.company_id = ?");
+    params.push(companyId);
+  }
+  if (fromDate) {
+    whereParts.push("cl.entry_date >= ?");
+    params.push(fromDate);
+  }
+  if (toDate) {
+    whereParts.push("cl.entry_date < ?");
+    params.push(toDate);
+  }
+  if (branchScope?.isBranchFiltered) {
+    whereParts.push("COALESCE(cl.branch_id, itlb.branch_id, tm.branch_id, 0) = ?");
+    params.push(branchScope.branchId);
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT
+      tm.id,
+      tm.id AS transaction_id,
+      cl.id AS cash_ledger_id,
+      DATE_FORMAT(cl.entry_date, '%Y-%m-%d') AS date,
+      TIME_FORMAT(COALESCE(tm.voucher_time, tm.created_at), '%H:%i') AS time,
+      COALESCE(pm.party_name, '') AS person,
+      COALESCE(tl.category, tm.note, 'Expense') AS category,
+      tm.remarks AS reason,
+      tm.note,
+      CASE
+        WHEN tm.transaction_type = 'EXPENSE_PAYMENT' THEN COALESCE(cl.credit_amount, 0)
+        WHEN tm.transaction_type = 'EXPENSE_PAYMENT_REVERSAL' THEN -COALESCE(cl.debit_amount, 0)
+        ELSE 0
+      END AS amount,
+      tm.transaction_type,
+      tm.voucher_no,
+      tm.reference_no,
+      COALESCE(cl.branch_id, itlb.branch_id, tm.branch_id, NULL) AS branch_id,
+      tm.company_id,
+      c.company_name
+    FROM cash_ledger cl
+    INNER JOIN transaction_master tm
+      ON tm.id = cl.transaction_id
+     AND tm.company_id = cl.company_id
+    ${getTransactionBranchJoinSql("tm")}
+    LEFT JOIN (
+      SELECT transaction_id, MIN(NULLIF(item_name, '')) AS category
+      FROM transaction_lines
+      GROUP BY transaction_id
+    ) tl ON tl.transaction_id = tm.id
+    LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+    LEFT JOIN companies c ON c.id = tm.company_id
+    WHERE ${whereParts.join(" AND ")}
+    ORDER BY cl.entry_date DESC, tm.id DESC, cl.id DESC
+    `,
+    params
+  );
+
+  return rows.map((row) => normalizeExpenseRow(row));
+}
+
 /* =========================
    DAILY REPORT
 ========================= */
@@ -16920,9 +16995,9 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
     const transactionBranchParams = branchScope.isBranchFiltered
       ? [branchScope.branchId, branchScope.branchId, branchScope.branchId]
       : [];
-    // Branch columns for material/expense rows are planned for a later schema phase.
-    // Until then, branch-locked users should not receive company-wide branchless rows here.
-    const branchlessReportClause = branchScope.isBranchFiltered ? "AND 1 = 0" : "";
+    // Branch columns for material rows are planned for a later schema phase.
+    // Until then, branch-locked users should not receive company-wide branchless material rows here.
+    const materialBranchlessReportClause = branchScope.isBranchFiltered ? "AND 1 = 0" : "";
 
     const [processRows] = await pool.query(
       `
@@ -17092,35 +17167,18 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
       WHERE msm.movement_date >= ?
         AND msm.movement_date < ?
         ${companyId !== null ? "AND msm.company_id = ?" : ""}
-        ${branchlessReportClause}
+        ${materialBranchlessReportClause}
       ORDER BY msm.movement_date DESC, msm.id DESC
       `,
       [reportDate, nextDate, ...companyParams]
     );
 
-    const [expenseRows] = await pool.query(
-      `
-      SELECT
-        e.id,
-        DATE_FORMAT(e.expense_date, '%Y-%m-%d') AS date,
-        TIME_FORMAT(e.expense_time, '%H:%i') AS time,
-        e.person,
-        e.category,
-        e.reason,
-        e.note,
-        e.amount,
-        e.company_id,
-        c.company_name
-      FROM expenses e
-      LEFT JOIN companies c ON c.id = e.company_id
-      WHERE e.expense_date >= ?
-        AND e.expense_date < ?
-        ${companyId !== null ? "AND e.company_id = ?" : ""}
-        ${branchlessReportClause}
-      ORDER BY e.expense_date DESC, e.expense_time DESC, e.id DESC
-      `,
-      [reportDate, nextDate, ...companyParams]
-    );
+    const expenseRows = await getNetExpenseLedgerRows(pool, {
+      companyId,
+      fromDate: reportDate,
+      toDate: nextDate,
+      branchScope
+    });
 
     const [transactionRows] = await pool.query(
       `
@@ -40792,6 +40850,16 @@ async function buildTransactionReversalPreview(connection, companyId, transactio
     `,
     [transactionId]
   );
+  const [settlementRows] = await connection.query(
+    `
+    SELECT *
+    FROM transaction_settlements
+    WHERE company_id = ?
+      AND transaction_id = ?
+    ORDER BY id ASC
+    `,
+    [companyId, transactionId]
+  );
 
   return {
     transaction,
@@ -40822,7 +40890,34 @@ async function buildTransactionReversalPreview(connection, companyId, transactio
       item_name: row.item_name,
       line_amount: toNumber(row.line_amount),
       barcode: row.barcode || ""
-    }))
+    })),
+    settlementPreview: settlementRows.map((row) => {
+      const settlementType = String(row.settlement_type || "").trim().toUpperCase();
+      const cashAmount = toNumber(row.cash_amount);
+      const fineWeight = toNumber(row.fine_weight);
+      const rateBasis = toNumber(row.rate_basis);
+      const fineCash = fineWeight > 0 && rateBasis > 0 ? fineWeight * rateBasis : 0;
+      const makingAllocation = settlementType === "CASH"
+        ? Math.max(cashAmount - fineCash, 0)
+        : cashAmount;
+      const legacyCombined = settlementType === "CASH" && !/^Cash allocation tracking:\s*tracked/i.test(String(row.remarks || ""));
+      return {
+        settlement_type: settlementType,
+        cash_amount: cashAmount,
+        metal_type: row.metal_type || "",
+        gross_weight: toNumber(row.gross_weight),
+        fine_weight: fineWeight,
+        rate_basis: rateBasis,
+        fine_cash_equivalent: fineCash,
+        making_allocation: makingAllocation,
+        reversal_cash_amount: -cashAmount,
+        reversal_gross_weight: -toNumber(row.gross_weight),
+        reversal_fine_weight: -fineWeight,
+        reversal_making_allocation: -makingAllocation,
+        legacy_combined: legacyCombined,
+        remarks: row.remarks || ""
+      };
+    })
   };
 }
 
@@ -41320,6 +41415,118 @@ async function assertPartyMetalReturnAvailable(connection, payload) {
   }
 }
 
+async function buildPartyMetalCashAllocationPreview(connection, {
+  companyId,
+  partyId,
+  branchId,
+  amount,
+  metalType = "",
+  metalRate = 0
+}) {
+  const cleanCompanyId = Number(companyId || 0);
+  const cleanPartyId = Number(partyId || 0);
+  const cleanBranchId = Number(branchId || 0);
+  const cashAmount = toNumber(amount);
+  const cleanMetalType = normalizeMetalType(metalType);
+  const cleanMetalRate = toNumber(metalRate);
+  const legacyPreview = {
+    makingDueAvailable: false,
+    makingChargeDue: null,
+    appliedToMaking: 0,
+    appliedToFine: 0,
+    fineSettled: 0,
+    remainingFine: null,
+    metalType: cleanMetalType,
+    metalRate: cleanMetalRate,
+    requiresMetalRate: false,
+    message: "Making due unavailable for legacy data. Cash will reduce combined due unless allocation tracking exists."
+  };
+
+  if (!cleanCompanyId || !cleanPartyId || !cleanBranchId || cashAmount <= 0) return legacyPreview;
+
+  const [baselineRows] = await connection.query(
+    `
+    SELECT MIN(tm.id) AS baseline_transaction_id
+    FROM transaction_settlements ts
+    INNER JOIN transaction_master tm
+      ON tm.id = ts.transaction_id
+     AND tm.company_id = ts.company_id
+    WHERE ts.company_id = ?
+      AND tm.party_id = ?
+      AND COALESCE(tm.branch_id, 0) = ?
+      AND UPPER(COALESCE(ts.settlement_type, '')) = 'CASH'
+      AND COALESCE(ts.remarks, '') LIKE 'Cash allocation tracking:%'
+    `,
+    [cleanCompanyId, cleanPartyId, cleanBranchId]
+  );
+  const baselineTransactionId = Number(baselineRows[0]?.baseline_transaction_id || 0);
+  if (!baselineTransactionId) return legacyPreview;
+
+  const [chargeRows] = await connection.query(
+    `
+    SELECT COALESCE(SUM(GREATEST(COALESCE(tl.line_amount, 0) - COALESCE(tl.metal_value, 0), 0)), 0) AS making_due_created
+    FROM transaction_master tm
+    INNER JOIN transaction_lines tl ON tl.transaction_id = tm.id
+    WHERE tm.company_id = ?
+      AND tm.party_id = ?
+      AND COALESCE(tm.branch_id, 0) = ?
+      AND tm.id > ?
+      AND UPPER(COALESCE(tm.transaction_type, '')) IN ('METAL_RECEIVED', 'FINISHED_GOODS_SENT')
+      AND UPPER(COALESCE(tm.status, 'POSTED')) <> 'CANCELLED'
+    `,
+    [cleanCompanyId, cleanPartyId, cleanBranchId, baselineTransactionId]
+  );
+
+  const [allocationRows] = await connection.query(
+    `
+    SELECT
+      COALESCE(SUM(GREATEST(COALESCE(ts.cash_amount, 0) - (COALESCE(ts.fine_weight, 0) * COALESCE(NULLIF(ts.rate_basis, 0), 0)), 0)), 0) AS making_paid
+    FROM transaction_settlements ts
+    INNER JOIN transaction_master tm
+      ON tm.id = ts.transaction_id
+     AND tm.company_id = ts.company_id
+    WHERE ts.company_id = ?
+      AND tm.party_id = ?
+      AND COALESCE(tm.branch_id, 0) = ?
+      AND tm.id >= ?
+      AND UPPER(COALESCE(ts.settlement_type, '')) = 'CASH'
+      AND COALESCE(ts.remarks, '') LIKE 'Cash allocation tracking:%'
+    `,
+    [cleanCompanyId, cleanPartyId, cleanBranchId, baselineTransactionId]
+  );
+
+  const makingChargeDue = Math.max(toNumber(chargeRows[0]?.making_due_created) - toNumber(allocationRows[0]?.making_paid), 0);
+  const appliedToMaking = Math.min(cashAmount, makingChargeDue);
+  const appliedToFine = Math.max(cashAmount - appliedToMaking, 0);
+  const requiresMetalRate = appliedToFine > 0;
+  const fineSettled = requiresMetalRate && cleanMetalRate > 0 ? appliedToFine / cleanMetalRate : 0;
+  let remainingFine = null;
+  if (cleanMetalType) {
+    const available = await getPartyMetalAvailableBalance(connection, {
+      companyId: cleanCompanyId,
+      partyId: cleanPartyId,
+      branchId: cleanBranchId,
+      metalType: cleanMetalType
+    });
+    remainingFine = Math.max(toNumber(available.fineBalance) - fineSettled, 0);
+  }
+
+  return {
+    makingDueAvailable: true,
+    makingChargeDue,
+    appliedToMaking,
+    appliedToFine,
+    fineSettled,
+    remainingFine,
+    metalType: cleanMetalType,
+    metalRate: cleanMetalRate,
+    requiresMetalRate,
+    message: requiresMetalRate
+      ? "Cash will apply to making due first, then fine liability using the metal rate."
+      : "Cash will apply to tracked making charge due."
+  };
+}
+
 async function postPartyMetalVoucher(connection, req, access, branchScope, config) {
   const finalUserId = access.actingUserId ?? getRequestedUserId(req);
   const partyId = Number(req.body.partyId || req.body.party_id || 0);
@@ -41361,18 +41568,65 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
   let metalDetails = null;
   let paymentDetails = null;
   let finishedGoodsDetails = null;
+  const settlementType = config.kind === "PAYMENT"
+    ? (normalizeSettlementType(req.body.settlementType || req.body.settlement_type) || "CASH")
+    : "";
   if (config.kind === "METAL") {
     const metalType = normalizeMetalType(req.body.metalType || req.body.metal_type);
     const purity = toNumber(req.body.purity ?? 0);
     const grossWeight = toNumber(req.body.grossWeight ?? req.body.gross_weight ?? 0);
     const fineWeight = validatePartyMetalFineWeight(grossWeight, purity, req.body.fineWeight ?? req.body.fine_weight);
     const ratePerGram = toNumber(req.body.ratePerGram ?? req.body.rate_per_gram ?? 0);
-    const metalValue = toNumber(req.body.totalValue ?? req.body.total_value ?? req.body.metalValue ?? req.body.metal_value ?? fineWeight * ratePerGram);
+    const hasReceivedMakingFields = config.transactionType === "METAL_RECEIVED" && (
+      req.body.makingCharge !== undefined ||
+      req.body.making_charge !== undefined ||
+      req.body.makingBasis !== undefined ||
+      req.body.making_basis !== undefined ||
+      req.body.makingValue !== undefined ||
+      req.body.making_value !== undefined ||
+      req.body.metalValue !== undefined ||
+      req.body.metal_value !== undefined
+    );
+    const makingCharge = hasReceivedMakingFields ? toNumber(req.body.makingCharge ?? req.body.making_charge ?? 0) : 0;
+    const makingBasisRaw = String(req.body.makingBasis || req.body.making_basis || "PER_GRAM").trim().toUpperCase();
+    const makingBasis = makingBasisRaw === "FIXED" ? "FIXED" : "PER_GRAM";
+    const expectedMetalValue = roundMoney(fineWeight * ratePerGram);
+    const expectedMakingValue = roundMoney(makingBasis === "FIXED" ? makingCharge : grossWeight * makingCharge);
+    const expectedTotalValue = roundMoney(expectedMetalValue + expectedMakingValue);
+    const metalValue = hasReceivedMakingFields
+      ? toNumber(req.body.metalValue ?? req.body.metal_value ?? expectedMetalValue)
+      : toNumber(req.body.totalValue ?? req.body.total_value ?? req.body.metalValue ?? req.body.metal_value ?? fineWeight * ratePerGram);
+    const makingValue = hasReceivedMakingFields
+      ? toNumber(req.body.makingValue ?? req.body.making_value ?? expectedMakingValue)
+      : 0;
+    const totalValue = hasReceivedMakingFields
+      ? toNumber(req.body.totalValue ?? req.body.total_value ?? req.body.lineAmount ?? req.body.line_amount ?? expectedTotalValue)
+      : metalValue;
     const qty = toNumber(req.body.quantity ?? req.body.qty ?? 0);
     const productName = String(req.body.productName || req.body.product_name || req.body.description || "").trim();
 
     if (!metalType || grossWeight <= 0) {
       const error = new Error("Metal type and gross weight are required");
+      error.status = 400;
+      throw error;
+    }
+    if (hasReceivedMakingFields && (makingCharge < 0 || totalValue < 0)) {
+      const error = new Error("Making charge and total value cannot be negative");
+      error.status = 400;
+      throw error;
+    }
+    if (hasReceivedMakingFields && !isAmountClose(metalValue, expectedMetalValue)) {
+      const error = new Error(`Metal value mismatch. Expected ${expectedMetalValue.toFixed(2)} for fine weight and rate.`);
+      error.status = 400;
+      throw error;
+    }
+    if (hasReceivedMakingFields && !isAmountClose(makingValue, expectedMakingValue)) {
+      const error = new Error(`Making value mismatch. Expected ${expectedMakingValue.toFixed(2)} for selected making basis.`);
+      error.status = 400;
+      throw error;
+    }
+    if (hasReceivedMakingFields && !isAmountClose(totalValue, expectedTotalValue)) {
+      const error = new Error(`Total value mismatch. Expected ${expectedTotalValue.toFixed(2)} from metal and making value.`);
       error.status = 400;
       throw error;
     }
@@ -41386,30 +41640,115 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
         fineWeight
       });
     }
-    metalDetails = { metalType, purity, grossWeight, fineWeight, ratePerGram, metalValue, qty, productName };
+    metalDetails = {
+      metalType,
+      purity,
+      grossWeight,
+      fineWeight,
+      ratePerGram,
+      metalValue: hasReceivedMakingFields ? expectedMetalValue : metalValue,
+      makingCharge,
+      makingBasis: hasReceivedMakingFields ? makingBasis : null,
+      makingValue: hasReceivedMakingFields ? expectedMakingValue : 0,
+      totalValue: hasReceivedMakingFields ? expectedTotalValue : metalValue,
+      qty,
+      productName
+    };
   }
 
   if (config.kind === "PAYMENT") {
-    const amount = toNumber(req.body.amount ?? req.body.cashAmount ?? req.body.cash_amount ?? 0);
+    if (!["CASH", "METAL"].includes(settlementType)) {
+      const error = new Error("Settlement type must be CASH or METAL");
+      error.status = 400;
+      throw error;
+    }
+    const amount = settlementType === "CASH"
+      ? toNumber(req.body.amount ?? req.body.cashAmount ?? req.body.cash_amount ?? 0)
+      : toNumber(req.body.makingCharge ?? req.body.making_charge ?? req.body.cashAmount ?? req.body.cash_amount ?? 0);
     const accountId = Number(req.body.accountId || req.body.account_id || req.body.paymentAccountId || 0);
-    if (amount <= 0) {
+    if (settlementType === "CASH" && amount <= 0) {
       const error = new Error("Payment amount is required");
       error.status = 400;
       throw error;
     }
-    if (!accountId) {
+    if (amount < 0) {
+      const error = new Error("Making charge cannot be negative");
+      error.status = 400;
+      throw error;
+    }
+    if ((settlementType === "CASH" || amount > 0) && !accountId) {
       const error = new Error("Payment account is required for party metal payments");
       error.status = 400;
       throw error;
     }
-    const account = await assertPaymentAccountBranchAccess(connection, access, accountId);
-    const accountBranchId = account.branch_id === null || account.branch_id === undefined ? null : Number(account.branch_id);
-    if (accountBranchId !== null && accountBranchId !== branchId) {
-      const error = new Error("Selected payment account belongs to another branch");
-      error.status = 403;
-      throw error;
+    let account = null;
+    if (accountId) {
+      account = await assertPaymentAccountBranchAccess(connection, access, accountId);
+      const accountBranchId = account.branch_id === null || account.branch_id === undefined ? null : Number(account.branch_id);
+      if (accountBranchId !== null && accountBranchId !== branchId) {
+        const error = new Error("Selected payment account belongs to another branch");
+        error.status = 403;
+        throw error;
+      }
     }
-    paymentDetails = { amount, accountId, paymentMode: String(account.account_type || "").trim() };
+    paymentDetails = { amount, accountId: accountId || null, paymentMode: String(account?.account_type || "").trim(), settlementType };
+
+    if (settlementType === "CASH") {
+      const allocationPreview = await buildPartyMetalCashAllocationPreview(connection, {
+        companyId: access.companyScope,
+        partyId,
+        branchId,
+        amount,
+        metalType: req.body.metalType || req.body.metal_type,
+        metalRate: req.body.metalRate ?? req.body.metal_rate ?? req.body.rateBasis ?? req.body.rate_basis
+      });
+      if (allocationPreview.requiresMetalRate && (!allocationPreview.metalType || allocationPreview.metalRate <= 0)) {
+        const error = new Error("Metal type and metal rate are required when cash is being applied to fine");
+        error.status = 400;
+        throw error;
+      }
+      if (!req.body.allocationConfirmed && !req.body.allocation_confirmed) {
+        const error = new Error("Confirm cash allocation preview before saving");
+        error.status = 409;
+        error.preview = allocationPreview;
+        throw error;
+      }
+      paymentDetails.allocationPreview = allocationPreview;
+    }
+
+    if (settlementType === "METAL") {
+      const metalType = normalizeMetalType(req.body.metalType || req.body.metal_type);
+      const purity = toNumber(req.body.purity ?? 0);
+      const grossWeight = toNumber(req.body.grossWeight ?? req.body.gross_weight ?? 0);
+      const fineWeight = validatePartyMetalFineWeight(grossWeight, purity, req.body.fineWeight ?? req.body.fine_weight);
+      if (!metalType || grossWeight <= 0 || purity <= 0 || fineWeight <= 0) {
+        const error = new Error("Metal type, gross weight, purity, and fine weight are required for metal settlement");
+        error.status = 400;
+        throw error;
+      }
+      await assertPartyMetalReturnAvailable(connection, {
+        companyId: access.companyScope,
+        partyId,
+        branchId,
+        metalType,
+        grossWeight,
+        fineWeight
+      });
+      metalDetails = {
+        metalType,
+        purity,
+        grossWeight,
+        fineWeight,
+        ratePerGram: toNumber(req.body.rateBasis ?? req.body.rate_basis ?? req.body.ratePerGram ?? req.body.rate_per_gram ?? 0),
+        metalValue: 0,
+        makingCharge: amount,
+        makingBasis: "FIXED",
+        makingValue: amount,
+        totalValue: amount,
+        qty: 0,
+        productName: "Metal Settlement"
+      };
+    }
   }
 
   if (config.kind === "FINISHED_GOODS") {
@@ -41513,9 +41852,9 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
       INSERT INTO transaction_lines
       (
         transaction_id, line_no, item_name, metal_type, purity, gross_weight,
-        fine_weight, qty, rate_per_gram, metal_value, line_amount, remarks
+        fine_weight, qty, rate_per_gram, metal_value, making_charge, making_basis, line_amount, remarks
       )
-      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         transactionId,
@@ -41527,7 +41866,9 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
         metalDetails.qty,
         metalDetails.ratePerGram,
         metalDetails.metalValue,
-        metalDetails.metalValue,
+        metalDetails.makingCharge,
+        metalDetails.makingBasis,
+        metalDetails.totalValue,
         remarks
       ]
     );
@@ -41553,31 +41894,155 @@ async function postPartyMetalVoucher(connection, req, access, branchScope, confi
   }
 
   if (config.kind === "PAYMENT") {
-    await connection.query(
-      `
-      INSERT INTO transaction_lines
-      (transaction_id, line_no, item_name, qty, line_amount, remarks)
-      VALUES (?, 1, ?, 1, ?, ?)
-      `,
-      [transactionId, config.lineItemName || "Party Payment", paymentDetails.amount, remarks]
-    );
+    if (paymentDetails.settlementType === "METAL") {
+      await connection.query(
+        `
+        INSERT INTO transaction_lines
+        (
+          transaction_id, line_no, item_name, metal_type, purity, gross_weight,
+          fine_weight, qty, rate_per_gram, metal_value, making_charge, making_basis, line_amount, remarks
+        )
+        VALUES (?, 1, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'FIXED', ?, ?)
+        `,
+        [
+          transactionId,
+          metalDetails.productName,
+          metalDetails.metalType,
+          metalDetails.purity,
+          metalDetails.grossWeight,
+          metalDetails.fineWeight,
+          metalDetails.ratePerGram,
+          metalDetails.makingCharge,
+          metalDetails.makingValue,
+          remarks
+        ]
+      );
 
-    await createCashLedgerEntry(connection, {
-      companyId: access.companyScope,
-      partyId,
-      transactionId,
-      entryDate: voucherDate,
-      entryType: config.cashEntryType || "DEBIT",
-      debitAmount: config.cashEntryType === "CREDIT" ? 0 : paymentDetails.amount,
-      creditAmount: config.cashEntryType === "CREDIT" ? paymentDetails.amount : 0,
-      referenceType: config.transactionType,
-      referenceNo: voucherNo,
-      remarks,
-      paymentMode: paymentDetails.paymentMode,
-      accountId: paymentDetails.accountId,
-      branchId,
-      createdBy: finalUserId
-    });
+      await createMetalLedgerEntry(connection, {
+        companyId: access.companyScope,
+        partyId,
+        transactionId,
+        entryDate: voucherDate,
+        metalType: metalDetails.metalType,
+        entryType: "OUT",
+        purity: metalDetails.purity,
+        grossIn: 0,
+        grossOut: metalDetails.grossWeight,
+        fineIn: 0,
+        fineOut: metalDetails.fineWeight,
+        referenceType: config.transactionType,
+        referenceNo: voucherNo,
+        remarks: remarks || "Metal settlement given",
+        branchId,
+        createdBy: finalUserId
+      });
+
+      if (paymentDetails.amount > 0) {
+        await createCashLedgerEntry(connection, {
+          companyId: access.companyScope,
+          partyId,
+          transactionId,
+          entryDate: voucherDate,
+          entryType: "DEBIT",
+          debitAmount: paymentDetails.amount,
+          creditAmount: 0,
+          referenceType: config.transactionType,
+          referenceNo: voucherNo,
+          remarks: remarks || "Making charge paid for metal settlement",
+          paymentMode: paymentDetails.paymentMode,
+          accountId: paymentDetails.accountId,
+          branchId,
+          createdBy: finalUserId
+        });
+      }
+
+      await connection.query(
+        `
+        INSERT INTO transaction_settlements
+        (
+          company_id, transaction_id, settlement_type, against_transaction_id,
+          against_invoice_no, against_voucher_no, cash_amount, metal_type,
+          gross_weight, fine_weight, purity, rate_basis, settlement_date,
+          remarks, created_by
+        )
+        VALUES (?, ?, 'METAL', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          access.companyScope,
+          transactionId,
+          referenceNo,
+          voucherNo,
+          paymentDetails.amount,
+          metalDetails.metalType,
+          metalDetails.grossWeight,
+          metalDetails.fineWeight,
+          metalDetails.purity,
+          metalDetails.ratePerGram,
+          voucherDate || null,
+          remarks || "Metal settlement given",
+          finalUserId
+        ]
+      );
+    } else {
+      await connection.query(
+        `
+        INSERT INTO transaction_lines
+        (transaction_id, line_no, item_name, qty, line_amount, remarks)
+        VALUES (?, 1, ?, 1, ?, ?)
+        `,
+        [transactionId, config.lineItemName || "Party Payment", paymentDetails.amount, remarks]
+      );
+
+      await createCashLedgerEntry(connection, {
+        companyId: access.companyScope,
+        partyId,
+        transactionId,
+        entryDate: voucherDate,
+        entryType: config.cashEntryType || "DEBIT",
+        debitAmount: config.cashEntryType === "CREDIT" ? 0 : paymentDetails.amount,
+        creditAmount: config.cashEntryType === "CREDIT" ? paymentDetails.amount : 0,
+        referenceType: config.transactionType,
+        referenceNo: voucherNo,
+        remarks,
+        paymentMode: paymentDetails.paymentMode,
+        accountId: paymentDetails.accountId,
+        branchId,
+        createdBy: finalUserId
+      });
+
+      await connection.query(
+        `
+        INSERT INTO transaction_settlements
+        (
+          company_id, transaction_id, settlement_type, against_transaction_id,
+          against_invoice_no, against_voucher_no, cash_amount, metal_type,
+          fine_weight, rate_basis, settlement_date,
+          remarks, created_by
+        )
+        VALUES (?, ?, 'CASH', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          access.companyScope,
+          transactionId,
+          referenceNo,
+          voucherNo,
+          paymentDetails.amount,
+          paymentDetails.allocationPreview?.metalType || "",
+          toNumber(paymentDetails.allocationPreview?.fineSettled),
+          toNumber(paymentDetails.allocationPreview?.metalRate),
+          voucherDate || null,
+          [
+            "Cash allocation tracking:",
+            paymentDetails.allocationPreview?.makingDueAvailable ? "tracked" : "legacy combined due",
+            `making=${toNumber(paymentDetails.allocationPreview?.appliedToMaking).toFixed(2)}`,
+            `fineCash=${toNumber(paymentDetails.allocationPreview?.appliedToFine).toFixed(2)}`,
+            `fineWeight=${toNumber(paymentDetails.allocationPreview?.fineSettled).toFixed(3)}`,
+            remarks || ""
+          ].filter(Boolean).join(" "),
+          finalUserId
+        ]
+      );
+    }
   }
 
   if (config.kind === "FINISHED_GOODS") {
@@ -41707,6 +42172,39 @@ app.post("/transaction/party-metal/payment", authMiddleware, (req, res) => handl
   note: "Payment given to party"
 }));
 
+app.get("/transaction/party-metal/payment-allocation-preview", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const partyId = Number(req.query.partyId || req.query.party_id || 0);
+    const branchId = getPartyMetalBranchId(branchScope, req.query.branchId ?? req.query.branch_id);
+    const amount = toNumber(req.query.amount ?? req.query.cashAmount ?? req.query.cash_amount);
+    if (!partyId || !branchId || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Party, branch, and amount are required for allocation preview" });
+    }
+    await assertPartyMetalBranch(pool, access, branchScope, branchId);
+    const party = await getPartyByIdForCompany(pool, access.companyScope, partyId);
+    if (!party) return res.status(404).json({ success: false, message: "Party not found" });
+
+    const preview = await buildPartyMetalCashAllocationPreview(pool, {
+      companyId: access.companyScope,
+      partyId,
+      branchId,
+      amount,
+      metalType: req.query.metalType || req.query.metal_type,
+      metalRate: req.query.metalRate ?? req.query.metal_rate ?? req.query.rateBasis ?? req.query.rate_basis
+    });
+
+    return res.json({ success: true, preview });
+  } catch (error) {
+    console.error("Party metal payment allocation preview error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Allocation preview failed", error: getErrorDetail(error) });
+  }
+});
+
 function getPartyMetalReportWhere(access, branchScope, req, alias = "tm") {
   const partyId = Number(req.query.partyId || req.query.party_id || 0);
   const partyType = normalizePartyMetalPartyType(req.query.partyType || req.query.party_type);
@@ -41754,8 +42252,8 @@ function getPartyMetalAmountEffects(row = {}) {
   const totalLineAmount = toNumber(row.line_amount ?? row.metal_value);
   const cashDebit = toNumber(row.cash_debit ?? row.payment_amount);
   const cashCredit = toNumber(row.cash_credit);
-  if (type === "METAL_RECEIVED") return { receivedValue: lineValue, returnedValue: 0, paid: 0, dueEffect: lineValue };
-  if (type === "METAL_RECEIVED_REVERSAL") return { receivedValue: -lineValue, returnedValue: 0, paid: 0, dueEffect: -lineValue };
+  if (type === "METAL_RECEIVED") return { receivedValue: totalLineAmount, returnedValue: 0, paid: 0, dueEffect: totalLineAmount };
+  if (type === "METAL_RECEIVED_REVERSAL") return { receivedValue: -totalLineAmount, returnedValue: 0, paid: 0, dueEffect: -totalLineAmount };
   if (type === "METAL_GIVEN") return { receivedValue: 0, returnedValue: lineValue, paid: 0, dueEffect: -lineValue };
   if (type === "METAL_GIVEN_REVERSAL") return { receivedValue: 0, returnedValue: -lineValue, paid: 0, dueEffect: lineValue };
   if (type === "FINISHED_GOODS_SENT") return { receivedValue: totalLineAmount, returnedValue: 0, paid: 0, dueEffect: totalLineAmount };
@@ -41799,7 +42297,15 @@ async function getPartyMetalReportRows(connection, whereParts, params) {
       COALESCE(line_totals.metal_value, 0) AS metal_value,
       COALESCE(line_totals.line_amount, 0) AS line_amount,
       COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
-      COALESCE(cash_totals.cash_credit, 0) AS cash_credit
+      COALESCE(cash_totals.cash_credit, 0) AS cash_credit,
+      COALESCE(settlement_totals.settlement_type, '') AS settlement_type,
+      COALESCE(settlement_totals.cash_settlement_amount, 0) AS cash_settlement_amount,
+      COALESCE(settlement_totals.metal_settlement_cash_amount, 0) AS metal_settlement_cash_amount,
+      COALESCE(settlement_totals.settlement_metal_type, '') AS settlement_metal_type,
+      COALESCE(settlement_totals.settlement_gross_weight, 0) AS settlement_gross_weight,
+      COALESCE(settlement_totals.settlement_fine_weight, 0) AS settlement_fine_weight,
+      COALESCE(settlement_totals.settlement_rate_basis, 0) AS settlement_rate_basis,
+      COALESCE(settlement_totals.settlement_remarks, '') AS settlement_remarks
     FROM transaction_master tm
     LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
     ${getTransactionBranchJoinSql("tm")}
@@ -41832,12 +42338,121 @@ async function getPartyMetalReportRows(connection, whereParts, params) {
       FROM cash_ledger
       GROUP BY transaction_id
     ) cash_totals ON cash_totals.transaction_id = tm.id
+    LEFT JOIN (
+      SELECT transaction_id,
+        MAX(UPPER(COALESCE(settlement_type, ''))) AS settlement_type,
+        SUM(CASE WHEN UPPER(COALESCE(settlement_type, '')) = 'CASH' THEN COALESCE(cash_amount, 0) ELSE 0 END) AS cash_settlement_amount,
+        SUM(CASE WHEN UPPER(COALESCE(settlement_type, '')) = 'METAL' THEN COALESCE(cash_amount, 0) ELSE 0 END) AS metal_settlement_cash_amount,
+        MAX(COALESCE(metal_type, '')) AS settlement_metal_type,
+        SUM(COALESCE(gross_weight, 0)) AS settlement_gross_weight,
+        SUM(COALESCE(fine_weight, 0)) AS settlement_fine_weight,
+        MAX(COALESCE(rate_basis, 0)) AS settlement_rate_basis,
+        MAX(COALESCE(remarks, '')) AS settlement_remarks
+      FROM transaction_settlements
+      GROUP BY transaction_id
+    ) settlement_totals ON settlement_totals.transaction_id = tm.id
     WHERE ${whereParts.join(" AND ")}
     ORDER BY tm.voucher_date ASC, tm.id ASC
     `,
     params
   );
   return rows;
+}
+
+function getPartyMetalLedgerMovement(row = {}) {
+  const type = String(row.transaction_type || "").trim().toUpperCase();
+  const settlementType = String(row.settlement_type || "").trim().toUpperCase();
+  const settlementRemarks = String(row.settlement_remarks || "");
+  const lineAmount = toNumber(row.line_amount);
+  const metalValue = toNumber(row.metal_value);
+  const lineFineWeight = toNumber(row.line_fine_weight);
+  const ledgerFineIn = toNumber(row.fine_in);
+  const ledgerFineOut = toNumber(row.fine_out);
+  const settlementFineWeight = toNumber(row.settlement_fine_weight);
+  const settlementRate = toNumber(row.settlement_rate_basis);
+  const cashDebit = toNumber(row.cash_debit);
+  const cashCredit = toNumber(row.cash_credit);
+  const makingValue = Math.max(lineAmount - metalValue, 0);
+  const trackedCashAllocation = settlementType === "CASH" && /^Cash allocation tracking:\s*tracked/i.test(settlementRemarks);
+  const isCashAllocationReversal = type === "PAYMENT_GIVEN_REVERSAL" && settlementType === "CASH" && settlementFineWeight < -0.0005;
+  const isMetalSettlementReversal = type === "PAYMENT_GIVEN_REVERSAL" && settlementType === "METAL";
+  const legacyCashSettlement = type === "PAYMENT_GIVEN" && cashDebit > 0 && !trackedCashAllocation && settlementType !== "METAL";
+  const legacyCashSettlementReversal = type === "PAYMENT_GIVEN_REVERSAL" && cashCredit > 0 && settlementType !== "METAL" && !isCashAllocationReversal;
+  const cashSettlementAmount = toNumber(row.cash_settlement_amount) || cashDebit;
+  const fineCashValue = settlementFineWeight > 0 && settlementRate > 0 ? settlementFineWeight * settlementRate : 0;
+  const trackedMakingPaid = trackedCashAllocation ? Math.max(cashSettlementAmount - fineCashValue, 0) : 0;
+  const metalSettlementCash = toNumber(row.metal_settlement_cash_amount) || (settlementType === "METAL" ? cashDebit : 0);
+
+  const movement = {
+    transactionLabel: type === "METAL_GIVEN" ? "Metal Returned" : String(row.transaction_type || "").replace(/_/g, " "),
+    metalType: normalizeMetalType(row.settlement_metal_type) || normalizeMetalType(row.metal_type),
+    grossIn: toNumber(row.gross_in),
+    grossOut: toNumber(row.gross_out),
+    fineIn: 0,
+    fineOut: 0,
+    makingDue: 0,
+    makingPaid: 0,
+    cashDue: 0,
+    cashPaid: 0,
+    legacyCombinedEffect: 0,
+    legacyCombined: false,
+    note: ""
+  };
+
+  if (type === "METAL_RECEIVED") {
+    movement.fineIn = ledgerFineIn || lineFineWeight;
+    movement.makingDue = makingValue;
+    movement.cashDue = lineAmount;
+  } else if (type === "METAL_RECEIVED_REVERSAL") {
+    movement.fineOut = Math.abs(ledgerFineOut || lineFineWeight);
+    movement.makingPaid = makingValue;
+    movement.cashPaid = lineAmount;
+  } else if (type === "FINISHED_GOODS_SENT") {
+    movement.fineOut = lineFineWeight || ledgerFineOut;
+  } else if (type === "FINISHED_GOODS_SENT_REVERSAL") {
+    movement.fineIn = lineFineWeight || ledgerFineIn;
+  } else if (type === "METAL_GIVEN") {
+    movement.fineOut = ledgerFineOut || lineFineWeight;
+  } else if (type === "METAL_GIVEN_REVERSAL") {
+    movement.fineIn = ledgerFineIn || lineFineWeight;
+  } else if (type === "PAYMENT_GIVEN") {
+    movement.cashPaid = cashDebit;
+    if (settlementType === "METAL") {
+      movement.fineOut = ledgerFineOut || settlementFineWeight;
+      movement.makingPaid = metalSettlementCash;
+    } else if (trackedCashAllocation) {
+      movement.fineOut = settlementFineWeight;
+      movement.makingPaid = trackedMakingPaid;
+    } else if (legacyCashSettlement) {
+      movement.legacyCombinedEffect = -cashDebit;
+      movement.legacyCombined = true;
+      movement.note = "Legacy combined settlement; making/fine split unavailable.";
+    }
+  } else if (type === "PAYMENT_GIVEN_REVERSAL") {
+    movement.cashDue = cashCredit;
+    if (isMetalSettlementReversal) {
+      movement.fineIn = ledgerFineIn || Math.abs(settlementFineWeight);
+      movement.makingDue = Math.abs(toNumber(row.metal_settlement_cash_amount)) || cashCredit;
+    } else if (isCashAllocationReversal) {
+      const reversedCashAmount = Math.abs(toNumber(row.cash_settlement_amount)) || cashCredit;
+      const reversedFineWeight = Math.abs(settlementFineWeight);
+      const reversedFineCashValue = reversedFineWeight > 0 && settlementRate > 0 ? reversedFineWeight * settlementRate : 0;
+      movement.fineIn = reversedFineWeight;
+      movement.makingDue = Math.max(reversedCashAmount - reversedFineCashValue, 0);
+    } else if (legacyCashSettlementReversal) {
+      movement.legacyCombinedEffect = cashCredit;
+      movement.legacyCombined = true;
+      movement.note = "Legacy combined settlement reversal; making/fine split unavailable.";
+    } else {
+      movement.legacyCombinedEffect = cashCredit;
+    }
+  } else if (type === "PAYMENT_RECEIVED") {
+    movement.cashPaid = cashCredit;
+  } else if (type === "PAYMENT_RECEIVED_REVERSAL") {
+    movement.cashDue = cashDebit;
+  }
+
+  return movement;
 }
 
 app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
@@ -41852,6 +42467,10 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
 
     const runningMetalByPartyType = new Map();
     const runningDueByParty = new Map();
+    const runningMakingDueByParty = new Map();
+    const runningCashDueByParty = new Map();
+    const runningLegacyCombinedByParty = new Map();
+    const hasLegacyCombinedByParty = new Set();
     const openingRows = [];
     const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
 
@@ -41878,11 +42497,12 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
         partyNames.set(String(partyId), row.party_name || "");
         partyTypes.set(String(partyId), row.party_type || "");
         const effects = getPartyMetalAmountEffects(row);
-        const grossIn = toNumber(row.gross_in);
-        const grossOut = toNumber(row.gross_out);
-        const fineIn = toNumber(row.fine_in);
-        const fineOut = toNumber(row.fine_out);
-        const metalType = normalizeMetalType(row.metal_type) || "CASH";
+        const movement = getPartyMetalLedgerMovement(row);
+        const grossIn = toNumber(movement.grossIn);
+        const grossOut = toNumber(movement.grossOut);
+        const fineIn = toNumber(movement.fineIn);
+        const fineOut = toNumber(movement.fineOut);
+        const metalType = normalizeMetalType(movement.metalType) || "CASH";
         const metalBalanceKey = `${partyId}|${metalType}`;
         const previousMetal = runningMetalByPartyType.get(metalBalanceKey) || { gross: 0, fine: 0 };
         runningMetalByPartyType.set(metalBalanceKey, {
@@ -41891,6 +42511,10 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
         });
         const dueBalanceKey = String(partyId);
         runningDueByParty.set(dueBalanceKey, toNumber(runningDueByParty.get(dueBalanceKey)) + effects.dueEffect);
+        runningMakingDueByParty.set(dueBalanceKey, toNumber(runningMakingDueByParty.get(dueBalanceKey)) + toNumber(movement.makingDue) - toNumber(movement.makingPaid));
+        runningCashDueByParty.set(dueBalanceKey, toNumber(runningCashDueByParty.get(dueBalanceKey)) + toNumber(movement.cashDue) - toNumber(movement.cashPaid));
+        runningLegacyCombinedByParty.set(dueBalanceKey, toNumber(runningLegacyCombinedByParty.get(dueBalanceKey)) + toNumber(movement.legacyCombinedEffect));
+        if (movement.legacyCombined) hasLegacyCombinedByParty.add(dueBalanceKey);
       }
 
       const openingPartyIds = new Set([
@@ -41912,12 +42536,16 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
         if (!metalEntries.length) metalEntries.push([`${partyKey}|`, { gross: 0, fine: 0 }]);
         metalEntries.forEach(([key, metal]) => {
           const metalType = key.split("|")[1] || "";
+          const runningMakingDue = hasLegacyCombinedByParty.has(partyKey)
+            ? toNumber(runningDueByParty.get(partyKey))
+            : toNumber(runningMakingDueByParty.get(partyKey));
           openingRows.push({
             id: `opening-${partyKey}-${metalType || "cash"}`,
             voucher_date: fromDate,
             voucher_no: "Opening Balance",
             reference_no: "",
             transaction_type: "OPENING_BALANCE",
+            transaction_label: "Opening Balance",
             party_id: Number(partyKey),
             party_name: partyNames.get(partyKey) || "",
             party_type: partyTypes.get(partyKey) || "",
@@ -41932,8 +42560,16 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
             payment: 0,
             running_gross_balance: metal.gross,
             running_fine_balance: metal.fine,
+            making_due: 0,
+            making_paid: 0,
+            running_making_due: runningMakingDue,
+            cash_due: 0,
+            cash_paid: 0,
+            running_cash_due: toNumber(runningCashDueByParty.get(partyKey)),
+            legacy_combined_due: hasLegacyCombinedByParty.has(partyKey),
             due_balance: toNumber(runningDueByParty.get(partyKey)),
-            branch_label: "Opening"
+            branch_label: "Opening",
+            remarks: hasLegacyCombinedByParty.has(partyKey) ? "Opening includes legacy combined due." : ""
           });
         });
       }
@@ -41941,11 +42577,12 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
 
     const ledgerRows = rows.map((row) => {
       const effects = getPartyMetalAmountEffects(row);
-      const grossIn = toNumber(row.gross_in);
-      const grossOut = toNumber(row.gross_out);
-      const fineIn = toNumber(row.fine_in);
-      const fineOut = toNumber(row.fine_out);
-      const metalType = normalizeMetalType(row.metal_type) || "CASH";
+      const movement = getPartyMetalLedgerMovement(row);
+      const grossIn = toNumber(movement.grossIn);
+      const grossOut = toNumber(movement.grossOut);
+      const fineIn = toNumber(movement.fineIn);
+      const fineOut = toNumber(movement.fineOut);
+      const metalType = normalizeMetalType(movement.metalType) || "CASH";
       const metalBalanceKey = `${Number(row.party_id || 0)}|${metalType}`;
       const dueBalanceKey = String(Number(row.party_id || 0));
       const previousMetal = runningMetalByPartyType.get(metalBalanceKey) || { gross: 0, fine: 0 };
@@ -41956,8 +42593,17 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
       runningMetalByPartyType.set(metalBalanceKey, nextMetal);
       const runningDue = toNumber(runningDueByParty.get(dueBalanceKey)) + effects.dueEffect;
       runningDueByParty.set(dueBalanceKey, runningDue);
+      const runningMakingTracked = toNumber(runningMakingDueByParty.get(dueBalanceKey)) + toNumber(movement.makingDue) - toNumber(movement.makingPaid);
+      const runningCashDue = toNumber(runningCashDueByParty.get(dueBalanceKey)) + toNumber(movement.cashDue) - toNumber(movement.cashPaid);
+      const runningLegacyCombined = toNumber(runningLegacyCombinedByParty.get(dueBalanceKey)) + toNumber(movement.legacyCombinedEffect);
+      runningMakingDueByParty.set(dueBalanceKey, runningMakingTracked);
+      runningCashDueByParty.set(dueBalanceKey, runningCashDue);
+      runningLegacyCombinedByParty.set(dueBalanceKey, runningLegacyCombined);
+      if (movement.legacyCombined) hasLegacyCombinedByParty.add(dueBalanceKey);
+      const runningMakingDue = hasLegacyCombinedByParty.has(dueBalanceKey) ? runningDue : runningMakingTracked;
       return {
         ...row,
+        transaction_label: movement.transactionLabel,
         metal_type: metalType === "CASH" ? "" : metalType,
         gross_in: grossIn,
         gross_out: grossOut,
@@ -41969,8 +42615,16 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
         payment: effects.paid,
         running_gross_balance: nextMetal.gross,
         running_fine_balance: nextMetal.fine,
+        making_due: toNumber(movement.makingDue),
+        making_paid: toNumber(movement.makingPaid),
+        running_making_due: runningMakingDue,
+        cash_due: toNumber(movement.cashDue),
+        cash_paid: toNumber(movement.cashPaid),
+        running_cash_due: runningCashDue,
+        legacy_combined_due: hasLegacyCombinedByParty.has(dueBalanceKey),
         due_balance: runningDue,
-        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned")
+        branch_label: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned"),
+        remarks: [row.line_remarks || row.settlement_remarks || "", movement.note].filter(Boolean).join(" | ")
       };
     });
 
@@ -41979,6 +42633,8 @@ app.get("/transaction/party-metal/ledger", authMiddleware, async (req, res) => {
       rows: [...openingRows, ...ledgerRows],
       summary: {
         partyDueBalances: Object.fromEntries(runningDueByParty),
+        partyMakingDueBalances: Object.fromEntries(runningMakingDueByParty),
+        partyCashDueBalances: Object.fromEntries(runningCashDueByParty),
         partyMetalBalances: Object.fromEntries([...runningMetalByPartyType.entries()].map(([key, value]) => [key, value]))
       },
       branchScope: getBranchScopeResponse(branchScope)
@@ -42027,7 +42683,214 @@ function getPartyMetalStatementLine(row = {}, runningDue = 0) {
   };
 }
 
+function getPartyMetalStatementRow(row = {}, movement = {}, balances = {}) {
+  return {
+    id: row.id,
+    transactionId: row.id,
+    voucherNo: row.voucher_no || "",
+    date: row.voucher_date || "",
+    transactionType: String(row.transaction_type || "").trim().toUpperCase(),
+    transactionLabel: movement.transactionLabel || String(row.transaction_type || "").replace(/_/g, " "),
+    reference: row.reference_no || "",
+    partyId: row.party_id,
+    partyName: row.party_name || "",
+    partyType: row.party_type || "",
+    branchLabel: row.branch_name || row.branch_code || (row.branch_id ? `Branch #${row.branch_id}` : "Unassigned"),
+    metalType: movement.metalType || normalizeMetalType(row.metal_type),
+    grossIn: toNumber(movement.grossIn),
+    grossOut: toNumber(movement.grossOut),
+    fineIn: toNumber(movement.fineIn),
+    fineOut: toNumber(movement.fineOut),
+    runningFineBalance: toNumber(balances.runningFineBalance),
+    makingDue: toNumber(movement.makingDue),
+    makingPaid: toNumber(movement.makingPaid),
+    runningMakingDue: toNumber(balances.runningMakingDue),
+    cashDue: toNumber(movement.cashDue),
+    cashPaid: toNumber(movement.cashPaid),
+    runningCashDue: toNumber(balances.runningCashDue),
+    legacyCombined: Boolean(balances.legacyCombined),
+    remarks: [row.line_remarks || row.settlement_remarks || "", movement.note || ""].filter(Boolean).join(" | "),
+    reversalUrl: `transaction-reversal.html?search=${encodeURIComponent(row.voucher_no || row.id || "")}`
+  };
+}
+
 app.get("/transaction/party-metal/statement", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
+    if (!access.ok) return sendAccessError(res, access);
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) return sendAccessError(res, branchScope);
+
+    const statementReq = {
+      query: {
+        ...req.query,
+        metalType: "",
+        metal_type: ""
+      }
+    };
+    const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, statementReq);
+    const requestedMetalType = normalizeMetalType(req.query.metalType || req.query.metal_type);
+    const allRows = await getPartyMetalReportRows(pool, whereParts, params);
+    const rows = requestedMetalType
+      ? allRows.filter((row) => normalizeMetalType(getPartyMetalLedgerMovement(row).metalType) === requestedMetalType)
+      : allRows;
+    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
+    const toDate = String(req.query.toDate || req.query.to_date || "").trim();
+    const requestedPartyId = Number(req.query.partyId || req.query.party_id || 0);
+    const companySettings = normalizeCompanySettingsRow(await getCompanySettingsForCompany(pool, access.companyScope));
+    const company = {
+      name: companySettings.company_name || "",
+      address: companySettings.address || "",
+      gstin: companySettings.gstin || ""
+    };
+    const runningMetalByPartyType = new Map();
+    const runningMakingDueByParty = new Map();
+    const runningCashDueByParty = new Map();
+    const runningLegacyCombinedByParty = new Map();
+    const hasLegacyCombinedByParty = new Set();
+    const opening = {
+      fineBalance: 0,
+      makingDue: 0,
+      cashDue: 0,
+      legacyCombined: false
+    };
+
+    if (fromDate) {
+      const openingReq = { query: { ...statementReq.query, fromDate: "", from_date: "", toDate: "", to_date: "" } };
+      const openingWhere = getPartyMetalReportWhere(access, branchScope, openingReq);
+      openingWhere.whereParts.push("tm.voucher_date < ?");
+      openingWhere.params.push(fromDate);
+      const allOpeningRows = await getPartyMetalReportRows(pool, openingWhere.whereParts, openingWhere.params);
+      const openingRows = requestedMetalType
+        ? allOpeningRows.filter((row) => normalizeMetalType(getPartyMetalLedgerMovement(row).metalType) === requestedMetalType)
+        : allOpeningRows;
+      openingRows.forEach((row) => {
+        const partyKey = String(Number(row.party_id || 0));
+        const movement = getPartyMetalLedgerMovement(row);
+        const metalType = normalizeMetalType(movement.metalType) || "CASH";
+        const metalKey = `${partyKey}|${metalType}`;
+        const previousMetal = runningMetalByPartyType.get(metalKey) || { gross: 0, fine: 0 };
+        runningMetalByPartyType.set(metalKey, {
+          gross: previousMetal.gross + toNumber(movement.grossIn) - toNumber(movement.grossOut),
+          fine: previousMetal.fine + toNumber(movement.fineIn) - toNumber(movement.fineOut)
+        });
+        runningMakingDueByParty.set(partyKey, toNumber(runningMakingDueByParty.get(partyKey)) + toNumber(movement.makingDue) - toNumber(movement.makingPaid));
+        runningCashDueByParty.set(partyKey, toNumber(runningCashDueByParty.get(partyKey)) + toNumber(movement.cashDue) - toNumber(movement.cashPaid));
+        runningLegacyCombinedByParty.set(partyKey, toNumber(runningLegacyCombinedByParty.get(partyKey)) + toNumber(movement.legacyCombinedEffect));
+        if (movement.legacyCombined) hasLegacyCombinedByParty.add(partyKey);
+      });
+    }
+
+    const openingPartyKeys = requestedPartyId
+      ? [String(requestedPartyId)]
+      : Array.from(new Set([...runningMakingDueByParty.keys(), ...runningCashDueByParty.keys(), ...Array.from(runningMetalByPartyType.keys()).map((key) => key.split("|")[0])]));
+    opening.fineBalance = openingPartyKeys.reduce((total, partyKey) => {
+      return total + Array.from(runningMetalByPartyType.entries())
+        .filter(([key]) => key.startsWith(`${partyKey}|`) && (!requestedMetalType || key.endsWith(`|${requestedMetalType}`)))
+        .reduce((sum, [, metal]) => sum + toNumber(metal.fine), 0);
+    }, 0);
+    opening.makingDue = openingPartyKeys.reduce((total, partyKey) => {
+      const legacy = hasLegacyCombinedByParty.has(partyKey);
+      return total + toNumber(runningMakingDueByParty.get(partyKey)) + (legacy ? toNumber(runningLegacyCombinedByParty.get(partyKey)) : 0);
+    }, 0);
+    opening.cashDue = openingPartyKeys.reduce((total, partyKey) => total + toNumber(runningCashDueByParty.get(partyKey)), 0);
+    opening.legacyCombined = openingPartyKeys.some((partyKey) => hasLegacyCombinedByParty.has(partyKey));
+
+    const statementRows = [];
+    let partyHeaderSource = rows[0] || null;
+    rows.forEach((row) => {
+      if (!partyHeaderSource) partyHeaderSource = row;
+      const partyKey = String(Number(row.party_id || 0));
+      const movement = getPartyMetalLedgerMovement(row);
+      const metalType = normalizeMetalType(movement.metalType) || "CASH";
+      const metalKey = `${partyKey}|${metalType}`;
+      const previousMetal = runningMetalByPartyType.get(metalKey) || { gross: 0, fine: 0 };
+      const nextMetal = {
+        gross: previousMetal.gross + toNumber(movement.grossIn) - toNumber(movement.grossOut),
+        fine: previousMetal.fine + toNumber(movement.fineIn) - toNumber(movement.fineOut)
+      };
+      runningMetalByPartyType.set(metalKey, nextMetal);
+      const runningMakingTracked = toNumber(runningMakingDueByParty.get(partyKey)) + toNumber(movement.makingDue) - toNumber(movement.makingPaid);
+      const runningCashDue = toNumber(runningCashDueByParty.get(partyKey)) + toNumber(movement.cashDue) - toNumber(movement.cashPaid);
+      const runningLegacyCombined = toNumber(runningLegacyCombinedByParty.get(partyKey)) + toNumber(movement.legacyCombinedEffect);
+      runningMakingDueByParty.set(partyKey, runningMakingTracked);
+      runningCashDueByParty.set(partyKey, runningCashDue);
+      runningLegacyCombinedByParty.set(partyKey, runningLegacyCombined);
+      if (movement.legacyCombined) hasLegacyCombinedByParty.add(partyKey);
+      const legacyCombined = hasLegacyCombinedByParty.has(partyKey);
+      statementRows.push(getPartyMetalStatementRow(row, movement, {
+        runningFineBalance: nextMetal.fine,
+        runningMakingDue: legacyCombined ? runningMakingTracked + runningLegacyCombined : runningMakingTracked,
+        runningCashDue,
+        legacyCombined
+      }));
+    });
+
+    const closingPartyKeys = requestedPartyId
+      ? [String(requestedPartyId)]
+      : Array.from(new Set([...runningMakingDueByParty.keys(), ...runningCashDueByParty.keys(), ...Array.from(runningMetalByPartyType.keys()).map((key) => key.split("|")[0])]));
+    const closing = {
+      fineBalance: closingPartyKeys.reduce((total, partyKey) => {
+        return total + Array.from(runningMetalByPartyType.entries())
+          .filter(([key]) => key.startsWith(`${partyKey}|`) && (!requestedMetalType || key.endsWith(`|${requestedMetalType}`)))
+          .reduce((sum, [, metal]) => sum + toNumber(metal.fine), 0);
+      }, 0),
+      makingDue: closingPartyKeys.reduce((total, partyKey) => {
+        const legacy = hasLegacyCombinedByParty.has(partyKey);
+        return total + toNumber(runningMakingDueByParty.get(partyKey)) + (legacy ? toNumber(runningLegacyCombinedByParty.get(partyKey)) : 0);
+      }, 0),
+      cashDue: closingPartyKeys.reduce((total, partyKey) => total + toNumber(runningCashDueByParty.get(partyKey)), 0),
+      legacyCombined: closingPartyKeys.some((partyKey) => hasLegacyCombinedByParty.has(partyKey))
+    };
+
+    let party = {
+      id: requestedPartyId || Number(partyHeaderSource?.party_id || 0) || null,
+      name: partyHeaderSource?.party_name || "",
+      type: partyHeaderSource?.party_type || ""
+    };
+    if (requestedPartyId && !party.name) {
+      const masterParty = await getPartyByIdForCompany(pool, access.companyScope, requestedPartyId);
+      if (masterParty) party = { id: masterParty.id, name: masterParty.party_name || "", type: masterParty.party_type || "" };
+    }
+    const branchLabel = rows[0]?.branch_name || rows[0]?.branch_code || (branchScope.isBranchFiltered ? `Branch #${branchScope.branchId}` : "All Branches");
+    const summary = {
+      opening,
+      closing,
+      totalGrossIn: statementRows.reduce((sum, row) => sum + toNumber(row.grossIn), 0),
+      totalGrossOut: statementRows.reduce((sum, row) => sum + toNumber(row.grossOut), 0),
+      totalFineIn: statementRows.reduce((sum, row) => sum + toNumber(row.fineIn), 0),
+      totalFineOut: statementRows.reduce((sum, row) => sum + toNumber(row.fineOut), 0),
+      totalMakingDue: statementRows.reduce((sum, row) => sum + toNumber(row.makingDue), 0),
+      totalMakingPaid: statementRows.reduce((sum, row) => sum + toNumber(row.makingPaid), 0),
+      totalCashDue: statementRows.reduce((sum, row) => sum + toNumber(row.cashDue), 0),
+      totalCashPaid: statementRows.reduce((sum, row) => sum + toNumber(row.cashPaid), 0),
+      legacyCombined: closing.legacyCombined,
+      periodFrom: fromDate || "",
+      periodTo: toDate || "",
+      printDate: getTodayDateOnly()
+    };
+
+    return res.json({
+      success: true,
+      company,
+      party,
+      filters: {
+        branch: branchLabel,
+        metalType: requestedMetalType || "All Metals",
+        fromDate,
+        toDate
+      },
+      rows: statementRows,
+      summary,
+      branchScope: getBranchScopeResponse(branchScope)
+    });
+  } catch (error) {
+    console.error("Party metal statement error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal statement failed", error: getErrorDetail(error) });
+  }
+});
+
+app.get("/transaction/party-metal/dashboard", authMiddleware, async (req, res) => {
   try {
     const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
     if (!access.ok) return sendAccessError(res, access);
@@ -42036,102 +42899,194 @@ app.get("/transaction/party-metal/statement", authMiddleware, async (req, res) =
 
     const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
     const rows = await getPartyMetalReportRows(pool, whereParts, params);
-    const fromDate = String(req.query.fromDate || req.query.from_date || "").trim();
-    let openingDue = 0;
-    const openingMetal = { GOLD: { gross: 0, fine: 0 }, SILVER: { gross: 0, fine: 0 } };
-
-    if (fromDate) {
-      const openingReq = { query: { ...req.query, fromDate: "", from_date: "", toDate: "", to_date: "" } };
-      const openingWhere = getPartyMetalReportWhere(access, branchScope, openingReq);
-      openingWhere.whereParts.push("tm.voucher_date < ?");
-      openingWhere.params.push(fromDate);
-      const openingRows = await getPartyMetalReportRows(pool, openingWhere.whereParts, openingWhere.params);
-      openingRows.forEach((row) => {
-        const effects = getPartyMetalAmountEffects(row);
-        openingDue += effects.dueEffect;
-        const metalType = normalizeMetalType(row.metal_type);
-        if (openingMetal[metalType]) {
-          openingMetal[metalType].gross += toNumber(row.gross_in) - toNumber(row.gross_out);
-          openingMetal[metalType].fine += toNumber(row.fine_in) - toNumber(row.fine_out);
-        }
-      });
-    }
-
-    let runningDue = openingDue;
-    const statementRows = [];
-    if (fromDate) {
-      statementRows.push({
-        id: "opening",
-        transactionId: null,
-        voucherNo: "Opening Balance",
-        date: fromDate,
-        transactionType: "OPENING_BALANCE",
-        reference: "",
-        partyId: Number(req.query.partyId || req.query.party_id || 0) || null,
-        partyName: "",
-        partyType: "",
-        productOrMetal: "Opening Balance",
-        metalType: "",
-        lotNumber: "",
-        qty: 0,
-        grossWeight: 0,
-        fineWeight: 0,
-        metalValue: 0,
-        makingValue: 0,
-        totalValue: 0,
-        payment: 0,
-        balance: openingDue,
-        branchLabel: "Opening",
-        remarks: "Opening balance before selected From Date",
-        ratePerGram: 0,
-        makingCharge: 0,
-        reversalUrl: ""
-      });
-    }
-
-    rows.forEach((row) => {
-      const effects = getPartyMetalAmountEffects(row);
-      runningDue += effects.dueEffect;
-      statementRows.push(getPartyMetalStatementLine(row, runningDue));
-    });
-
-    const summary = statementRows.reduce((acc, row) => {
-      const type = String(row.transactionType || "").toUpperCase();
-      if (type === "FINISHED_GOODS_SENT") acc.totalFinishedGoodsSent += toNumber(row.totalValue);
-      if (type === "PAYMENT_RECEIVED") acc.totalPaymentReceived += toNumber(row.payment);
-      if (type === "PAYMENT_GIVEN") acc.totalPaymentGiven += toNumber(row.payment);
-      if (type === "METAL_RECEIVED") acc.totalMetalReceived += toNumber(row.totalValue);
-      if (type === "METAL_GIVEN") acc.totalMetalReturned += Math.abs(toNumber(row.totalValue));
-      return acc;
-    }, {
-      openingBalance: openingDue,
-      totalFinishedGoodsSent: 0,
-      totalPaymentReceived: 0,
-      totalPaymentGiven: 0,
+    const partyStats = new Map();
+    const metalBalanceByParty = new Map();
+    const monthlyMap = new Map();
+    const alerts = [];
+    const kpis = {
+      totalSilverFineDue: 0,
+      totalGoldFineDue: 0,
+      totalMakingDue: 0,
+      totalCashDue: 0,
       totalMetalReceived: 0,
       totalMetalReturned: 0,
-      currentDue: runningDue,
-      silverBalance: openingMetal.SILVER.gross,
-      goldBalance: openingMetal.GOLD.gross
-    });
+      totalFinishedGoodsSent: 0,
+      totalCashSettled: 0,
+      totalMetalSettled: 0,
+      legacyCombinedTotal: 0
+    };
 
-    rows.forEach((row) => {
-      const metalType = normalizeMetalType(row.metal_type);
-      if (metalType === "SILVER") summary.silverBalance += toNumber(row.gross_in) - toNumber(row.gross_out);
-      if (metalType === "GOLD") summary.goldBalance += toNumber(row.gross_in) - toNumber(row.gross_out);
-    });
+    function getPartyStat(row) {
+      const key = String(Number(row.party_id || 0));
+      if (!partyStats.has(key)) {
+        partyStats.set(key, {
+          partyId: Number(row.party_id || 0),
+          partyName: row.party_name || "",
+          partyType: row.party_type || "",
+          silverFineDue: 0,
+          goldFineDue: 0,
+          fineDue: 0,
+          makingDue: 0,
+          cashDue: 0,
+          legacyCombined: 0,
+          transactionCount: 0,
+          lastTransactionDate: ""
+        });
+      }
+      return partyStats.get(key);
+    }
 
-    const finishedGoodsHistory = statementRows.filter((row) => row.transactionType === "FINISHED_GOODS_SENT");
+    function getMonthlyBucket(dateValue) {
+      const key = String(dateValue || "").slice(0, 7) || "Unknown";
+      if (!monthlyMap.has(key)) {
+        monthlyMap.set(key, {
+          month: key,
+          metalReceived: 0,
+          metalReturned: 0,
+          finishedGoodsSent: 0,
+          cashSettlement: 0,
+          metalSettlement: 0,
+          makingCharges: 0
+        });
+      }
+      return monthlyMap.get(key);
+    }
+
+    for (const row of rows) {
+      const movement = getPartyMetalLedgerMovement(row);
+      const type = String(row.transaction_type || "").trim().toUpperCase();
+      const settlementType = String(row.settlement_type || "").trim().toUpperCase();
+      const partyKey = String(Number(row.party_id || 0));
+      const metalType = normalizeMetalType(movement.metalType);
+      const metalKey = `${partyKey}|${metalType || "NONE"}`;
+      const previousMetal = metalBalanceByParty.get(metalKey) || 0;
+      const nextMetal = previousMetal + toNumber(movement.fineIn) - toNumber(movement.fineOut);
+      metalBalanceByParty.set(metalKey, nextMetal);
+
+      const stat = getPartyStat(row);
+      stat.transactionCount += 1;
+      stat.lastTransactionDate = row.voucher_date || stat.lastTransactionDate;
+      stat.makingDue += toNumber(movement.makingDue) - toNumber(movement.makingPaid);
+      stat.cashDue += toNumber(movement.cashDue) - toNumber(movement.cashPaid);
+      stat.legacyCombined += toNumber(movement.legacyCombinedEffect);
+      if (metalType === "SILVER") stat.silverFineDue = nextMetal;
+      if (metalType === "GOLD") stat.goldFineDue = nextMetal;
+      stat.fineDue = stat.silverFineDue + stat.goldFineDue;
+
+      const month = getMonthlyBucket(row.voucher_date);
+      if (type === "METAL_RECEIVED") {
+        kpis.totalMetalReceived += toNumber(movement.fineIn);
+        month.metalReceived += toNumber(movement.fineIn);
+      }
+      if (type === "METAL_RECEIVED_REVERSAL") {
+        kpis.totalMetalReceived -= toNumber(movement.fineOut);
+        month.metalReceived -= toNumber(movement.fineOut);
+      }
+      if (type === "METAL_GIVEN") {
+        kpis.totalMetalReturned += toNumber(movement.fineOut);
+        month.metalReturned += toNumber(movement.fineOut);
+      }
+      if (type === "METAL_GIVEN_REVERSAL") {
+        kpis.totalMetalReturned -= toNumber(movement.fineIn);
+        month.metalReturned -= toNumber(movement.fineIn);
+      }
+      if (type === "FINISHED_GOODS_SENT") {
+        kpis.totalFinishedGoodsSent += toNumber(movement.fineOut);
+        month.finishedGoodsSent += toNumber(movement.fineOut);
+      }
+      if (type === "FINISHED_GOODS_SENT_REVERSAL") {
+        kpis.totalFinishedGoodsSent -= toNumber(movement.fineIn);
+        month.finishedGoodsSent -= toNumber(movement.fineIn);
+      }
+      if (type === "PAYMENT_GIVEN" && settlementType === "CASH") {
+        kpis.totalCashSettled += toNumber(movement.cashPaid);
+        month.cashSettlement += toNumber(movement.cashPaid);
+      }
+      if (type === "PAYMENT_GIVEN_REVERSAL" && settlementType === "CASH") {
+        kpis.totalCashSettled -= toNumber(movement.cashDue);
+        month.cashSettlement -= toNumber(movement.cashDue);
+      }
+      if (type === "PAYMENT_GIVEN" && settlementType === "METAL") {
+        kpis.totalMetalSettled += toNumber(movement.fineOut);
+        month.metalSettlement += toNumber(movement.fineOut);
+      }
+      if (type === "PAYMENT_GIVEN_REVERSAL" && settlementType === "METAL") {
+        kpis.totalMetalSettled -= toNumber(movement.fineIn);
+        month.metalSettlement -= toNumber(movement.fineIn);
+      }
+      if (toNumber(movement.makingDue) > 0) month.makingCharges += toNumber(movement.makingDue);
+      if (movement.legacyCombined) {
+        alerts.push({
+          type: "LEGACY_COMBINED",
+          severity: "WARNING",
+          partyId: stat.partyId,
+          partyName: stat.partyName,
+          voucherNo: row.voucher_no || "",
+          message: "Legacy combined record found; making/fine split unavailable."
+        });
+      }
+      if (type === "PAYMENT_GIVEN" && settlementType === "CASH" && movement.legacyCombined) {
+        alerts.push({
+          type: "PENDING_ALLOCATION",
+          severity: "WARNING",
+          partyId: stat.partyId,
+          partyName: stat.partyName,
+          voucherNo: row.voucher_no || "",
+          message: "Cash settlement allocation is legacy/untracked."
+        });
+      }
+    }
+
+    const parties = Array.from(partyStats.values()).map((party) => ({
+      ...party,
+      makingDue: party.makingDue + party.legacyCombined,
+      activityScore: party.transactionCount
+    }));
+    for (const party of parties) {
+      kpis.totalMakingDue += party.makingDue;
+      kpis.totalCashDue += party.cashDue;
+      kpis.legacyCombinedTotal += party.legacyCombined;
+      if (party.silverFineDue < -0.0005 || party.goldFineDue < -0.0005) {
+        alerts.push({ type: "NEGATIVE_FINE_BALANCE", severity: "FAIL", partyId: party.partyId, partyName: party.partyName, message: "Party has negative fine balance." });
+      }
+      if (party.makingDue < -0.009) {
+        alerts.push({ type: "NEGATIVE_MAKING_DUE", severity: "FAIL", partyId: party.partyId, partyName: party.partyName, message: "Party has negative making due." });
+      }
+      if (party.cashDue < -0.009) {
+        alerts.push({ type: "NEGATIVE_CASH_DUE", severity: "FAIL", partyId: party.partyId, partyName: party.partyName, message: "Party has negative cash due." });
+      }
+      if (party.silverFineDue < -0.0005 || party.goldFineDue < -0.0005 || party.makingDue < -0.009 || party.cashDue < -0.009) {
+        alerts.push({ type: "OVER_SETTLEMENT", severity: "FAIL", partyId: party.partyId, partyName: party.partyName, message: "Potential over settlement detected." });
+      }
+    }
+
+    kpis.totalSilverFineDue = parties.reduce((total, party) => total + toNumber(party.silverFineDue), 0);
+    kpis.totalGoldFineDue = parties.reduce((total, party) => total + toNumber(party.goldFineDue), 0);
+    const byFine = [...parties].sort((a, b) => Math.abs(b.fineDue) - Math.abs(a.fineDue)).slice(0, 10);
+    const byMaking = [...parties].sort((a, b) => Math.abs(b.makingDue) - Math.abs(a.makingDue)).slice(0, 10);
+    const byCash = [...parties].sort((a, b) => Math.abs(b.cashDue) - Math.abs(a.cashDue)).slice(0, 10);
+    const byActivity = [...parties].sort((a, b) => b.transactionCount - a.transactionCount).slice(0, 10);
+    const supplierTypes = new Set(["SUPPLIER", "BULLION_PARTY", "CUSTOMER_SUPPLIER"]);
+    const topLists = {
+      topSuppliers: [...parties].filter((party) => supplierTypes.has(String(party.partyType || "").toUpperCase())).sort((a, b) => Math.abs(b.fineDue) - Math.abs(a.fineDue)).slice(0, 10),
+      topKarigars: [...parties].filter((party) => String(party.partyType || "").toUpperCase() === "KARIGAR").sort((a, b) => Math.abs(b.makingDue) - Math.abs(a.makingDue)).slice(0, 10),
+      highestFineDue: byFine,
+      highestMakingDue: byMaking,
+      highestCashDue: byCash,
+      mostActiveParties: byActivity
+    };
+
     return res.json({
       success: true,
-      rows: statementRows,
-      finishedGoodsHistory,
-      summary,
+      kpis,
+      topLists,
+      monthlySeries: Array.from(monthlyMap.values()).sort((a, b) => String(a.month).localeCompare(String(b.month))),
+      alerts,
       branchScope: getBranchScopeResponse(branchScope)
     });
   } catch (error) {
-    console.error("Party metal statement error:", error);
-    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal statement failed", error: getErrorDetail(error) });
+    console.error("Party metal dashboard error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Party metal dashboard failed", error: getErrorDetail(error) });
   }
 });
 

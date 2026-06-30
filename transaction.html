@@ -611,6 +611,7 @@
                       <input type="hidden" id="txnParty" value="" />
                       <div class="txn-party-dropdown" id="txnPartyDropdown"></div>
                     </div>
+                    <button type="button" class="secondary-btn" id="txnAddPartyBtn">Add Party</button>
                   </div>
 
                   <div class="input-box">
@@ -2630,6 +2631,18 @@
         return;
       }
 
+      await addTxnPartyFromInput(typed);
+    });
+    document.getElementById("txnAddPartyBtn")?.addEventListener("click", async function () {
+      const typed = normalizePartySearchText(document.getElementById("txnPartySearch")?.value || "");
+      if (!typed) {
+        showToast("Type party name first", "error");
+        return;
+      }
+      if (findTxnPartyOption(typed)) {
+        showToast("Party already exists", "info");
+        return;
+      }
       await addTxnPartyFromInput(typed);
     });
     document.getElementById("txnPartySearch")?.addEventListener("blur", function () {
