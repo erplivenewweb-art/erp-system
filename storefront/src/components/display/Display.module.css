@@ -1,0 +1,17 @@
+.card { padding: var(--sf-space-6); border: var(--sf-border-hairline) solid var(--sf-component-card-border); border-radius: var(--sf-radius-large); background: var(--sf-component-card-background); box-shadow: var(--sf-elevation-subtle); }
+.badge, .status { display: inline-flex; align-items: center; gap: var(--sf-space-2); width: fit-content; padding: var(--sf-space-1) var(--sf-space-3); border-radius: var(--sf-radius-pill); font-size: var(--sf-font-size-small); font-weight: var(--sf-font-weight-semibold); }
+.badge { background: var(--sf-color-surface-subtle); color: var(--sf-color-text-secondary); }
+.badge.accent { background: var(--sf-color-semantic-danger-bg); color: var(--sf-color-brand-vermilion); }
+.status { background: var(--sf-color-surface-subtle); }
+.dot { inline-size: 0.5rem; block-size: 0.5rem; border-radius: var(--sf-radius-pill); background: currentColor; }
+.success { background: var(--sf-color-semantic-success-bg); color: var(--sf-color-semantic-success); }
+.warning { background: var(--sf-color-semantic-warning-bg); color: var(--sf-color-semantic-warning); }
+.danger { background: var(--sf-color-semantic-danger-bg); color: var(--sf-color-semantic-danger); }
+.info { background: var(--sf-color-semantic-info-bg); color: var(--sf-color-semantic-info); }
+.price { display: grid; gap: var(--sf-space-1); font-size: var(--sf-font-size-price); font-variant-numeric: tabular-nums; font-weight: var(--sf-font-weight-semibold); }
+.price small { color: var(--sf-color-text-muted); font-size: var(--sf-font-size-small); font-weight: var(--sf-font-weight-regular); }
+.currency { font-size: var(--sf-font-size-small); letter-spacing: var(--sf-font-tracking-overline); }
+.avatar { display: grid; place-items: center; inline-size: 3rem; block-size: 3rem; border-radius: var(--sf-radius-pill); background: var(--sf-color-surface-inverse); color: var(--sf-color-text-inverse); font-weight: var(--sf-font-weight-semibold); }
+.rating { display: inline-flex; align-items: center; gap: var(--sf-space-2); color: var(--sf-color-text-secondary); font-variant-numeric: tabular-nums; }
+.rating svg { color: var(--sf-color-brand-vermilion); fill: currentColor; }
+

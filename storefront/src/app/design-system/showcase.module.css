@@ -1,0 +1,14 @@
+.preview { min-block-size: 100%; padding-inline: var(--sf-layout-gutter); background: var(--sf-color-surface-canvas); color: var(--sf-color-text-primary); }
+.swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: var(--sf-space-4); }
+.swatch { display: grid; gap: var(--sf-space-2); }
+.swatch span { display: block; aspect-ratio: 1; border: var(--sf-border-hairline) solid var(--sf-color-border-subtle); border-radius: var(--sf-radius-medium); background: var(--swatch-color, var(--sf-color-surface-subtle)); }
+.swatch[data-swatch="ink"] span { --swatch-color: var(--sf-color-brand-ink); }
+.swatch[data-swatch="ivory"] span { --swatch-color: var(--sf-color-brand-ivory); }
+.swatch[data-swatch="silver"] span { --swatch-color: var(--sf-color-brand-silver); }
+.swatch[data-swatch="vermilion"] span { --swatch-color: var(--sf-color-brand-vermilion); }
+.swatch[data-swatch="success"] span { --swatch-color: var(--sf-color-semantic-success); }
+.swatch[data-swatch="warning"] span { --swatch-color: var(--sf-color-semantic-warning); }
+.swatch[data-swatch="danger"] span { --swatch-color: var(--sf-color-semantic-danger); }
+.swatch[data-swatch="info"] span { --swatch-color: var(--sf-color-semantic-info); }
+.spacingSample { padding: var(--sf-space-8); border-radius: var(--sf-radius-medium); background: var(--sf-color-surface-subtle); box-shadow: var(--sf-elevation-raised); }
+@media (max-width: 47.99rem) { .preview { margin-inline: calc(-1 * var(--sf-space-4)); padding-inline: var(--sf-space-4); } }

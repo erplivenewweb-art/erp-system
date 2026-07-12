@@ -1,0 +1,59 @@
+.card {
+  width: min(calc(100% - (2 * var(--sf-layout-gutter))), var(--sf-layout-reading-max));
+  margin: var(--sf-space-12) auto;
+  padding: clamp(var(--sf-space-6), 6vw, var(--sf-space-12));
+  border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
+  border-radius: var(--sf-radius-large);
+  background: var(--sf-color-surface-raised);
+}
+
+.card h1 {
+  max-width: 16ch;
+  margin: 0 0 var(--sf-space-6);
+  font-family: var(--sf-font-family-display);
+  font-size: var(--sf-font-size-h2);
+  line-height: var(--sf-font-line-height-heading);
+}
+
+.card > p:not(.eyebrow) {
+  max-width: 62ch;
+  color: var(--sf-color-text-secondary);
+}
+
+.eyebrow {
+  margin: 0 0 var(--sf-space-3);
+  color: var(--sf-color-brand-vermilion);
+  font-size: var(--sf-font-size-small);
+  font-weight: var(--sf-font-weight-semibold);
+  letter-spacing: var(--sf-font-tracking-overline);
+  text-transform: uppercase;
+}
+
+.statusList {
+  display: grid;
+  gap: var(--sf-space-4);
+  margin: var(--sf-space-8) 0 0;
+}
+
+.statusList div {
+  display: grid;
+  gap: var(--sf-space-1);
+  padding-block-start: var(--sf-space-4);
+  border-block-start: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
+}
+
+.statusList dt {
+  color: var(--sf-color-text-muted);
+  font-size: var(--sf-font-size-small);
+}
+
+.statusList dd {
+  margin: 0;
+  font-weight: var(--sf-font-weight-semibold);
+}
+
+@media (min-width: 48rem) {
+  .statusList {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

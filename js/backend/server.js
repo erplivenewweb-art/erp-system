@@ -1313,15 +1313,39 @@ function normalizeProcessName(value) {
 }
 
 const PROCESS_QTY_TOLERANCE = 0.0005;
-const PROCESS_QTY_INCREASE_MESSAGE = "Output quantity can increase only in Baton/Patta process.";
-const PROCESS_QTY_INCREASE_ALLOWED_STEPS = new Set(["baton", "batton", "batan", "patta", "patti"]);
 
-function normalizeProcessStepNameForQuantityRule(value = "") {
-  return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+function buildProcessStepVariance({
+  expectedQty = 0,
+  actualQty = 0,
+  expectedWeight = 0,
+  actualWeight = 0
+} = {}) {
+  const safeExpectedQty = toNumber(expectedQty);
+  const safeActualQty = toNumber(actualQty);
+  const safeExpectedWeight = toNumber(expectedWeight);
+  const safeActualWeight = toNumber(actualWeight);
+  return {
+    expectedQty: safeExpectedQty,
+    actualQty: safeActualQty,
+    qtyVariance: Number(format3(safeActualQty - safeExpectedQty)),
+    expectedWeight: safeExpectedWeight,
+    actualWeight: safeActualWeight,
+    weightVariance: Number(format3(safeActualWeight - safeExpectedWeight))
+  };
 }
 
-function isQuantityIncreaseAllowedProcessStep(processName) {
-  return PROCESS_QTY_INCREASE_ALLOWED_STEPS.has(normalizeProcessStepNameForQuantityRule(processName));
+function formatSignedVariance(value = 0) {
+  const numericValue = toNumber(value);
+  return `${numericValue > 0 ? "+" : ""}${Number.isInteger(numericValue) ? numericValue : numericValue.toFixed(3)}`;
+}
+
+function addProcessStepVarianceWarnings(warnings = [], variance = {}) {
+  if (Math.abs(toNumber(variance.qtyVariance)) > PROCESS_QTY_TOLERANCE) {
+    warnings.push(`Expected Qty: ${variance.expectedQty} | Actual Qty: ${variance.actualQty} | Qty Variance: ${formatSignedVariance(variance.qtyVariance)}`);
+  }
+  if (Math.abs(toNumber(variance.weightVariance)) > PROCESS_WEIGHT_TOLERANCE) {
+    warnings.push(`Expected Weight: ${toNumber(variance.expectedWeight).toFixed(3)}g | Actual Weight: ${toNumber(variance.actualWeight).toFixed(3)}g | Weight Variance: ${formatSignedVariance(variance.weightVariance)}g`);
+  }
 }
 
 function isTestProcessLotDeleteEnabled() {
@@ -2540,10 +2564,6 @@ function getProcessStepCorrectionValuesFromBody(body = {}, beforeStep = {}) {
   });
   if (!weightValidation.ok) return weightValidation;
   if (outputQty < 0) return { ok: false, message: "Output quantity cannot be negative" };
-  if (inputQty > 0 && outputQty > inputQty + PROCESS_QTY_TOLERANCE && !isQuantityIncreaseAllowedProcessStep(processName)) {
-    return { ok: false, message: PROCESS_QTY_INCREASE_MESSAGE };
-  }
-
   return {
     ok: true,
     processName,
@@ -2553,7 +2573,13 @@ function getProcessStepCorrectionValuesFromBody(body = {}, beforeStep = {}) {
     outputQty,
     lossReason,
     lossWeight: weightValidation.lossWeight,
-    lossQty: Math.max(0, inputQty - outputQty)
+    lossQty: Math.max(0, inputQty - outputQty),
+    variance: buildProcessStepVariance({
+      expectedQty: inputQty,
+      actualQty: outputQty,
+      expectedWeight: beforeStep.input_weight,
+      actualWeight: outputWeight
+    })
   };
 }
 
@@ -3018,6 +3044,9 @@ function validateBillingTotals(payload) {
   const submittedTotalWeight = toNumber(payload.totalWeight);
   const paidAmount = toNumber(payload.paidAmount);
   const dueAmount = toNumber(payload.dueAmount);
+  const paymentMode = String(payload.paymentMode || payload.payment_mode || "").trim().toUpperCase();
+  const paymentStatus = String(payload.paymentStatus || payload.payment_status || "").trim().toUpperCase();
+  const submittedMetalValue = toNumber(payload.metalValue ?? payload.metal_value);
 
   const matchedTotals = expectedCandidates.find((expected) => {
     const subtotalOk = isAmountClose(submittedSubtotal, expected.subtotal);
@@ -3050,6 +3079,48 @@ function validateBillingTotals(payload) {
     return {
       ok: false,
       message: "Billing total mismatch. Please recalculate and try again."
+    };
+  }
+
+  const isCashMetalMode = paymentMode === "CASH + METAL";
+  const isMetalMode = paymentMode === "METAL" || paymentStatus === "METAL SETTLED";
+  const isCashOnlyMode = !isCashMetalMode && !isMetalMode;
+  const expectedCustomerTotal = matchedTotals.customerTotal;
+  let equationPaid = paidAmount;
+  let equationMetalValue = 0;
+
+  if (isCashMetalMode) {
+    equationMetalValue = submittedMetalValue;
+  } else if (isMetalMode) {
+    if (paidAmount > BILLING_AMOUNT_TOLERANCE) {
+      return {
+        ok: false,
+        message: "Billing payment mismatch. Please recalculate and try again."
+      };
+    }
+    equationPaid = 0;
+    equationMetalValue = submittedMetalValue > BILLING_AMOUNT_TOLERANCE
+      ? submittedMetalValue
+      : Math.max(expectedCustomerTotal - dueAmount, 0);
+  } else if (submittedMetalValue > BILLING_AMOUNT_TOLERANCE) {
+    return {
+      ok: false,
+      message: "Billing payment mismatch. Please recalculate and try again."
+    };
+  }
+
+  const customerPaymentTotal = equationPaid + equationMetalValue + dueAmount;
+  if (!isAmountClose(customerPaymentTotal, expectedCustomerTotal)) {
+    return {
+      ok: false,
+      message: "Billing payment mismatch. Please recalculate and try again."
+    };
+  }
+
+  if (isCashOnlyMode && !isAmountClose(paidAmount + dueAmount, expectedCustomerTotal)) {
+    return {
+      ok: false,
+      message: "Billing payment mismatch. Please recalculate and try again."
     };
   }
 
@@ -6992,7 +7063,7 @@ async function buildReturnPreview(connection, {
   const refundEstimate = buildReturnRefundEstimate(saleItem, settlementSummary);
   const returnCommercialWeights = getBillingCommercialWeights(saleItem || stock || {});
   if (settlementSummary.isSettlementBlocked) {
-    blockingReasons.push("Paid/settled invoice return requires refund workflow");
+    blockingReasons.push("Paid/settled invoice return requires refund/reversal workflow.");
   }
 
   const duplicateRefundPayables = await getOpenReturnRefundPayables(
@@ -7009,7 +7080,7 @@ async function buildReturnPreview(connection, {
   const branchId = resolveReturnPersistenceBranch(saleItem, stock, access);
   const returnOptions = ["RETURN_TO_STOCK", "DAMAGED_RETURN"];
   const uniqueBlockingReasons = [...new Set(blockingReasons)];
-  const nonSettlementBlockingReasons = uniqueBlockingReasons.filter((reason) => reason !== "Paid/settled invoice return requires refund workflow");
+  const nonSettlementBlockingReasons = uniqueBlockingReasons.filter((reason) => reason !== "Paid/settled invoice return requires refund/reversal workflow.");
   const requiresRefundWorkflow = Boolean(settlementSummary.isSettlementBlocked);
   const canCreateRefundPayable = requiresRefundWorkflow && nonSettlementBlockingReasons.length === 0;
 
@@ -14106,9 +14177,25 @@ async function postBillingToTransactionFoundation(connection, payload) {
   const branchId = payload.branchId ?? null;
   const items = Array.isArray(payload.items) ? payload.items : [];
   const metalPercent = toNumber(payload.metalPercent);
-  const metalPayable = toNumber(payload.metalPayable);
-  const metalNote = String(payload.metalNote || "").trim();
+  const submittedMetalGrossWeight = toNumber(payload.metalGrossWeight ?? payload.metal_gross_weight);
+  const submittedMetalFineWeight = toNumber(payload.metalFineWeight ?? payload.metal_fine_weight);
+  const submittedMetalRate = toNumber(payload.metalRate ?? payload.metal_rate);
+  const submittedMetalValue = toNumber(payload.metalValue ?? payload.metal_value);
+  const metalPayable = submittedMetalFineWeight > 0 ? submittedMetalFineWeight : toNumber(payload.metalPayable);
+  const metalGrossWeight = submittedMetalGrossWeight > 0 ? submittedMetalGrossWeight : metalPayable;
+  const metalMakingCharge = toNumber(payload.metalMakingCharge ?? payload.metal_making_charge);
+  const rawMetalNote = String(payload.metalNote || "").trim();
+  const metalNote = [rawMetalNote, metalMakingCharge > 0 ? `Making charge cash ${metalMakingCharge.toFixed(2)}` : ""].filter(Boolean).join(" | ");
   const metalType = normalizeMetalType(payload.metalType || getBillingItemMetalType(items));
+  const metalSettlementAmount = Math.max(totalAmount - paidAmount - dueAmount, 0);
+  if (submittedMetalValue > 0) {
+    if (submittedMetalValue - Math.max(totalAmount - paidAmount, 0) > BILLING_AMOUNT_TOLERANCE) {
+      throw new Error("Metal value cannot exceed remaining bill amount");
+    }
+    if (Math.abs(submittedMetalValue - metalSettlementAmount) > BILLING_AMOUNT_TOLERANCE) {
+      throw new Error("Metal value mismatch. Please recalculate mixed payment and try again.");
+    }
+  }
 
   const existingSaleTxn = await findExistingSaleInvoiceTransaction(connection, companyId, invoiceNumber);
   if (existingSaleTxn) {
@@ -14299,17 +14386,18 @@ async function postBillingToTransactionFoundation(connection, payload) {
     lastTransactionId = paymentTransactionId;
   }
 
-  const metalSettlementAmount = Math.max(totalAmount - paidAmount - dueAmount, 0);
   const shouldPostMetalSettlement =
     metalPayable > 0 &&
-    (paymentMode.toUpperCase() === "METAL" || paymentStatus.toUpperCase() === "METAL SETTLED" || metalSettlementAmount > 0);
+    (paymentMode.toUpperCase() === "METAL" || paymentMode.toUpperCase() === "CASH + METAL" || paymentStatus.toUpperCase() === "METAL SETTLED" || metalSettlementAmount > 0);
 
   if (shouldPostMetalSettlement) {
     const metalVoucherNo = `MET-${invoiceNumber}`;
     const effectiveRateBasis =
-      metalSettlementAmount > 0
-        ? metalSettlementAmount / Math.max(metalPayable, 1)
-        : ratePerGram;
+      submittedMetalRate > 0
+        ? submittedMetalRate
+        : metalSettlementAmount > 0
+          ? metalSettlementAmount / Math.max(metalPayable, 1)
+          : ratePerGram;
 
     const [metalTxnInsert] = await connection.query(
       `
@@ -14357,7 +14445,7 @@ async function postBillingToTransactionFoundation(connection, payload) {
         saleVoucherNo,
         metalSettlementAmount,
         metalType,
-        metalPayable,
+        metalGrossWeight,
         metalPayable,
         metalPercent,
         effectiveRateBasis,
@@ -14384,7 +14472,7 @@ async function postBillingToTransactionFoundation(connection, payload) {
       metalType: metalType || "SILVER",
       entryType: "IN",
       purity: metalPercent,
-      grossIn: metalPayable,
+      grossIn: metalGrossWeight,
       grossOut: 0,
       fineIn: metalPayable,
       fineOut: 0,
@@ -17379,6 +17467,11 @@ app.get("/getStock", authMiddleware, async (req, res) => {
     if (companyId !== null) {
       whereParts.push("s.company_id = ?");
       params.push(companyId);
+    }
+    const lotFilter = String(req.query.lot ?? req.query.lotNumber ?? req.query.lot_number ?? "").trim();
+    if (lotFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.lot_number, ''))) = UPPER(TRIM(?))");
+      params.push(lotFilter);
     }
     appendBranchScopeFilter(whereParts, params, branchScope, { alias: "s" });
     appendOperationalStockVisibilityFilter(whereParts, { alias: "s" });
@@ -20462,18 +20555,6 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       });
     }
 
-    if (
-      inputQty > 0 &&
-      outputQty > inputQty + PROCESS_QTY_TOLERANCE &&
-      !isQuantityIncreaseAllowedProcessStep(processName)
-    ) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: PROCESS_QTY_INCREASE_MESSAGE
-      });
-    }
-
     const finalStatus = requestedStatus === "OPEN" ? "OPEN" : "COMPLETED";
     const finalOutputWeight = finalStatus === "COMPLETED" ? outputWeight : 0;
     const finalRecoveryWeight = finalStatus === "COMPLETED" ? recoveryWeight : 0;
@@ -20482,6 +20563,12 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
     const finalOutputQty = finalStatus === "COMPLETED" ? outputQty : 0;
     const lossQty = finalStatus === "COMPLETED" ? Math.max(0, inputQty - finalOutputQty) : 0;
     const warnings = [];
+    const variance = buildProcessStepVariance({
+      expectedQty: inputQty,
+      actualQty: finalOutputQty,
+      expectedWeight: effectiveInputWeight,
+      actualWeight: finalOutputWeight
+    });
 
     if (rawLossWeight < -0.0005) {
       await connection.rollback();
@@ -20505,6 +20592,9 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
 
     if (finalStatus === "COMPLETED" && inputQty > 0 && (lossQty / inputQty) > 0.05) {
       warnings.push("Quantity loss is above 5% for this process step");
+    }
+    if (finalStatus === "COMPLETED") {
+      addProcessStepVarianceWarnings(warnings, variance);
     }
 
     const [insertResult] = await connection.query(
@@ -20636,6 +20726,7 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
       success: true,
       message: finalStatus === "COMPLETED" ? "Process step completed successfully" : "Process step saved as open",
       step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null,
+      variance,
       warnings
     });
   } catch (error) {
@@ -20833,22 +20924,16 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       });
     }
 
-    if (
-      step.input_qty > 0 &&
-      outputQty > step.input_qty + PROCESS_QTY_TOLERANCE &&
-      !isQuantityIncreaseAllowedProcessStep(step.process_name || step.processName)
-    ) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: PROCESS_QTY_INCREASE_MESSAGE
-      });
-    }
-
     const rawLossWeight = weightValidation.balanceWeight;
     const lossWeight = weightValidation.lossWeight;
     const lossQty = Math.max(0, step.input_qty - outputQty);
     const warnings = [];
+    const variance = buildProcessStepVariance({
+      expectedQty: step.input_qty,
+      actualQty: outputQty,
+      expectedWeight: step.input_weight,
+      actualWeight: outputWeight
+    });
 
     if (rawLossWeight < -0.0005) {
       await connection.rollback();
@@ -20871,6 +20956,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
     if (step.input_qty > 0 && (lossQty / step.input_qty) > 0.05) {
       warnings.push("Quantity loss is above 5% for this process step");
     }
+    addProcessStepVarianceWarnings(warnings, variance);
 
     await connection.query(
       `
@@ -20936,6 +21022,7 @@ app.put("/process/steps/:id/complete", authMiddleware, checkRole(["SUPERADMIN", 
       success: true,
       message: "Process step completed successfully",
       step: savedRows.length ? normalizeProcessStepRow(savedRows[0]) : null,
+      variance,
       warnings
     });
   } catch (error) {
@@ -21351,6 +21438,14 @@ app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["S
 
     const finalLossWeight = weightValidation.lossWeight;
     const finalLossQty = Math.max(0, toNumber(beforeStep.input_qty) - correctionValues.outputQty);
+    const variance = buildProcessStepVariance({
+      expectedQty: beforeStep.input_qty,
+      actualQty: correctionValues.outputQty,
+      expectedWeight: beforeStep.input_weight,
+      actualWeight: correctionValues.outputWeight
+    });
+    const warnings = [];
+    addProcessStepVarianceWarnings(warnings, variance);
 
     await connection.query(
       `
@@ -21450,6 +21545,8 @@ app.post("/process/steps/:id/reverse-and-correct", authMiddleware, checkRole(["S
       message: "Process step reversed and corrected successfully",
       step: afterStep,
       batchId,
+      variance,
+      warnings,
       correction: {
         reason: correctionReason
       }
@@ -21639,20 +21736,16 @@ app.put("/process/steps/:id/correct", authMiddleware, checkRole(["SUPERADMIN", "
       });
     }
 
-    if (
-      inputQty > 0 &&
-      outputQty > inputQty + PROCESS_QTY_TOLERANCE &&
-      !isQuantityIncreaseAllowedProcessStep(processName)
-    ) {
-      await connection.rollback();
-      return res.status(400).json({
-        success: false,
-        message: PROCESS_QTY_INCREASE_MESSAGE
-      });
-    }
-
     const lossWeight = weightValidation.lossWeight;
     const lossQty = Math.max(0, inputQty - outputQty);
+    const variance = buildProcessStepVariance({
+      expectedQty: inputQty,
+      actualQty: outputQty,
+      expectedWeight: beforeStep.input_weight,
+      actualWeight: outputWeight
+    });
+    const warnings = [];
+    addProcessStepVarianceWarnings(warnings, variance);
 
     await connection.query(
       `
@@ -21733,6 +21826,8 @@ app.put("/process/steps/:id/correct", authMiddleware, checkRole(["SUPERADMIN", "
       success: true,
       message: "Process step corrected successfully",
       step: afterStep,
+      variance,
+      warnings,
       correction: {
         reason: correctionReason
       }
@@ -24744,7 +24839,7 @@ app.post("/saveReturn", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       return res.status(409).json({
         success: false,
         message: isSettlementBlocked
-          ? "Paid/settled invoice return requires refund workflow"
+          ? "Paid/settled invoice return requires refund/reversal workflow."
           : "Return cannot be saved safely",
         blockingReasons: preview.blockingReasons,
         warnings: preview.warnings,
@@ -27849,6 +27944,12 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       employeeName = "",
       metalPercent = 0,
       metalPayable = 0,
+      metalType = "",
+      metalGrossWeight = 0,
+      metalFineWeight = 0,
+      metalRate = 0,
+      metalValue = 0,
+      metalMakingCharge = 0,
       metalNote = "",
       items = [],
       invoiceDraftId = null,
@@ -28222,6 +28323,12 @@ app.post("/saveBilling", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAF
       subtotal: Number(billingTotals.subtotal || 0),
       metalPercent: Number(metalPercent || 0),
       metalPayable: Number(metalPayable || 0),
+      metalType: String(metalType || "").trim(),
+      metalGrossWeight: Number(metalGrossWeight || 0),
+      metalFineWeight: Number(metalFineWeight || 0),
+      metalRate: Number(metalRate || 0),
+      metalValue: Number(metalValue || 0),
+      metalMakingCharge: Number(metalMakingCharge || 0),
       metalNote: String(metalNote || "").trim(),
       branchId: persistedBranchId,
       items: ledgerItems
@@ -30397,6 +30504,35 @@ app.delete("/sales-history/:invoiceNumber", authMiddleware, checkRole(["SUPERADM
       return res.status(404).json({
         success: false,
         message: "Sale record not found"
+      });
+    }
+
+    const saleRow = saleRows[0];
+    const saleStatus = String(saleRow.status || "").trim().toUpperCase();
+    const isDraftOrUnpostedSale = ["DRAFT", "UNPOSTED"].includes(saleStatus);
+    if (!isDraftOrUnpostedSale) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Use Return or Reverse Transaction to cancel this sale."
+      });
+    }
+
+    const [postedLinkRows] = await connection.query(
+      `
+      SELECT id
+      FROM invoice_transaction_link
+      WHERE company_id = ?
+        AND invoice_no = ?
+      LIMIT 1
+      `,
+      [companyId, invoiceNumber]
+    );
+    if (postedLinkRows.length) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "Use Return or Reverse Transaction to cancel this sale."
       });
     }
 
@@ -40770,6 +40906,30 @@ function getTransactionBranchJoinSql(alias = "tm") {
   `;
 }
 
+function appendTransactionReportBranchScope(whereParts, params, branchScope, alias = "tm") {
+  if (!branchScope?.isBranchFiltered) return;
+  whereParts.push(`
+    (
+      COALESCE(${alias}.branch_id, itlb.branch_id, 0) = ?
+      OR EXISTS (
+        SELECT 1
+        FROM cash_ledger cl_scope
+        WHERE cl_scope.company_id = ${alias}.company_id
+          AND cl_scope.transaction_id = ${alias}.id
+          AND COALESCE(cl_scope.branch_id, 0) = ?
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM metal_ledger ml_scope
+        WHERE ml_scope.company_id = ${alias}.company_id
+          AND ml_scope.transaction_id = ${alias}.id
+          AND COALESCE(ml_scope.branch_id, 0) = ?
+      )
+    )
+  `);
+  params.push(branchScope.branchId, branchScope.branchId, branchScope.branchId);
+}
+
 async function getTransactionForReversal(connection, companyId, transactionId) {
   const [rows] = await connection.query(
     `
@@ -41317,7 +41477,7 @@ app.post("/transaction/reversal", authMiddleware, async (req, res) => {
   }
 });
 
-const PARTY_METAL_PARTY_TYPES = new Set(["SUPPLIER", "KARIGAR", "BULLION_PARTY", "CUSTOMER"]);
+const PARTY_METAL_PARTY_TYPES = new Set(["SUPPLIER", "KARIGAR", "BULLION_PARTY", "CUSTOMER_SUPPLIER", "CUSTOMER"]);
 const PARTY_METAL_TRANSACTION_TYPES = new Set([
   "METAL_RECEIVED",
   "METAL_RECEIVED_REVERSAL",
@@ -42236,8 +42396,21 @@ function getPartyMetalReportWhere(access, branchScope, req, alias = "tm") {
     params.push(toDate);
   }
   if (metalType) {
-    whereParts.push("COALESCE(line_totals.metal_type, metal_totals.metal_type, '') = ?");
-    params.push(metalType);
+    whereParts.push(`(
+      (
+        UPPER(${alias}.transaction_type) IN ('PAYMENT_GIVEN', 'PAYMENT_GIVEN_REVERSAL')
+        AND UPPER(COALESCE(settlement_totals.settlement_type, '')) = 'CASH'
+        AND COALESCE(settlement_totals.settlement_metal_type, '') = ?
+      )
+      OR (
+        NOT (
+          UPPER(${alias}.transaction_type) IN ('PAYMENT_GIVEN', 'PAYMENT_GIVEN_REVERSAL')
+          AND UPPER(COALESCE(settlement_totals.settlement_type, '')) = 'CASH'
+        )
+        AND COALESCE(line_totals.metal_type, metal_totals.metal_type, settlement_totals.settlement_metal_type, '') = ?
+      )
+    )`);
+    params.push(metalType, metalType);
   }
   if (search) {
     whereParts.push("(LOWER(pm.party_name) LIKE ? OR LOWER(tm.voucher_no) LIKE ? OR LOWER(tm.reference_no) LIKE ?)");
@@ -43098,48 +43271,7 @@ app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => 
     if (!branchScope.ok) return sendAccessError(res, branchScope);
 
     const { whereParts, params } = getPartyMetalReportWhere(access, branchScope, req);
-    const [rows] = await pool.query(
-      `
-      SELECT
-        tm.id,
-        tm.voucher_date,
-        tm.transaction_type,
-        tm.party_id,
-        pm.party_name,
-        pm.party_type,
-        COALESCE(line_totals.metal_type, metal_totals.metal_type, '') AS metal_type,
-        COALESCE(metal_totals.gross_in, 0) AS gross_in,
-        COALESCE(metal_totals.gross_out, 0) AS gross_out,
-        COALESCE(metal_totals.fine_in, 0) AS fine_in,
-        COALESCE(metal_totals.fine_out, 0) AS fine_out,
-        COALESCE(line_totals.metal_value, 0) AS metal_value,
-        COALESCE(line_totals.line_amount, 0) AS line_amount,
-        COALESCE(cash_totals.cash_debit, 0) AS cash_debit,
-        COALESCE(cash_totals.cash_credit, 0) AS cash_credit
-      FROM transaction_master tm
-      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
-      ${getTransactionBranchJoinSql("tm")}
-      LEFT JOIN (
-        SELECT transaction_id, MAX(metal_type) AS metal_type, SUM(metal_value) AS metal_value, SUM(line_amount) AS line_amount
-        FROM transaction_lines
-        GROUP BY transaction_id
-      ) line_totals ON line_totals.transaction_id = tm.id
-      LEFT JOIN (
-        SELECT transaction_id, MAX(metal_type) AS metal_type,
-          SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out, SUM(fine_in) AS fine_in, SUM(fine_out) AS fine_out
-        FROM metal_ledger
-        GROUP BY transaction_id
-      ) metal_totals ON metal_totals.transaction_id = tm.id
-      LEFT JOIN (
-        SELECT transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
-        FROM cash_ledger
-        GROUP BY transaction_id
-      ) cash_totals ON cash_totals.transaction_id = tm.id
-      WHERE ${whereParts.join(" AND ")}
-      ORDER BY tm.voucher_date ASC, tm.id ASC
-      `,
-      params
-    );
+    const rows = await getPartyMetalReportRows(pool, whereParts, params);
 
     const summaryMap = new Map();
     for (const row of rows) {
@@ -43156,6 +43288,12 @@ app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => 
           fine_balance: 0,
           gold_gross_balance: 0,
           silver_gross_balance: 0,
+          gold_fine_balance: 0,
+          silver_fine_balance: 0,
+          making_due: 0,
+          cash_due: 0,
+          legacy_combined_due: 0,
+          has_legacy_combined: false,
           total_metal_value: 0,
           total_returned_value: 0,
           total_paid: 0,
@@ -43165,18 +43303,29 @@ app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => 
       }
       const summary = summaryMap.get(key);
       const type = String(row.transaction_type || "").trim().toUpperCase();
-      const metalType = normalizeMetalType(row.metal_type);
-      const grossIn = toNumber(row.gross_in);
-      const grossOut = toNumber(row.gross_out);
-      const fineIn = toNumber(row.fine_in);
-      const fineOut = toNumber(row.fine_out);
+      const movement = getPartyMetalLedgerMovement(row);
+      const metalType = normalizeMetalType(movement.metalType);
+      const grossIn = toNumber(movement.grossIn);
+      const grossOut = toNumber(movement.grossOut);
+      const fineIn = toNumber(movement.fineIn);
+      const fineOut = toNumber(movement.fineOut);
       const effects = getPartyMetalAmountEffects(row);
       summary.total_metal_received += type === "METAL_RECEIVED" ? grossIn : type === "METAL_RECEIVED_REVERSAL" ? -grossOut : 0;
-      summary.total_metal_returned += type === "METAL_GIVEN" ? grossOut : type === "METAL_GIVEN_REVERSAL" ? -grossIn : 0;
+      summary.total_metal_returned += type === "METAL_GIVEN" || (type === "PAYMENT_GIVEN" && String(row.settlement_type || "").trim().toUpperCase() === "METAL")
+        ? grossOut
+        : type === "METAL_GIVEN_REVERSAL" || (type === "PAYMENT_GIVEN_REVERSAL" && String(row.settlement_type || "").trim().toUpperCase() === "METAL")
+          ? -grossIn
+          : 0;
       summary.gross_balance += grossIn - grossOut;
       summary.fine_balance += fineIn - fineOut;
       if (metalType === "GOLD") summary.gold_gross_balance += grossIn - grossOut;
       if (metalType === "SILVER") summary.silver_gross_balance += grossIn - grossOut;
+      if (metalType === "GOLD") summary.gold_fine_balance += fineIn - fineOut;
+      if (metalType === "SILVER") summary.silver_fine_balance += fineIn - fineOut;
+      summary.making_due += toNumber(movement.makingDue) - toNumber(movement.makingPaid);
+      summary.cash_due += toNumber(movement.cashDue) - toNumber(movement.cashPaid);
+      summary.legacy_combined_due += toNumber(movement.legacyCombinedEffect);
+      if (movement.legacyCombined) summary.has_legacy_combined = true;
       summary.total_metal_value += effects.receivedValue;
       summary.total_returned_value += effects.returnedValue;
       summary.total_paid += effects.paid;
@@ -43184,16 +43333,35 @@ app.get("/transaction/party-metal/summary", authMiddleware, async (req, res) => 
       summary.last_transaction_date = row.voucher_date || summary.last_transaction_date;
     }
 
-    const summaries = Array.from(summaryMap.values()).sort((a, b) => Math.abs(b.current_due) - Math.abs(a.current_due));
+    const summaries = Array.from(summaryMap.values()).map((row) => ({
+      ...row,
+      running_making_due: row.making_due + row.legacy_combined_due,
+      running_cash_due: row.cash_due
+    })).sort((a, b) => Math.abs(b.current_due) - Math.abs(a.current_due));
     const dashboard = summaries.reduce(
       (acc, row) => {
-        if (row.party_type === "SUPPLIER" || row.party_type === "BULLION_PARTY") acc.totalSupplierDue += row.current_due;
+        if (["SUPPLIER", "BULLION_PARTY", "CUSTOMER_SUPPLIER"].includes(row.party_type)) acc.totalSupplierDue += row.current_due;
         if (row.party_type === "KARIGAR") acc.totalKarigarDue += row.current_due;
         acc.totalSilverBalance += row.silver_gross_balance;
         acc.totalGoldBalance += row.gold_gross_balance;
+        acc.totalSilverFineBalance += row.silver_fine_balance;
+        acc.totalGoldFineBalance += row.gold_fine_balance;
+        acc.totalMakingDue += row.running_making_due;
+        acc.totalCashDue += row.running_cash_due;
+        acc.legacyCombinedTotal += row.legacy_combined_due;
         return acc;
       },
-      { totalSupplierDue: 0, totalKarigarDue: 0, totalSilverBalance: 0, totalGoldBalance: 0 }
+      {
+        totalSupplierDue: 0,
+        totalKarigarDue: 0,
+        totalSilverBalance: 0,
+        totalGoldBalance: 0,
+        totalSilverFineBalance: 0,
+        totalGoldFineBalance: 0,
+        totalMakingDue: 0,
+        totalCashDue: 0,
+        legacyCombinedTotal: 0
+      }
     );
     dashboard.topOutstandingParties = summaries.filter((row) => row.current_due > 0.009).slice(0, 10);
 
@@ -45984,14 +46152,21 @@ app.get("/reports/lamination-profit", authMiddleware, async (req, res) => {
 
 app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+    const reportPermission = await requireBranchOperationalPermission(pool, req, res, access, "canViewReports", "TRANSACTION_PARTY_LEDGER_REPORT");
+    if (!reportPermission.ok) return;
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
     }
 
     const companyId = access.companyScope;
@@ -46054,6 +46229,7 @@ app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) =>
       `);
       baseParams.push(metalType);
     }
+    appendTransactionReportBranchScope(baseWhere, baseParams, branchScope, "tm");
 
     const rangeWhere = [...baseWhere];
     const rangeParams = [...baseParams];
@@ -46088,24 +46264,25 @@ app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) =>
         COALESCE(silver.gross_in, 0) AS silver_in,
         COALESCE(silver.gross_out, 0) AS silver_out
       FROM transaction_master tm
-      LEFT JOIN party_master pm ON pm.id = tm.party_id
+      LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
+      ${getTransactionBranchJoinSql("tm")}
       LEFT JOIN (
-        SELECT transaction_id, SUM(debit_amount) AS debit_amount, SUM(credit_amount) AS credit_amount
+        SELECT company_id, transaction_id, SUM(debit_amount) AS debit_amount, SUM(credit_amount) AS credit_amount
         FROM cash_ledger
-        GROUP BY transaction_id
-      ) cash ON cash.transaction_id = tm.id
+        GROUP BY company_id, transaction_id
+      ) cash ON cash.transaction_id = tm.id AND cash.company_id = tm.company_id
       LEFT JOIN (
-        SELECT transaction_id, SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out
+        SELECT company_id, transaction_id, SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out
         FROM metal_ledger
         WHERE metal_type = 'GOLD'
-        GROUP BY transaction_id
-      ) gold ON gold.transaction_id = tm.id
+        GROUP BY company_id, transaction_id
+      ) gold ON gold.transaction_id = tm.id AND gold.company_id = tm.company_id
       LEFT JOIN (
-        SELECT transaction_id, SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out
+        SELECT company_id, transaction_id, SUM(gross_in) AS gross_in, SUM(gross_out) AS gross_out
         FROM metal_ledger
         WHERE metal_type = 'SILVER'
-        GROUP BY transaction_id
-      ) silver ON silver.transaction_id = tm.id
+        GROUP BY company_id, transaction_id
+      ) silver ON silver.transaction_id = tm.id AND silver.company_id = tm.company_id
       ${rangeWhereClause}
       ORDER BY tm.voucher_date ASC, tm.id ASC
       `,
@@ -46122,7 +46299,8 @@ app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) =>
         SELECT
           COALESCE(SUM(cl.debit_amount), 0) - COALESCE(SUM(cl.credit_amount), 0) AS opening_cash_balance
         FROM cash_ledger cl
-        INNER JOIN transaction_master tm ON tm.id = cl.transaction_id
+        INNER JOIN transaction_master tm ON tm.id = cl.transaction_id AND tm.company_id = cl.company_id
+        ${getTransactionBranchJoinSql("tm")}
         ${openingWhereClause}
         `,
         openingParams
@@ -46180,14 +46358,21 @@ app.get("/transaction/reports/party-ledger", authMiddleware, async (req, res) =>
 
 app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+    const reportPermission = await requireBranchOperationalPermission(pool, req, res, access, "canViewReports", "TRANSACTION_CUSTOMER_DUE_REPORT");
+    if (!reportPermission.ok) return;
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
     }
 
     const companyId = access.companyScope;
@@ -46223,6 +46408,7 @@ app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) =>
       whereParts.push("tm.invoice_no LIKE ?");
       params.push(`%${invoiceNo}%`);
     }
+    appendTransactionReportBranchScope(whereParts, params, branchScope, "tm");
 
     const [rows] = await pool.query(
       `
@@ -46240,6 +46426,7 @@ app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) =>
         COALESCE(tlt.line_amount, 0) AS line_amount,
         COALESCE(tst.settlement_amount, 0) AS settlement_amount
       FROM transaction_master tm
+      ${getTransactionBranchJoinSql("tm")}
       LEFT JOIN party_master pm ON pm.id = tm.party_id AND pm.company_id = tm.company_id
       LEFT JOIN (
         SELECT company_id, transaction_id, SUM(debit_amount) AS cash_debit, SUM(credit_amount) AS cash_credit
@@ -46357,14 +46544,21 @@ app.get("/transaction/reports/customer-due", authMiddleware, async (req, res) =>
 
 app.get("/transaction/reports/metal-ledger", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: false,
-      allowSuperAdminAll: true
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: false
     });
 
     if (!access.ok) {
       return sendAccessError(res, access);
+    }
+    const reportPermission = await requireBranchOperationalPermission(pool, req, res, access, "canViewReports", "TRANSACTION_METAL_LEDGER_REPORT");
+    if (!reportPermission.ok) return;
+    const branchScope = await resolveOperationalBranchScope(pool, access, getRequestedBranchScopeValue(req));
+    if (!branchScope.ok) {
+      return res.status(branchScope.status || 403).json({
+        success: false,
+        message: branchScope.message || "Branch access denied"
+      });
     }
 
     const companyId = access.companyScope;
@@ -46433,6 +46627,10 @@ app.get("/transaction/reports/metal-ledger", authMiddleware, async (req, res) =>
       whereParts.push("tm.process_lot_no LIKE ?");
       params.push(`%${processLotNo}%`);
     }
+    if (branchScope.isBranchFiltered) {
+      whereParts.push("COALESCE(ml.branch_id, tm.branch_id, itlb.branch_id, 0) = ?");
+      params.push(branchScope.branchId);
+    }
 
     const [rows] = await pool.query(
       `
@@ -46454,8 +46652,9 @@ app.get("/transaction/reports/metal-ledger", authMiddleware, async (req, res) =>
         tm.lot_no,
         tm.process_lot_no
       FROM metal_ledger ml
-      LEFT JOIN party_master pm ON pm.id = ml.party_id
-      LEFT JOIN transaction_master tm ON tm.id = ml.transaction_id
+      LEFT JOIN party_master pm ON pm.id = ml.party_id AND pm.company_id = ml.company_id
+      LEFT JOIN transaction_master tm ON tm.id = ml.transaction_id AND tm.company_id = ml.company_id
+      ${getTransactionBranchJoinSql("tm")}
       WHERE ${whereParts.join(" AND ")}
       ORDER BY ml.entry_date DESC, ml.id DESC
       `,

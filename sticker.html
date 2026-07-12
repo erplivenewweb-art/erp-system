@@ -1725,13 +1725,13 @@
       const unsavedItems = pendingStickerItems.filter(item => !item.saved_to_server);
 
       if (!unsavedItems.length) {
-      showToast("There are no new unsaved items.", "info");
+        showToast("There are no new unsaved items.", "info");
         return;
       }
 
       try {
-        const lotsToSave = [...new Set(unsavedItems.map((item) => normalizeText(item.lot_number || item.lot || "")).filter(Boolean))];
-        for (const lot of lotsToSave) {
+        const savedLots = [...new Set(unsavedItems.map((item) => normalizeText(item.lot_number || item.lot || "")).filter(Boolean))];
+        for (const lot of savedLots) {
           if (!(await validateStickerLotCompleted(lot))) {
             return;
           }
@@ -1796,6 +1796,9 @@
         updateNextSerialForCurrentLot();
         logStickerDebug("savePendingToServer success", { savedCount: unsavedItems.length });
         showToast("All new items have been saved to stock.", "success");
+        if (savedLots.length) {
+          window.location.href = `stock.html?lot=${encodeURIComponent(savedLots[0])}`;
+        }
       } catch (err) {
         console.log("Bulk save error:", err);
         logStickerDebug("savePendingToServer failed", { reason: "SERVER_SAVE_ERROR", message: err?.message || String(err) });

@@ -1,0 +1,38 @@
+.button,
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sf-space-2);
+  min-block-size: var(--sf-layout-control-height);
+  border: var(--sf-border-hairline) solid transparent;
+  border-radius: var(--sf-radius-small);
+  font-weight: var(--sf-font-weight-semibold);
+  cursor: pointer;
+  transition:
+    background-color var(--sf-motion-fast) var(--sf-easing-standard),
+    border-color var(--sf-motion-fast) var(--sf-easing-standard),
+    color var(--sf-motion-fast) var(--sf-easing-standard),
+    transform var(--sf-motion-instant) var(--sf-easing-standard);
+}
+.button { padding-inline: var(--sf-space-5); text-decoration: none; }
+.button:hover:not(:disabled) { transform: translateY(-1px); }
+.button:active:not(:disabled) { transform: translateY(1px); }
+.primary { background: var(--sf-component-button-background); border-color: var(--sf-component-button-border); color: var(--sf-component-button-text); }
+.secondary { background: transparent; border-color: var(--sf-color-border-strong); color: var(--sf-color-text-primary); }
+.tertiary { background: transparent; color: var(--sf-color-text-link); text-decoration: underline; text-underline-offset: 0.2em; }
+.danger { background: var(--sf-color-semantic-danger); color: var(--sf-color-text-inverse); }
+.button:disabled, .iconButton:disabled { background: var(--sf-component-disabled-background); color: var(--sf-component-disabled-text); cursor: not-allowed; transform: none; }
+.iconButton { inline-size: var(--sf-layout-control-height); padding: 0; background: transparent; border-color: var(--sf-color-border-subtle); color: var(--sf-color-text-primary); }
+.iconButton[aria-pressed="true"] { background: var(--sf-color-semantic-danger-bg); color: var(--sf-color-semantic-danger); }
+.spinner {
+  inline-size: 1rem;
+  block-size: 1rem;
+  border: var(--sf-border-strong) solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: var(--sf-radius-pill);
+  animation: spin var(--sf-motion-slow) linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-inline-end-color: currentColor; } }
+

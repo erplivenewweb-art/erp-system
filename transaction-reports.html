@@ -365,11 +365,11 @@
             <div class="report-summary-grid">
               <div class="report-summary-card">
                 <h4>Opening Cash Balance</h4>
-                <p id="partyLedgerOpeningCash">Rs 0.00</p>
+                <p id="partyLedgerOpeningCash">₹ 0.00</p>
               </div>
               <div class="report-summary-card">
                 <h4>Current Cash Balance</h4>
-                <p id="partyLedgerCurrentCash">Rs 0.00</p>
+                <p id="partyLedgerCurrentCash">₹ 0.00</p>
               </div>
               <div class="report-summary-card">
                 <h4>Gold Balance</h4>
@@ -450,15 +450,15 @@
               </div>
               <div class="report-summary-card">
                 <h4>Total Open Due</h4>
-                <p id="customerDueOpenTotal">Rs 0.00</p>
+                <p id="customerDueOpenTotal">₹ 0.00</p>
               </div>
               <div class="report-summary-card">
                 <h4>Total Billed Amount</h4>
-                <p id="customerDueBilledTotal">Rs 0.00</p>
+                <p id="customerDueBilledTotal">₹ 0.00</p>
               </div>
               <div class="report-summary-card">
                 <h4>Total Settled Amount</h4>
-                <p id="customerDueSettledTotal">Rs 0.00</p>
+                <p id="customerDueSettledTotal">₹ 0.00</p>
               </div>
             </div>
 
@@ -762,7 +762,7 @@
     }
 
     function formatMoney(value) {
-      return `Rs ${Number(value || 0).toFixed(2)}`;
+      return `₹ ${Number(value || 0).toFixed(2)}`;
     }
 
     function formatWeight(value) {

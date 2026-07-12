@@ -1,0 +1,110 @@
+{
+  "version": {
+    "contractVersion": "1.0",
+    "schemaVersion": "1.0.0",
+    "capabilities": [
+      "catalogue.b2b",
+      "pricing.wholesale",
+      "quotation"
+    ]
+  },
+  "dealer": {
+    "id": "dlr_Business01",
+    "legalName": "Example Retail Private Limited",
+    "displayName": "Example Retail",
+    "gstinMasked": "27ABCDE12**34Z5",
+    "category": "RETAILER",
+    "level": "GOLD",
+    "approvalStatus": "APPROVED",
+    "visibilityEntitlements": [
+      "APPROVED_DEALER",
+      "DEALER_LEVEL"
+    ],
+    "creditTerms": {
+      "code": "NET_30",
+      "days": 30,
+      "currency": "INR",
+      "creditLimit": "500000.00",
+      "validUntil": "2027-03-31T18:29:59Z",
+      "status": "ACTIVE"
+    },
+    "audit": {
+      "createdAt": "2026-07-01T09:00:00Z",
+      "updatedAt": "2026-07-11T09:00:00Z",
+      "revision": 3
+    }
+  },
+  "priceQuote": {
+    "id": "pqt_Dealer001",
+    "variantId": "var_Ring0001",
+    "customerType": "DEALER_USER",
+    "dealerId": "dlr_Business01",
+    "quantity": 25,
+    "currency": "INR",
+    "wholesale": {
+      "amount": "38000.00",
+      "currency": "INR",
+      "dealerLevels": [
+        "GOLD",
+        "PLATINUM"
+      ]
+    },
+    "priceBreaks": [
+      {
+        "minimumQuantity": 10,
+        "unitAmount": "38500.00",
+        "currency": "INR"
+      },
+      {
+        "minimumQuantity": 25,
+        "unitAmount": "38000.00",
+        "currency": "INR"
+      }
+    ],
+    "moq": {
+      "variantId": "var_Ring0001",
+      "minimumQuantity": 10,
+      "increment": 5,
+      "appliesTo": "DEALER_LEVEL"
+    },
+    "subtotal": "950000.00",
+    "taxSummary": {
+      "display": "GST calculated by ERP at final validation"
+    },
+    "total": "950000.00",
+    "expiresAt": "2026-07-11T09:15:00Z"
+  },
+  "quotation": {
+    "id": "qtn_Offer0001",
+    "dealerId": "dlr_Business01",
+    "status": "OFFERED",
+    "revision": 2,
+    "currency": "INR",
+    "lines": [
+      {
+        "lineId": "qln_Line0001",
+        "variantId": "var_Ring0001",
+        "descriptionSnapshot": "Classic Gold Ring — wholesale design variant",
+        "quantity": 25,
+        "unitAmount": "38000.00",
+        "lineTotal": "950000.00"
+      }
+    ],
+    "priceQuoteId": "pqt_Dealer001",
+    "validUntil": "2026-07-18T09:00:00Z",
+    "creditTerms": {
+      "code": "NET_30",
+      "days": 30,
+      "currency": "INR",
+      "creditLimit": "500000.00",
+      "validUntil": "2027-03-31T18:29:59Z",
+      "status": "ACTIVE"
+    },
+    "channel": "B2B_PORTAL",
+    "audit": {
+      "createdAt": "2026-07-10T09:00:00Z",
+      "updatedAt": "2026-07-11T09:00:00Z",
+      "revision": 2
+    }
+  }
+}

@@ -1,0 +1,55 @@
+@import "./tokens.generated.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--sf-color-surface-canvas);
+  color: var(--sf-color-text-primary);
+  font-family: var(--sf-font-family-body);
+  line-height: var(--sf-font-line-height-body);
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  background: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--sf-color-focus-ring);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--sf-color-brand-vermilion);
+  color: var(--sf-color-text-inverse);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: var(--sf-motion-reduced) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--sf-motion-reduced) !important;
+  }
+}
+

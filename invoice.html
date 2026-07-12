@@ -1267,29 +1267,17 @@
       if (!tbody) return;
 
       tbody.innerHTML = "";
-      const groupedItems = getGroupedInvoiceItems(invoiceItems);
 
-      groupedItems.forEach((item) => {
-        const safeKey = encodeURIComponent(item.key);
-        const barcodeText = item.quantity > 1
-          ? `${item.barcode || ""} +${item.quantity - 1} more`
-          : (item.barcode || "");
+      invoiceItems.forEach((item) => {
+        const barcode = String(item.barcode || "").trim();
+        const safeBarcode = encodeURIComponent(barcode);
 
         tbody.innerHTML += `
           <tr>
-            <td>${barcodeText}</td>
-            <td>${item.productName || ""}</td>
+            <td>${barcode}</td>
+            <td>${item.productName || item.product_name || ""}</td>
             <td>${item.sku || ""}</td>
-            <td>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value="${item.quantity}"
-                oninput="updateInvoiceGroupQuantity('${safeKey}', this.value)"
-                style="width:72px; padding:6px 8px; border:1px solid #cbd5e1; border-radius:8px;"
-              />
-            </td>
+            <td><span>1</span></td>
             <td>${num(item.weight).toFixed(3)}</td>
             <td>${item.size || ""}</td>
             <td>${item.lot || ""}</td>
@@ -1297,7 +1285,7 @@
               <button
                 type="button"
                 class="delete-row-btn"
-                onclick="deleteInvoiceItemGroup('${safeKey}')"
+                onclick="deleteInvoiceItem('${safeBarcode}')"
                 title="Delete"
               >
                 <i class="fas fa-trash"></i>
@@ -1319,10 +1307,11 @@
     }
 
     async function deleteInvoiceItem(barcode) {
-      if (!barcode) return;
+      const cleanBarcode = decodeURIComponent(String(barcode || "")).trim();
+      if (!cleanBarcode) return;
 
       try {
-        await removeDraftItem(barcode);
+        await removeDraftItem(cleanBarcode);
         renderInvoiceTable();
         focusInvoiceScanner();
       } catch (error) {
@@ -1448,18 +1437,32 @@
       }
     }
 
-    function sendToBilling() {
-      if (!processedInvoiceItems.length) {
-      showToast("Please update the barcode first.", "error");
-        return;
-      }
+    async function sendToBilling() {
+      try {
+        if (!currentInvoiceDraftId) {
+          await fetchCurrentInvoiceDraft();
+        }
 
-      if (!currentInvoiceDraftId) {
-        showToast("Invoice draft missing", "error");
-        return;
-      }
+        if (invoiceItems.length) {
+          await applyDraftDetailsToServer();
+          renderInvoiceTable();
+        }
 
-      window.location.href = `billing.html?invoiceDraftId=${encodeURIComponent(currentInvoiceDraftId)}`;
+        if (!processedInvoiceItems.length) {
+          showToast("Please scan a barcode first.", "error");
+          return;
+        }
+
+        if (!currentInvoiceDraftId) {
+          showToast("Invoice draft missing", "error");
+          return;
+        }
+
+        window.location.href = `billing.html?invoiceDraftId=${encodeURIComponent(currentInvoiceDraftId)}`;
+      } catch (error) {
+        console.log("Send to billing error:", error);
+        showToast(error.message || "Invoice draft update failed", "error");
+      }
     }
 
     async function autoAddBarcode(barcode) {
@@ -1478,18 +1481,6 @@
       lastAutoScanTime = now;
 
       await loadFromServer();
-
-      const item = stockItems.find(
-        (x) =>
-          String(x.barcode || "").trim() === cleanBarcode &&
-          String(x.status || "IN_STOCK").toUpperCase() === "IN_STOCK"
-      );
-
-      if (!item) {
-        document.getElementById("invoiceBarcodeInput").value = "";
-        focusInvoiceScanner();
-        return;
-      }
 
       const existsInPending = invoiceItems.some((x) => String(x.barcode || "").trim() === cleanBarcode);
       if (existsInPending) {

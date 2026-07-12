@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "data": {
+    "variantId": "var_01JZ8Q00000000000000000000",
+    "status": "IN_STOCK",
+    "lastSyncedAt": "2026-07-11T09:59:30Z",
+    "freshnessStatus": "FRESH",
+    "expiresAt": "2026-07-11T10:04:30Z",
+    "exactQuantitySuppressed": true
+  },
+  "metadata": {
+    "requestId": "01JZ8REQ3000000000000000000",
+    "correlationId": "01JZ8COR3000000000000000000",
+    "generatedAt": "2026-07-11T10:00:00Z",
+    "contractVersion": "1.0.0"
+  }
+}
+

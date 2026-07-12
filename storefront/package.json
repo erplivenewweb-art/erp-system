@@ -1,0 +1,51 @@
+{
+  "name": "silver-sankha-storefront",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Phase 3A storefront scaffold.",
+  "engines": {
+    "node": ">=20.19.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "tokens:generate": "node scripts/generate-tokens.mjs",
+    "tokens:validate": "node scripts/validate-tokens.mjs",
+    "boundaries:check": "node scripts/guard-boundaries.mjs",
+    "styles:check": "node scripts/guard-styles.mjs",
+    "predev": "npm run tokens:generate",
+    "dev": "next dev",
+    "prebuild": "npm run tokens:generate && npm run boundaries:check",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate": "npm run tokens:validate && npm run boundaries:check && npm run styles:check && npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/jsdom": "28.0.3",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "axe-core": "4.12.1",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "29.1.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.16"
+    }
+  }
+}

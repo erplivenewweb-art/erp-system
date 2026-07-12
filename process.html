@@ -2849,14 +2849,6 @@
       return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
     }
 
-    function normalizeStepNameForQuantityRule(value = "") {
-      return String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
-    }
-
-    function isQuantityIncreaseAllowedProcessStep(processName = "") {
-      return ["baton", "batton", "batan", "patta", "patti"].includes(normalizeStepNameForQuantityRule(processName));
-    }
-
     function isSolderingLikeStepName(value = "") {
       return ["soldering", "solding", "solder", "kdm"].includes(normalizeStepNameForMatch(value));
     }
@@ -4081,6 +4073,27 @@
       updateStepOutputPieceHelper();
     }
 
+    function formatSignedProcessVariance(value = 0) {
+      const numericValue = Number(value || 0);
+      const text = Number.isInteger(numericValue) ? String(numericValue) : numericValue.toFixed(3);
+      return `${numericValue > 0 ? "+" : ""}${text}`;
+    }
+
+    function confirmProcessQtyVariance(expectedQty, actualQty) {
+      const expected = Number(expectedQty || 0);
+      const actual = Number(actualQty || 0);
+      const variance = actual - expected;
+      if (Math.abs(variance) <= 0.0005) return true;
+
+      const message = [
+        `Expected Qty : ${formatProcessQty(expected)}`,
+        `Actual Qty : ${formatProcessQty(actual)}`,
+        `Variance : ${formatSignedProcessVariance(variance)}`,
+        "Continue?"
+      ].join("\n");
+      return window.confirm(message);
+    }
+
     function fillProcessStepFormFromOpenStep(step) {
       currentOpenProcessStep = step || null;
       selectedRecoveryStockIds.clear();
@@ -4506,12 +4519,7 @@
         return;
       }
 
-      if (
-        inputQty > 0 &&
-        outputQty > inputQty + 0.0005 &&
-        !isQuantityIncreaseAllowedProcessStep(processName)
-      ) {
-        showToast("Output quantity can increase only in Baton/Patta process.", "error", "Invalid Value");
+      if (inputQty > 0 && !confirmProcessQtyVariance(inputQty, outputQty)) {
         return;
       }
 
@@ -5049,15 +5057,7 @@
       if (hasInputQty && hasOutputQty) {
         const inputQty = Number(inputQtyRaw || 0);
         const outputQty = Number(outputQtyRaw || 0);
-        const activeProcessName = currentOpenProcessStep
-          ? currentOpenProcessStep.processName
-          : processName;
-        if (
-          inputQty > 0 &&
-          outputQty > inputQty + 0.0005 &&
-          !isQuantityIncreaseAllowedProcessStep(activeProcessName)
-        ) {
-          showToast("Output quantity can increase only in Baton/Patta process.", "error", "Invalid Value");
+        if (inputQty > 0 && !confirmProcessQtyVariance(inputQty, outputQty)) {
           return;
         }
       }

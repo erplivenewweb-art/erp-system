@@ -1667,56 +1667,7 @@
         return;
       }
 
-      const confirmed = window.confirm("Are you sure you want to delete this sale?");
-      if (!confirmed) return;
-
-      const deleteReason = window.prompt("Optional delete reason:", "") || "";
-
-      try {
-        const params = new URLSearchParams();
-        const actingUserId = getCurrentUserId();
-        const companyId =
-          saleCompanyId !== null && saleCompanyId !== undefined && saleCompanyId !== "null"
-            ? Number(saleCompanyId)
-            : getCurrentCompanyId();
-
-        if (actingUserId !== null && !Number.isNaN(actingUserId)) {
-          params.set("actingUserId", String(actingUserId));
-        }
-        if (companyId !== null && !Number.isNaN(companyId)) {
-          params.set("companyId", String(companyId));
-        }
-
-        const response = await fetch(
-          `${API_BASE}/sales-history/${encodeURIComponent(cleanInvoiceNo)}${params.toString() ? `?${params.toString()}` : ""}`,
-          {
-            method: "DELETE",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              reason: String(deleteReason || "").trim()
-            })
-          }
-        );
-
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result?.success) {
-          throw new Error(result?.message || "Delete failed");
-        }
-
-        salesHistoryData = salesHistoryData.filter((item) => {
-          const sameInvoice = String(item.invoice_number || item.invoiceNumber || "").trim() === cleanInvoiceNo;
-          const itemCompanyId = getItemCompanyId(item);
-          return !(sameInvoice && (companyId === null || itemCompanyId === companyId));
-        });
-
-        renderSalesHistory();
-        showToast(result.message || "Sale deleted successfully", "success");
-      } catch (error) {
-        console.error("Delete sale error:", error);
-        showToast(error.message || "Delete failed", "error");
-      }
+      showToast("Use Return or Reverse Transaction to cancel this sale.", "error");
     }
 
     async function restoreSaleRecord(invoiceNumber, saleCompanyId = null) {

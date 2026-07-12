@@ -1,0 +1,27 @@
+{
+  "success": false,
+  "error": {
+    "code": "MOQ_NOT_MET",
+    "message": "The requested quantity does not meet the minimum order rule.",
+    "status": 422,
+    "retryable": false,
+    "correlationId": "c6d28af4-7391-4d87-80c6-9facb3889156",
+    "violations": [
+      {
+        "field": "quantity",
+        "code": "MINIMUM",
+        "message": "Quantity must be at least 10."
+      }
+    ]
+  },
+  "metadata": {
+    "requestId": "3b7baf87-c88d-473d-b5f8-4cc586d4310c",
+    "correlationId": "c6d28af4-7391-4d87-80c6-9facb3889156",
+    "generatedAt": "2026-07-11T09:00:00Z",
+    "version": {
+      "contractVersion": "1.0",
+      "schemaVersion": "1.0.0"
+    }
+  }
+}
+

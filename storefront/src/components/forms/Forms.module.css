@@ -1,0 +1,45 @@
+.field { display: grid; gap: var(--sf-space-2); }
+.label { color: var(--sf-color-text-primary); font-size: var(--sf-font-size-small); font-weight: var(--sf-font-weight-semibold); }
+.help { margin: 0; color: var(--sf-color-text-muted); font-size: var(--sf-font-size-small); }
+.validation { margin: 0; font-size: var(--sf-font-size-small); font-weight: var(--sf-font-weight-medium); }
+.error { color: var(--sf-color-semantic-danger); }
+.success { color: var(--sf-color-semantic-success); }
+.control {
+  inline-size: 100%;
+  min-block-size: var(--sf-layout-control-height);
+  padding: var(--sf-space-3) var(--sf-space-4);
+  border: var(--sf-border-hairline) solid var(--sf-component-field-border);
+  border-radius: var(--sf-radius-small);
+  background: var(--sf-component-field-background);
+  color: var(--sf-color-text-primary);
+}
+.control:read-only { background: var(--sf-color-surface-subtle); border-style: dashed; }
+.control:disabled { background: var(--sf-component-disabled-background); color: var(--sf-component-disabled-text); cursor: not-allowed; }
+.invalid { border-color: var(--sf-color-semantic-danger); box-shadow: 0 0 0 var(--sf-border-hairline) var(--sf-color-semantic-danger); }
+.textarea { min-block-size: 8rem; resize: vertical; }
+.choice, .switch { display: inline-flex; align-items: center; gap: var(--sf-space-3); min-block-size: var(--sf-layout-touch-min); cursor: pointer; }
+.choice input { inline-size: 1.25rem; block-size: 1.25rem; accent-color: var(--sf-color-brand-vermilion); }
+.choice:has(input:disabled), .switch:has(input:disabled) { color: var(--sf-color-text-disabled); cursor: not-allowed; }
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.track {
+  display: inline-flex;
+  align-items: center;
+  inline-size: 2.75rem;
+  block-size: 1.5rem;
+  padding: var(--sf-space-1);
+  border: var(--sf-border-hairline) solid var(--sf-color-border-strong);
+  border-radius: var(--sf-radius-pill);
+  background: var(--sf-color-surface-subtle);
+  transition: background var(--sf-motion-fast) var(--sf-easing-standard);
+}
+.track span {
+  inline-size: 1rem;
+  block-size: 1rem;
+  border-radius: var(--sf-radius-pill);
+  background: var(--sf-color-text-secondary);
+  transition: transform var(--sf-motion-fast) var(--sf-easing-standard);
+}
+.switch input:checked + .track { background: var(--sf-color-brand-vermilion); }
+.switch input:checked + .track span { background: var(--sf-color-text-inverse); transform: translateX(1.2rem); }
+.switch input:focus-visible + .track { outline: 3px solid var(--sf-color-focus-ring); outline-offset: 3px; }
+

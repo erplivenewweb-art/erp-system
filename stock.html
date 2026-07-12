@@ -112,6 +112,12 @@
       transform: none;
     }
 
+    .stock-highlight-lot {
+      outline: 2px solid #c58b2b;
+      outline-offset: -2px;
+      background: #fff7e6;
+    }
+
     .lot-card-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -645,7 +651,7 @@
 
               <div class="input-box">
                 <label for="searchLot">Lot No Search</label>
-                <input type="text" id="searchLot" placeholder="Enter Lot No" oninput="filterStockTable()" />
+                <input type="text" id="searchLot" placeholder="Enter Lot No" oninput="handleStockLotSearchInput()" />
               </div>
 
               <div class="input-box">
@@ -829,6 +835,9 @@
     let isViewingLotItems = false;
     let stockCurrentPage = 1;
     let stockHasNextPage = false;
+    let stockRequestedLotFilter = "";
+    let stockLotQueryApplied = false;
+    let stockLotSearchTimer = null;
 
     function getLoggedInUser() {
       try {
@@ -849,6 +858,46 @@
     function getCurrentCompanyName() {
       const user = getLoggedInUser();
       return String(user?.company_name || user?.companyName || "").trim();
+    }
+
+    function applyStockLotQueryFilterOnce() {
+      if (stockLotQueryApplied) return;
+      stockLotQueryApplied = true;
+
+      const params = new URLSearchParams(window.location.search);
+      const lot = String(params.get("lot") || params.get("lot_number") || params.get("lotNo") || "").trim();
+      if (!lot) return;
+
+      stockRequestedLotFilter = lot;
+      const lotInput = document.getElementById("searchLot");
+      if (lotInput) lotInput.value = lot;
+    }
+
+    function clearStockLotQueryFilter() {
+      stockRequestedLotFilter = "";
+      const params = new URLSearchParams(window.location.search);
+      if (!params.has("lot") && !params.has("lot_number") && !params.has("lotNo")) return;
+      params.delete("lot");
+      params.delete("lot_number");
+      params.delete("lotNo");
+      const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+      window.history.replaceState({}, "", nextUrl);
+    }
+
+    function getCurrentLotSearchValue() {
+      return String(document.getElementById("searchLot")?.value || "").trim();
+    }
+
+    function handleStockLotSearchInput() {
+      const lot = getCurrentLotSearchValue();
+      clearStockLotQueryFilter();
+      stockRequestedLotFilter = lot;
+      stockCurrentPage = 1;
+
+      if (stockLotSearchTimer) clearTimeout(stockLotSearchTimer);
+      stockLotSearchTimer = setTimeout(() => {
+        loadStockData();
+      }, 250);
     }
 
     function getCurrentUserId() {
@@ -1099,8 +1148,14 @@
 
     async function loadStockData() {
       try {
+        applyStockLotQueryFilterOnce();
         const params = buildStockAuthParams();
+        const lotFilter = getCurrentLotSearchValue();
+        stockRequestedLotFilter = lotFilter;
 
+        if (lotFilter) {
+          params.set("lot", lotFilter);
+        }
         params.set("limit", String(STOCK_PAGE_LIMIT));
         params.set("offset", String((stockCurrentPage - 1) * STOCK_PAGE_LIMIT));
 
@@ -1118,10 +1173,15 @@
         filteredStockItems = [...stockItems];
         stockHasNextPage = allVisibleItems.length === STOCK_PAGE_LIMIT;
 
-        hideSearchSummary();
-        hideLotSummary();
-        renderLotWiseTable(stockItems, "Finished Product Stock");
-        renderInternalStockTable(filteredInternalStockItems);
+        const statusFilter = document.getElementById("stockStatusFilter")?.value || "ALL";
+        if (hasActiveSearch(statusFilter)) {
+          filterStockTable();
+        } else {
+          hideSearchSummary();
+          hideLotSummary();
+          renderLotWiseTable(stockItems, "Finished Product Stock");
+          renderInternalStockTable(filteredInternalStockItems);
+        }
         renderRecoveryStockTable(filteredRecoveryStockItems);
         updateStockPagination();
       } catch (error) {
@@ -1240,6 +1300,12 @@
       const barcodeSearch = normalizeText(document.getElementById("searchBarcode")?.value);
       const productSearch = normalizeText(document.getElementById("searchProduct")?.value);
       const statusFilter = document.getElementById("stockStatusFilter")?.value || "ALL";
+      const requestedLotSearch = normalizeText(stockRequestedLotFilter);
+      const useExactLotSearch = Boolean(requestedLotSearch && lotSearch === requestedLotSearch);
+
+      if (requestedLotSearch && lotSearch !== requestedLotSearch) {
+        clearStockLotQueryFilter();
+      }
 
       const matchesMainFilters = (item) => {
         const product = normalizeText(getItemProduct(item));
@@ -1252,7 +1318,7 @@
         return (
           (!skuSearch || sku.includes(skuSearch)) &&
           (!sizeSearch || size.includes(sizeSearch)) &&
-          (!lotSearch || lot.includes(lotSearch)) &&
+          (!lotSearch || (useExactLotSearch ? lot === lotSearch : lot.includes(lotSearch))) &&
           (!barcodeSearch || barcode.includes(barcodeSearch)) &&
           (!productSearch || product.includes(productSearch)) &&
           (statusFilter === "ALL" || status === statusFilter)
@@ -1398,9 +1464,10 @@
 
       body.innerHTML = groupedLots.map((group) => {
         const safeLot = String(group.lot).replace(/'/g, "\\'");
+        const highlightClass = normalizeText(stockRequestedLotFilter) === normalizeText(group.lot) ? " stock-highlight-lot" : "";
 
         return `
-          <div class="lot-summary-card">
+          <div class="lot-summary-card${highlightClass}">
             <div class="lot-card-head">
               <div class="lot-icon">
                 <i class="fas fa-layer-group"></i>
@@ -1489,6 +1556,7 @@
       document.getElementById("searchBarcode").value = "";
       document.getElementById("searchProduct").value = "";
       document.getElementById("stockStatusFilter").value = "ALL";
+      clearStockLotQueryFilter();
 
       filteredStockItems = [...stockItems];
 
@@ -1651,9 +1719,10 @@
 
       tbody.innerHTML = groupedLots.map((group) => {
         const safeLot = String(group.lot).replace(/'/g, "\\'");
+        const highlightClass = normalizeText(stockRequestedLotFilter) === normalizeText(group.lot) ? " class=\"stock-highlight-lot\"" : "";
 
         return `
-          <tr>
+          <tr${highlightClass}>
             <td>${escapeHtml(group.lot)}</td>
             <td>${escapeHtml(group.sizes || "-")}</td>
             <td>${group.totalItems}</td>

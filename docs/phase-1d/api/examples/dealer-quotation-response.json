@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "data": {
+    "quotationId": "qtn_01JZ8QUOTE000000000000000",
+    "status": "OFFERED",
+    "revision": 2,
+    "dealerId": "dlr_01JZ8DEALER00000000000000",
+    "currency": "INR",
+    "validUntil": "2026-07-18T10:00:00Z",
+    "lines": [
+      {
+        "variantId": "var_01JZ8Q00000000000000000000",
+        "descriptionSnapshot": "Premium Silver Sankha — polished",
+        "quantity": 25,
+        "unitAmount": "38000.00",
+        "lineTotal": "950000.00"
+      }
+    ]
+  },
+  "metadata": {
+    "requestId": "01JZ8REQ2000000000000000000",
+    "correlationId": "01JZ8COR2000000000000000000",
+    "generatedAt": "2026-07-11T10:00:00Z",
+    "contractVersion": "1.0.0"
+  }
+}
+

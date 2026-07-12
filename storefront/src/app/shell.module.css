@@ -1,0 +1,4 @@
+.skipLink { position: fixed; inset-block-start: var(--sf-space-2); inset-inline-start: var(--sf-space-2); z-index: var(--sf-z-toast); padding: var(--sf-space-3) var(--sf-space-4); background: var(--sf-color-surface-inverse); color: var(--sf-color-text-inverse); transform: translateY(-200%); }
+.skipLink:focus { transform: translateY(0); }
+.main { min-height: calc(100vh - 8rem); }
+@media (prefers-reduced-motion: reduce) { .skipLink { transition: none; } }

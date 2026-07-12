@@ -1,0 +1,1439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.example.invalid/commerce/v1/commerce-contracts.schema.json",
+  "title": "Commerce Contracts V1",
+  "description": "Planning-only B2C and B2B contracts. Customer-safe and independent of ERP runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "$ref": "#/$defs/VersionMetadata"
+    },
+    "product": {
+      "$ref": "#/$defs/Product"
+    },
+    "inventory": {
+      "$ref": "#/$defs/InventoryAvailability"
+    },
+    "priceQuote": {
+      "$ref": "#/$defs/PriceQuote"
+    },
+    "customer": {
+      "$ref": "#/$defs/CustomerProfile"
+    },
+    "dealer": {
+      "$ref": "#/$defs/DealerProfile"
+    },
+    "quotation": {
+      "$ref": "#/$defs/Quotation"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "$defs": {
+    "CustomerType": {
+      "type": "string",
+      "enum": [
+        "GUEST",
+        "RETAIL",
+        "DEALER_USER"
+      ],
+      "description": "Actor/customer classification."
+    },
+    "DealerLevel": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "SILVER",
+        "GOLD",
+        "PLATINUM",
+        "CUSTOM"
+      ],
+      "description": "Commercial entitlement level; not approval."
+    },
+    "DealerCategory": {
+      "type": "string",
+      "enum": [
+        "RETAILER",
+        "WHOLESALER",
+        "DISTRIBUTOR",
+        "CORPORATE",
+        "MARKETPLACE_PARTNER",
+        "OTHER"
+      ],
+      "description": "Dealer business category."
+    },
+    "ApprovalStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "UNDER_REVIEW",
+        "INFORMATION_REQUIRED",
+        "APPROVED",
+        "REJECTED",
+        "SUSPENDED",
+        "REVOKED"
+      ],
+      "description": "Dealer verification lifecycle."
+    },
+    "QuotationStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "REQUESTED",
+        "UNDER_REVIEW",
+        "OFFERED",
+        "REVISION_REQUESTED",
+        "ACCEPTED",
+        "REJECTED",
+        "EXPIRED",
+        "CANCELLED",
+        "CONVERTED"
+      ],
+      "description": "Quotation lifecycle."
+    },
+    "OrderChannel": {
+      "type": "string",
+      "enum": [
+        "B2C_WEB",
+        "B2B_PORTAL",
+        "MOBILE",
+        "MARKETPLACE",
+        "ASSISTED",
+        "EXPORT"
+      ],
+      "description": "Originating channel."
+    },
+    "PublishStatus": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "SCHEDULED",
+        "PUBLISHED",
+        "UNPUBLISHED",
+        "ARCHIVED"
+      ],
+      "description": "Commerce publication lifecycle."
+    },
+    "Visibility": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "AUTHENTICATED_CUSTOMER",
+        "APPROVED_DEALER",
+        "DEALER_LEVEL",
+        "PRIVATE",
+        "CHANNEL_RESTRICTED"
+      ],
+      "description": "Audience gate evaluated server-side."
+    },
+    "InventoryStatus": {
+      "type": "string",
+      "enum": [
+        "IN_STOCK",
+        "LOW_AVAILABILITY",
+        "BACKORDER",
+        "MADE_TO_ORDER",
+        "OUT_OF_STOCK",
+        "UNAVAILABLE",
+        "UNKNOWN"
+      ],
+      "description": "Coarse customer-safe status; never reveals internal stock."
+    },
+    "AuditMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce actor ID."
+        },
+        "updatedBy": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce actor ID."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "createdAt",
+        "updatedAt",
+        "revision"
+      ]
+    },
+    "VersionMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "1.0"
+        },
+        "schemaVersion": {
+          "type": "string",
+          "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{1,63}$"
+          }
+        }
+      },
+      "required": [
+        "contractVersion",
+        "schemaVersion"
+      ]
+    },
+    "RequestMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "channel": {
+          "$ref": "#/$defs/OrderChannel"
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
+        "clientVersion": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "requestId",
+        "channel"
+      ]
+    },
+    "ResponseMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "correlationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "$ref": "#/$defs/VersionMetadata"
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
+      },
+      "required": [
+        "requestId",
+        "correlationId",
+        "generatedAt",
+        "version"
+      ]
+    },
+    "Pagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "limit"
+      ]
+    },
+    "Sorting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "enum": [
+            "RELEVANCE",
+            "CREATED_AT",
+            "UPDATED_AT",
+            "PRICE",
+            "TITLE",
+            "POPULARITY"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "ASC",
+            "DESC"
+          ]
+        }
+      },
+      "required": [
+        "field",
+        "direction"
+      ]
+    },
+    "Filtering": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "categoryIds": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "collectionIds": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "availability": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/InventoryStatus"
+          }
+        },
+        "price": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "min": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+            },
+            "max": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            }
+          },
+          "required": [
+            "currency"
+          ]
+        },
+        "attributes": {
+          "type": "object",
+          "maxProperties": 20,
+          "additionalProperties": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "maxProperties": 5
+    },
+    "Search": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
+        "filters": {
+          "$ref": "#/$defs/Filtering"
+        },
+        "sort": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/Sorting"
+          }
+        },
+        "page": {
+          "$ref": "#/$defs/Pagination"
+        }
+      },
+      "required": [
+        "query",
+        "page"
+      ]
+    },
+    "ProductMedia": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "type": {
+          "enum": [
+            "IMAGE",
+            "VIDEO",
+            "THREE_D",
+            "DOCUMENT"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048
+        },
+        "altText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
+        "rightsExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "publishStatus": {
+          "$ref": "#/$defs/PublishStatus"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "url",
+        "altText",
+        "position",
+        "publishStatus"
+      ]
+    },
+    "ProductVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sellable design option. It is not a physical barcode inventory unit.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "productId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "skuAlias": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Customer-safe commerce alias, never an internal barcode."
+        },
+        "options": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 20,
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "displayWeight": {
+          "type": "object",
+          "description": "ERP-sourced customer-safe projection only.",
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "type": "string",
+              "pattern": "^[0-9]{1,8}(\\.[0-9]{1,4})?$"
+            },
+            "unit": {
+              "enum": [
+                "g",
+                "kg"
+              ]
+            },
+            "asOf": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "value",
+            "unit",
+            "asOf"
+          ]
+        },
+        "publishStatus": {
+          "$ref": "#/$defs/PublishStatus"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "required": [
+        "id",
+        "productId",
+        "options",
+        "publishStatus",
+        "visibility"
+      ]
+    },
+    "Product": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Commerce product design and merchandising projection, separate from variants, physical inventory, availability, price, media, SEO, and publication.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "story": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 160
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
+        "variantIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "mediaIds": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "categoryIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "collectionIds": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "seo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "maxLength": 70
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 170
+            },
+            "canonicalUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "indexable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "description",
+            "indexable"
+          ]
+        },
+        "publishStatus": {
+          "$ref": "#/$defs/PublishStatus"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        },
+        "audit": {
+          "$ref": "#/$defs/AuditMetadata"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "slug",
+        "locale",
+        "variantIds",
+        "publishStatus",
+        "visibility",
+        "audit"
+      ]
+    },
+    "Collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "productIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "publishStatus": {
+          "$ref": "#/$defs/PublishStatus"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "slug",
+        "publishStatus",
+        "visibility"
+      ]
+    },
+    "Category": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "productIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+            "description": "Opaque commerce identifier; never an ERP/internal ID."
+          }
+        },
+        "publishStatus": {
+          "$ref": "#/$defs/PublishStatus"
+        },
+        "visibility": {
+          "$ref": "#/$defs/Visibility"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "slug",
+        "publishStatus",
+        "visibility"
+      ]
+    },
+    "InventoryAvailability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "variantId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "status": {
+          "$ref": "#/$defs/InventoryStatus"
+        },
+        "sellable": {
+          "type": "boolean"
+        },
+        "leadTimeDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "enum": [
+            "GLOBAL",
+            "COUNTRY",
+            "REGION",
+            "POSTAL_PREFIX"
+          ]
+        }
+      },
+      "required": [
+        "variantId",
+        "status",
+        "sellable",
+        "asOf",
+        "expiresAt",
+        "scope"
+      ]
+    },
+    "RetailPrice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "compareAtAmount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ]
+    },
+    "WholesalePrice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "dealerLevels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/DealerLevel"
+          }
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "dealerLevels"
+      ]
+    },
+    "DealerSpecialPrice": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "dealerId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "validFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "validUntil": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "amount",
+        "currency",
+        "dealerId",
+        "validFrom",
+        "validUntil"
+      ]
+    },
+    "PriceBreak": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimumQuantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "unitAmount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      },
+      "required": [
+        "minimumQuantity",
+        "unitAmount",
+        "currency"
+      ]
+    },
+    "MOQRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "variantId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "minimumQuantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "increment": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "appliesTo": {
+          "enum": [
+            "ALL_DEALERS",
+            "DEALER_LEVEL",
+            "DEALER_CATEGORY",
+            "DEALER"
+          ]
+        }
+      },
+      "required": [
+        "variantId",
+        "minimumQuantity",
+        "increment",
+        "appliesTo"
+      ]
+    },
+    "PriceQuote": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "variantId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "customerType": {
+          "$ref": "#/$defs/CustomerType"
+        },
+        "dealerId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "retail": {
+          "$ref": "#/$defs/RetailPrice"
+        },
+        "wholesale": {
+          "$ref": "#/$defs/WholesalePrice"
+        },
+        "dealerSpecial": {
+          "$ref": "#/$defs/DealerSpecialPrice"
+        },
+        "priceBreaks": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/PriceBreak"
+          }
+        },
+        "moq": {
+          "$ref": "#/$defs/MOQRule"
+        },
+        "subtotal": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "taxSummary": {
+          "type": "object",
+          "description": "Customer-safe ERP-calculated summary; GST logic remains ERP-owned.",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "total": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "variantId",
+        "customerType",
+        "quantity",
+        "currency",
+        "subtotal",
+        "total",
+        "expiresAt"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "customerType": {
+                "const": "DEALER_USER"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "dealerId"
+            ]
+          }
+        }
+      ]
+    },
+    "CustomerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "type": {
+          "$ref": "#/$defs/CustomerType"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "phone": {
+          "type": "string",
+          "pattern": "^\\+[1-9][0-9]{7,14}$"
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+        },
+        "marketingConsent": {
+          "type": "boolean"
+        },
+        "dealerId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "audit": {
+          "$ref": "#/$defs/AuditMetadata"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "displayName",
+        "locale",
+        "marketingConsent",
+        "audit"
+      ]
+    },
+    "CreditTerms": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "PREPAID",
+            "NET_7",
+            "NET_15",
+            "NET_30",
+            "NET_45",
+            "NET_60",
+            "CUSTOM"
+          ]
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 365
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "creditLimit": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+        },
+        "validUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED",
+            "EXPIRED"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "days",
+        "currency",
+        "status"
+      ]
+    },
+    "DealerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "legalName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "gstinMasked": {
+          "type": "string",
+          "pattern": "^[0-9A-Z*]{15}$",
+          "description": "Masked display value only; verification evidence is never returned in general profile."
+        },
+        "category": {
+          "$ref": "#/$defs/DealerCategory"
+        },
+        "level": {
+          "$ref": "#/$defs/DealerLevel"
+        },
+        "approvalStatus": {
+          "$ref": "#/$defs/ApprovalStatus"
+        },
+        "visibilityEntitlements": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Visibility"
+          }
+        },
+        "creditTerms": {
+          "$ref": "#/$defs/CreditTerms"
+        },
+        "audit": {
+          "$ref": "#/$defs/AuditMetadata"
+        }
+      },
+      "required": [
+        "id",
+        "legalName",
+        "displayName",
+        "category",
+        "level",
+        "approvalStatus",
+        "visibilityEntitlements",
+        "audit"
+      ]
+    },
+    "Quotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "dealerId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "status": {
+          "$ref": "#/$defs/QuotationStatus"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "lineId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+                "description": "Opaque commerce identifier; never an ERP/internal ID."
+              },
+              "variantId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+                "description": "Opaque commerce identifier; never an ERP/internal ID."
+              },
+              "descriptionSnapshot": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              },
+              "unitAmount": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+              },
+              "lineTotal": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$"
+              }
+            },
+            "required": [
+              "lineId",
+              "variantId",
+              "descriptionSnapshot",
+              "quantity"
+            ]
+          }
+        },
+        "priceQuoteId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{1,31}_[A-Za-z0-9_-]{8,64}$",
+          "description": "Opaque commerce identifier; never an ERP/internal ID."
+        },
+        "validUntil": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "creditTerms": {
+          "$ref": "#/$defs/CreditTerms"
+        },
+        "channel": {
+          "$ref": "#/$defs/OrderChannel"
+        },
+        "audit": {
+          "$ref": "#/$defs/AuditMetadata"
+        }
+      },
+      "required": [
+        "id",
+        "dealerId",
+        "status",
+        "revision",
+        "currency",
+        "lines",
+        "validUntil",
+        "channel",
+        "audit"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{2,63}$"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "status": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "correlationId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "violations": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "field",
+                  "code"
+                ]
+              }
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "status",
+            "retryable",
+            "correlationId"
+          ]
+        },
+        "metadata": {
+          "$ref": "#/$defs/ResponseMetadata"
+        }
+      },
+      "required": [
+        "success",
+        "error",
+        "metadata"
+      ]
+    },
+    "SuccessResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "const": true
+        },
+        "data": {},
+        "metadata": {
+          "$ref": "#/$defs/ResponseMetadata"
+        }
+      },
+      "required": [
+        "success",
+        "data",
+        "metadata"
+      ]
+    }
+  }
+}
+

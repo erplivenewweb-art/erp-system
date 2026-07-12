@@ -11,7 +11,8 @@
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/toast.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="js/libs/html2canvas.min.js"></script>
+  <script src="js/libs/jspdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
   <style>
@@ -137,6 +138,27 @@
       color: #1d4ed8;
       background: #eff6ff;
       border-color: #bfdbfe;
+    }
+
+    .billing-category-summary {
+      display: grid;
+      gap: 4px;
+      line-height: 1.35;
+    }
+
+    .billing-category-summary strong {
+      color: #111827;
+      font-size: 14px;
+    }
+
+    .billing-category-summary span {
+      color: #475569;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .billing-detail-row {
+      background: #f8fafc;
     }
 
     .company-info-box {
@@ -585,7 +607,7 @@
               </div>
 
               <div class="input-box">
-                <label>MC (Rs per gram)</label>
+                <label>MC (₹ per gram)</label>
                 <input type="number" id="billMcRate" step="0.01" min="0" placeholder="Enter MC per gram" oninput="calculateBillingTotal()" />
               </div>
 
@@ -638,11 +660,11 @@
               <div class="summary-chip hidden-box" id="billSalesModeChip">Sales Mode: <span id="billSalesModeText">Owner Sale</span></div>
               <div class="summary-chip">Total Count: <span id="billTotalCount">0</span></div>
               <div class="summary-chip">Total Weight: <span id="billTotalWeight">0.000</span> g</div>
-              <div class="summary-chip hidden-box" id="billMarginPerGramChip">Margin / Gram: Rs <span id="billMarginPerGramText">0.00</span></div>
-              <div class="summary-chip hidden-box" id="billSellingRateChip">Selling Rate: Rs <span id="billSellingRateText">0.00</span></div>
-              <div class="summary-chip hidden-box" id="billCompanyTotalChip">Company Total: Rs <span id="billCompanyTotalText">0.00</span></div>
-              <div class="summary-chip hidden-box" id="billEmployeeMarginChip">Total Margin: Rs <span id="billEmployeeMarginText">0.00</span></div>
-              <div class="summary-chip">Customer Total: Rs <span id="billGrandTotalText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billMarginPerGramChip">Margin / Gram: ₹ <span id="billMarginPerGramText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billSellingRateChip">Selling Rate: ₹ <span id="billSellingRateText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billCompanyTotalChip">Company Total: ₹ <span id="billCompanyTotalText">0.00</span></div>
+              <div class="summary-chip hidden-box" id="billEmployeeMarginChip">Total Margin: ₹ <span id="billEmployeeMarginText">0.00</span></div>
+              <div class="summary-chip">Customer Total: ₹ <span id="billGrandTotalText">0.00</span></div>
               <div class="summary-chip">Status: <span id="billStatusChip" class="status-chip">Not Selected</span></div>
             </div>
           </div>
@@ -662,6 +684,7 @@
                 <thead>
                   <tr>
                     <th>SL</th>
+                    <th>Barcode</th>
                     <th>Item</th>
                     <th>SKU</th>
                     <th>Qty</th>
@@ -740,6 +763,7 @@
                   <option value="Online">Online</option>
                   <option value="Due">Due</option>
                   <option value="Metal">Metal</option>
+                  <option value="Cash + Metal">Cash + Metal</option>
                 </select>
               </div>
 
@@ -782,9 +806,9 @@
 
                 <div style="min-width:260px; flex:1;">
                   <div class="summary-chip-row">
-                    <div class="summary-chip">Customer Total: Rs. <span id="onlineGrandTotalText">0.00</span></div>
-                    <div class="summary-chip">Company Total: Rs. <span id="onlineCompanyTotalText">0.00</span></div>
-                    <div class="summary-chip">Payable Now: Rs. <span id="onlinePayNowText">0.00</span></div>
+                    <div class="summary-chip">Customer Total: ₹ <span id="onlineGrandTotalText">0.00</span></div>
+                    <div class="summary-chip">Company Total: ₹ <span id="onlineCompanyTotalText">0.00</span></div>
+                    <div class="summary-chip">Payable Now: ₹ <span id="onlinePayNowText">0.00</span></div>
                   </div>
 
                   <div class="info-note">
@@ -849,11 +873,71 @@
               </div>
             </div>
 
+            <div id="mixedPaymentBox" class="payment-extra-box payment-section-hidden">
+              <h4>Cash + Metal Settlement</h4>
+
+              <div class="form-grid">
+                <div class="input-box">
+                  <label>Cash Amount (₹)</label>
+                  <input type="number" id="billMixedCashAmount" step="0.01" placeholder="Enter cash amount" oninput="calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Metal Type</label>
+                  <select id="billMixedMetalType" onchange="calculateMixedSettlement()">
+                    <option value="SILVER">Silver</option>
+                    <option value="GOLD">Gold</option>
+                  </select>
+                </div>
+
+                <div class="input-box">
+                  <label>Gross Weight</label>
+                  <input type="number" id="billMixedGrossWeight" step="0.001" placeholder="0.000" oninput="calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Purity %</label>
+                  <input type="number" id="billMixedPurity" step="0.001" placeholder="0.000" oninput="calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Fine Weight</label>
+                  <input type="number" id="billMixedFineWeight" step="0.001" placeholder="0.000" oninput="markMixedFineManual(); calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Metal Rate (₹/gm)</label>
+                  <input type="number" id="billMixedMetalRate" step="0.01" placeholder="0.00" oninput="calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Metal Value</label>
+                  <input type="number" id="billMixedMetalValue" step="0.01" readonly />
+                </div>
+
+                <div class="input-box">
+                  <label>Making Charge</label>
+                  <input type="number" id="billMixedMakingCharge" step="0.01" placeholder="Optional" oninput="calculateMixedSettlement()" />
+                </div>
+
+                <div class="input-box">
+                  <label>Remarks</label>
+                  <input type="text" id="billMixedRemarks" placeholder="Cash and metal settlement note" />
+                </div>
+              </div>
+
+              <div class="summary-chip-row">
+                <div class="summary-chip">Cash Paid: ₹ <span id="mixedCashPreviewText">0.00</span></div>
+                <div class="summary-chip success-soft">Metal Value: ₹ <span id="mixedMetalValueText">0.00</span></div>
+                <div class="summary-chip danger-soft">Remaining Due: ₹ <span id="mixedDuePreviewText">0.00</span></div>
+              </div>
+            </div>
+
             <div class="btn-row" style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
               <button type="button" class="primary-btn" id="saveBillingBtn" onclick="saveBillingRecord()">Save</button>
               <button type="button" class="primary-btn" onclick="calculateBillingTotal()">Calculate Bill</button>
               <button type="button" class="secondary-btn" onclick="printBillingInvoice()">Print GST Invoice</button>
-              <button type="button" class="secondary-btn" onclick="downloadBillingInvoice()">Download</button>
+              <button type="button" class="secondary-btn" onclick="downloadBillingInvoice()">Download PDF</button>
             </div>
           </div>
         </div>
@@ -871,6 +955,7 @@
     let currentInvoiceDraftId = null;
     let billingBranchContext = null;
     let billingBranches = [];
+    let expandedBillingDisplayGroups = new Set();
     const salesModeMargins = {
       OWNER: 0,
       STAFF: 0
@@ -1394,6 +1479,10 @@
       ].map((barcode) => String(barcode || "").trim()).filter(Boolean);
     }
 
+    function hasBillingBarcodeSource(item = {}) {
+      return getBillingItemSourceBarcodes(item).length > 0;
+    }
+
     function getBillingItemBasePurities(item = {}) {
       return [
         item.basePurity,
@@ -1406,13 +1495,15 @@
     }
 
     function normalizeBillingItem(item = {}) {
-      const quantity = getBillingItemQty(item);
+      const hasBarcode = hasBillingBarcodeSource(item);
+      const quantity = hasBarcode ? 1 : getBillingItemQty(item);
       const totalWeight = num(item.weight);
       const unitWeight = num(item.unitWeight || totalWeight);
 
       return {
         ...item,
         itemName: item.itemName || item.productName || item.product_name || "",
+        barcode: String(item.barcode || getBillingItemSourceBarcodes(item)[0] || "").trim(),
         quantity,
         unitWeight,
         weight: totalWeight,
@@ -1450,6 +1541,28 @@
 
       items.forEach((rawItem, index) => {
         const item = normalizeBillingItem(rawItem);
+        const sourceBarcodes = getBillingItemSourceBarcodes(item);
+
+        if (sourceBarcodes.length) {
+          const uniqueBarcodes = [...new Set(sourceBarcodes)];
+          const splitWeight = uniqueBarcodes.length > 1
+            ? num(item.unitWeight || (num(item.weight) / uniqueBarcodes.length))
+            : num(item.weight);
+
+          uniqueBarcodes.forEach((barcode, barcodeIndex) => {
+            grouped.set(`__barcode__${barcode}__${index}__${barcodeIndex}`, {
+              ...item,
+              barcode,
+              quantity: 1,
+              unitWeight: splitWeight,
+              weight: splitWeight,
+              sourceBarcodes: [barcode],
+              basePurities: getBillingItemBasePurities(item)
+            });
+          });
+          return;
+        }
+
         const key = getBillingItemKey(item);
 
         if (!key.replace(/\|/g, "")) {
@@ -1601,7 +1714,11 @@
 
     async function loadItemsFromInvoiceDraft(showMessage = false) {
       const draftId = getInvoiceDraftIdFromUrl();
-      if (!draftId) return false;
+      const isDevelopmentHost = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+      if (!draftId) {
+        if (isDevelopmentHost) console.log("Billing draft load skipped: invoiceDraftId missing");
+        return false;
+      }
 
       const response = await fetch(
         `${API_BASE}/invoice-drafts/${encodeURIComponent(draftId)}/billing?${buildAccessParams(true).toString()}`,
@@ -1619,7 +1736,9 @@
       currentInvoiceDraftId = draftId;
 
       if (!readyItems.length) {
+        if (isDevelopmentHost) console.log("Billing draft load returned no items", { draftId, result });
         billingItems = [];
+        expandedBillingDisplayGroups = new Set();
         renderBillingTable();
         calculateBillingTotal();
         saveBillingItems();
@@ -1627,12 +1746,12 @@
         return true;
       }
 
-      billingItems = aggregateBillingItems(readyItems.map((item, index) => ({
+      billingItems = readyItems.map((item, index) => normalizeBillingItem({
         id: item.id || item.barcode || ("INV-" + index + "-" + Date.now()),
         barcode: item.barcode || "",
         itemName: item.itemName || item.productName || item.product_name || "",
         sku: item.sku || "",
-        quantity: Math.floor(num(item.quantity || 1)) || 1,
+        quantity: 1,
         unitWeight: num(item.unitWeight || item.weight),
         weight: num(item.weight),
         purity: num(item.purity),
@@ -1645,7 +1764,8 @@
         pureWeight: 0,
         totalPrice: 0,
         company_id: item.company_id ?? getCurrentCompanyId()
-      })));
+      }));
+      expandedBillingDisplayGroups = new Set();
 
       const draft = result.draft || {};
       document.getElementById("billCustomerName").value = draft.customerName || "";
@@ -1686,6 +1806,7 @@
       billingItems = [];
       removedBillingBarcodes = [];
       currentInvoiceDraftId = null;
+      expandedBillingDisplayGroups = new Set();
       renderBillingTable();
       calculateBillingTotal();
 
@@ -1723,7 +1844,16 @@
         "billMetalPercent",
         "billMetalPayable",
         "billMetalTotalWeight",
-        "billMetalNote"
+        "billMetalNote",
+        "billMixedCashAmount",
+        "billMixedMetalType",
+        "billMixedGrossWeight",
+        "billMixedPurity",
+        "billMixedFineWeight",
+        "billMixedMetalRate",
+        "billMixedMetalValue",
+        "billMixedMakingCharge",
+        "billMixedRemarks"
       ];
 
       ids.forEach((id) => {
@@ -1735,6 +1865,8 @@
           el.value = "OWNER";
         } else if (id === "billReminderMode") {
           el.value = "Manual";
+        } else if (id === "billMixedMetalType") {
+          el.value = "SILVER";
         } else {
           el.value = "";
         }
@@ -1757,6 +1889,114 @@
       handlePaymentModeChange();
     }
 
+    function escapeBillingHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function getBillingDisplayCategoryName(item = {}) {
+      return String(
+        item.itemName ||
+        item.productName ||
+        item.product_name ||
+        item.category ||
+        item.productCategory ||
+        item.product_category ||
+        "Uncategorized"
+      ).trim() || "Uncategorized";
+    }
+
+    function getBillingDisplayGroupKey(item = {}) {
+      const product = getBillingDisplayCategoryName(item).toLowerCase();
+      const purity = num(item.purity) > 0 ? num(item.purity).toFixed(2) : "";
+      const lot = String(item.lot || item.lot_number || "").trim().toLowerCase();
+      return [product, purity, lot].join("||");
+    }
+
+    function getCommonBillingDisplayValue(items = [], getter = () => "") {
+      const values = [...new Set(items.map((item) => String(getter(item) || "").trim()).filter(Boolean))];
+      return values.length === 1 ? values[0] : "-";
+    }
+
+    function getBillingDisplayGroups(items = billingItems) {
+      const groups = new Map();
+
+      items.forEach((item, index) => {
+        const categoryName = getBillingDisplayCategoryName(item);
+        const key = getBillingDisplayGroupKey(item);
+
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            categoryName,
+            sku: "",
+            quantity: 0,
+            weight: 0,
+            pureWeight: 0,
+            totalPrice: 0,
+            purity: num(item.purity),
+            size: "",
+            lot: String(item.lot || item.lot_number || "").trim() || "-",
+            items: []
+          });
+        }
+
+        const group = groups.get(key);
+        group.quantity += getBillingItemQty(item);
+        group.weight += num(item.weight);
+        group.pureWeight += num(item.pureWeight);
+        group.totalPrice += num(item.totalPrice);
+        group.items.push({ item, index });
+      });
+
+      return Array.from(groups.values()).map((group) => {
+        const groupItems = group.items.map(({ item }) => item);
+        return {
+          ...group,
+          sku: getCommonBillingDisplayValue(groupItems, (item) => item.sku),
+          size: getCommonBillingDisplayValue(groupItems, (item) => item.size),
+          lot: getCommonBillingDisplayValue(groupItems, (item) => item.lot || item.lot_number) || "-"
+        };
+      });
+    }
+
+    function toggleBillingDisplayGroup(encodedGroupKey) {
+      const groupKey = decodeURIComponent(encodedGroupKey || "");
+      if (expandedBillingDisplayGroups.has(groupKey)) {
+        expandedBillingDisplayGroups.delete(groupKey);
+      } else {
+        expandedBillingDisplayGroups.add(groupKey);
+      }
+      renderBillingTable();
+    }
+
+    function renderBillingDetailRow(item, index, displaySl = "") {
+      return `
+        <tr class="billing-detail-row">
+          <td>${escapeBillingHtml(displaySl)}</td>
+          <td>${escapeBillingHtml(item.barcode || "")}</td>
+          <td>${escapeBillingHtml(item.itemName || "")}</td>
+          <td>${escapeBillingHtml(item.sku || "")}</td>
+          <td><span>${getBillingItemQty(item)}</span></td>
+          <td>${num(item.weight).toFixed(3)}</td>
+          <td>${num(item.purity).toFixed(2)}</td>
+          <td>${escapeBillingHtml(item.size || "")}</td>
+          <td>${escapeBillingHtml(item.lot || "")}</td>
+          <td>${num(item.pureWeight).toFixed(3)}</td>
+          <td>${num(document.getElementById("billRatePerGram")?.value).toFixed(2)}</td>
+          <td>${num(document.getElementById("billMcRate")?.value).toFixed(2)}</td>
+          <td>${num(item.totalPrice).toFixed(2)}</td>
+          <td>
+            <button type="button" class="mini-btn clear-btn" onclick="deleteBillingItem(${index})">Delete</button>
+          </td>
+        </tr>
+      `;
+    }
+
     function renderBillingTable() {
       const tbody = document.getElementById("billingTableBody");
       const totalCount = document.getElementById("billTotalCount");
@@ -1765,36 +2005,45 @@
       if (!tbody) return;
 
       tbody.innerHTML = "";
-      let totalWeight = 0;
-      let totalRows = 0;
+      const totalWeight = billingItems.reduce((sum, item) => sum + num(item.weight), 0);
+      const totalRows = billingItems.length;
 
-      billingItems.forEach((item, index) => {
-        totalWeight += num(item.weight);
-        totalRows += 1;
+      getBillingDisplayGroups().forEach((group, groupIndex) => {
+        const isExpanded = expandedBillingDisplayGroups.has(group.key);
+        const detailLabel = group.items.some(({ item }) => hasBillingBarcodeSource(item)) ? "Barcodes" : "Details";
 
         tbody.innerHTML += `
           <tr>
-            <td>${index + 1}</td>
-            <td>${item.itemName || ""}</td>
-            <td>${item.sku || ""}</td>
-            <td><span>${getBillingItemQty(item)}</span></td>
-            <td>${num(item.weight).toFixed(3)}</td>
-            <td>${num(item.purity).toFixed(2)}</td>
-            <td>${item.size || ""}</td>
-            <td>${item.lot || ""}</td>
-            <td>${num(item.pureWeight).toFixed(3)}</td>
+            <td>${groupIndex + 1}</td>
+            <td>
+              <button type="button" class="mini-btn" onclick="toggleBillingDisplayGroup('${encodeURIComponent(group.key)}')">
+                ${isExpanded ? "Hide" : "View"} ${detailLabel}
+              </button>
+            </td>
+            <td>${escapeBillingHtml(group.categoryName)}</td>
+            <td>${escapeBillingHtml(group.sku)}</td>
+            <td><span>${group.quantity}</span></td>
+            <td>${group.weight.toFixed(3)} g</td>
+            <td>${num(group.purity).toFixed(2)}%</td>
+            <td>${escapeBillingHtml(group.size || "-")}</td>
+            <td>${escapeBillingHtml(group.lot || "-")}</td>
+            <td>${group.pureWeight.toFixed(3)}</td>
             <td>${num(document.getElementById("billRatePerGram")?.value).toFixed(2)}</td>
             <td>${num(document.getElementById("billMcRate")?.value).toFixed(2)}</td>
-            <td>${num(item.totalPrice).toFixed(2)}</td>
-            <td>
-              <button type="button" class="mini-btn clear-btn" onclick="deleteBillingItem(${index})">Delete</button>
-            </td>
+            <td>${group.totalPrice.toFixed(2)}</td>
+            <td>Expand to delete barcodes</td>
           </tr>
         `;
+
+        if (isExpanded) {
+          group.items.forEach(({ item, index }, detailIndex) => {
+            tbody.innerHTML += renderBillingDetailRow(item, index, `${groupIndex + 1}.${detailIndex + 1}`);
+          });
+        }
       });
 
       if (!billingItems.length) {
-        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;">No billing items found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="14" style="text-align:center;">No billing items found</td></tr>`;
       }
 
       if (totalCount) totalCount.textContent = totalRows;
@@ -1938,7 +2187,7 @@
       const statusEl = document.getElementById("billPaymentStatus");
       const paidEl = document.getElementById("billPaidAmount");
       const dueEl = document.getElementById("billDueAmount");
-      const companyTotal = num(document.getElementById("billCompanyTotal").value);
+      const customerGrandTotal = num(document.getElementById("billGrandTotal").value);
 
       if (mode === "Cash" || mode === "Online") {
         if (!statusEl.value || statusEl.value === "Due" || statusEl.value === "Metal Settled") {
@@ -1946,30 +2195,32 @@
         }
 
         if (statusEl.value === "Paid") {
-          paidEl.value = companyTotal.toFixed(2);
+          paidEl.value = customerGrandTotal.toFixed(2);
           dueEl.value = "0.00";
         } else if (statusEl.value === "Partial") {
           const paid = num(paidEl.value);
-          dueEl.value = Math.max(companyTotal - paid, 0).toFixed(2);
+          dueEl.value = Math.max(customerGrandTotal - paid, 0).toFixed(2);
         } else if (statusEl.value === "Due") {
           paidEl.value = "0.00";
-          dueEl.value = companyTotal.toFixed(2);
+          dueEl.value = customerGrandTotal.toFixed(2);
         }
       } else if (mode === "Due") {
         statusEl.value = "Due";
         paidEl.value = "0.00";
-        dueEl.value = companyTotal.toFixed(2);
+        dueEl.value = customerGrandTotal.toFixed(2);
       } else if (mode === "Metal") {
         statusEl.value = "Metal Settled";
         paidEl.value = "0.00";
         dueEl.value = "0.00";
+      } else if (mode === "Cash + Metal") {
+        calculateMixedSettlement();
       }
 
       updateQuickSummary();
     }
 
     function syncAmountsFromInputs() {
-      const companyTotal = num(document.getElementById("billCompanyTotal").value);
+      const customerGrandTotal = num(document.getElementById("billGrandTotal").value);
       const paidEl = document.getElementById("billPaidAmount");
       const dueEl = document.getElementById("billDueAmount");
       const statusEl = document.getElementById("billPaymentStatus");
@@ -1978,20 +2229,24 @@
       const paid = num(paidEl.value);
 
       if (mode === "Cash" || mode === "Online") {
-        if (paid >= companyTotal && companyTotal > 0) {
+        if (paid >= customerGrandTotal && customerGrandTotal > 0) {
           statusEl.value = "Paid";
           dueEl.value = "0.00";
-        } else if (paid > 0 && paid < companyTotal) {
+        } else if (paid > 0 && paid < customerGrandTotal) {
           statusEl.value = "Partial";
-          dueEl.value = Math.max(companyTotal - paid, 0).toFixed(2);
-        } else if (paid === 0 && companyTotal > 0) {
+          dueEl.value = Math.max(customerGrandTotal - paid, 0).toFixed(2);
+        } else if (paid === 0 && customerGrandTotal > 0) {
           statusEl.value = "Due";
-          dueEl.value = companyTotal.toFixed(2);
+          dueEl.value = customerGrandTotal.toFixed(2);
         }
       }
 
       if (mode === "Due") {
-        dueEl.value = companyTotal.toFixed(2);
+        dueEl.value = customerGrandTotal.toFixed(2);
+      }
+      if (mode === "Cash + Metal") {
+        calculateMixedSettlement();
+        return;
       }
 
       document.getElementById("duePreviewText").textContent = num(dueEl.value).toFixed(2);
@@ -2012,6 +2267,7 @@
       document.getElementById("onlinePaymentBox").classList.add("payment-section-hidden");
       document.getElementById("duePaymentBox").classList.add("payment-section-hidden");
       document.getElementById("metalPaymentBox").classList.add("payment-section-hidden");
+      document.getElementById("mixedPaymentBox").classList.add("payment-section-hidden");
 
       if (mode === "Online") {
         document.getElementById("onlinePaymentBox").classList.remove("payment-section-hidden");
@@ -2019,6 +2275,8 @@
         document.getElementById("duePaymentBox").classList.remove("payment-section-hidden");
       } else if (mode === "Metal") {
         document.getElementById("metalPaymentBox").classList.remove("payment-section-hidden");
+      } else if (mode === "Cash + Metal") {
+        document.getElementById("mixedPaymentBox").classList.remove("payment-section-hidden");
       }
 
       autoSetAmounts();
@@ -2026,6 +2284,63 @@
       generatePaymentQr();
       updateQuickSummary();
       maybeAutoFinalize();
+    }
+
+    function markMixedFineManual() {
+      const fineEl = document.getElementById("billMixedFineWeight");
+      if (fineEl) fineEl.dataset.manual = "1";
+    }
+
+    function getMixedPaymentBillTotal() {
+      return num(document.getElementById("billGrandTotal")?.value || document.getElementById("billCompanyTotal")?.value || 0);
+    }
+
+    function calculateMixedSettlement() {
+      const mode = document.getElementById("billPaymentMode")?.value || "";
+      if (mode !== "Cash + Metal") return null;
+
+      const total = getMixedPaymentBillTotal();
+      const cashEl = document.getElementById("billMixedCashAmount");
+      const grossEl = document.getElementById("billMixedGrossWeight");
+      const purityEl = document.getElementById("billMixedPurity");
+      const fineEl = document.getElementById("billMixedFineWeight");
+      const rateEl = document.getElementById("billMixedMetalRate");
+      const valueEl = document.getElementById("billMixedMetalValue");
+      const statusEl = document.getElementById("billPaymentStatus");
+      const paidEl = document.getElementById("billPaidAmount");
+      const dueEl = document.getElementById("billDueAmount");
+
+      const cashAmount = Math.max(num(cashEl?.value || 0), 0);
+      const grossWeight = Math.max(num(grossEl?.value || 0), 0);
+      const purity = Math.max(num(purityEl?.value || 0), 0);
+      const autoFine = grossWeight > 0 && purity > 0 ? (grossWeight * purity) / 100 : 0;
+      if (fineEl && !fineEl.dataset.manual) {
+        fineEl.value = autoFine ? autoFine.toFixed(3) : "";
+      }
+      const fineWeight = Math.max(num(fineEl?.value || 0), 0);
+      const metalRate = Math.max(num(rateEl?.value || 0), 0);
+      const metalValue = fineWeight * metalRate;
+      if (valueEl) valueEl.value = metalValue ? metalValue.toFixed(2) : "";
+
+      const paidTotal = cashAmount + metalValue;
+      const dueAmount = Math.max(total - paidTotal, 0);
+      if (paidEl) paidEl.value = cashAmount.toFixed(2);
+      if (dueEl) dueEl.value = dueAmount.toFixed(2);
+      if (statusEl) {
+        statusEl.value = dueAmount <= 0 ? "Paid" : paidTotal > 0 ? "Partial" : "Due";
+      }
+
+      const cashText = document.getElementById("mixedCashPreviewText");
+      const metalText = document.getElementById("mixedMetalValueText");
+      const dueText = document.getElementById("mixedDuePreviewText");
+      const duePreviewText = document.getElementById("duePreviewText");
+      if (cashText) cashText.textContent = cashAmount.toFixed(2);
+      if (metalText) metalText.textContent = metalValue.toFixed(2);
+      if (dueText) dueText.textContent = dueAmount.toFixed(2);
+      if (duePreviewText) duePreviewText.textContent = dueAmount.toFixed(2);
+      generatePaymentQr();
+      updateQuickSummary();
+      return { total, cashAmount, grossWeight, purity, fineWeight, metalRate, metalValue, dueAmount, paidTotal };
     }
 
     function calculateMetalSettlement() {
@@ -2064,7 +2379,7 @@
       const invoiceNo = String(document.getElementById("billInvoiceNumber")?.value || "BILL").trim();
       const grandTotal = Number(document.getElementById("billGrandTotal")?.value || 0);
       const companyTotal = Number(document.getElementById("billCompanyTotal")?.value || 0);
-      const paidAmount = Number(document.getElementById("billPaidAmount")?.value || companyTotal || 0);
+      const paidAmount = Number(document.getElementById("billPaidAmount")?.value || 0);
       const dueAmount = Number(document.getElementById("billDueAmount")?.value || 0);
       const duePreviewText = document.getElementById("duePreviewText");
       const onlineGrandTotalText = document.getElementById("onlineGrandTotalText");
@@ -2073,8 +2388,13 @@
 
       if (onlineGrandTotalText) onlineGrandTotalText.textContent = grandTotal.toFixed(2);
       if (onlineCompanyTotalText) onlineCompanyTotalText.textContent = companyTotal.toFixed(2);
+      const payableNow = !isNaN(dueAmount) && dueAmount > 0
+        ? dueAmount
+        : !isNaN(paidAmount) && paidAmount > 0
+          ? paidAmount
+          : grandTotal;
       if (onlinePayNowText) {
-        onlinePayNowText.textContent = (!isNaN(paidAmount) && paidAmount > 0 ? paidAmount : companyTotal).toFixed(2);
+        onlinePayNowText.textContent = payableNow.toFixed(2);
       }
 
       if (duePreviewText) {
@@ -2094,8 +2414,6 @@
         qrBox.innerHTML = `<div style="text-align:center; font-size:13px; color:#64748b; line-height:1.6;">Please save a permanent UPI ID in Settings.</div>`;
         return;
       }
-
-      const payableNow = !isNaN(paidAmount) && paidAmount > 0 ? paidAmount : companyTotal;
 
       if (!payableNow || payableNow <= 0) {
         qrBox.innerHTML = `<div style="text-align:center; font-size:13px; color:#64748b; line-height:1.6;">An amount is required to generate the QR code.</div>`;
@@ -2126,7 +2444,7 @@
       const invoiceNo = document.getElementById("billInvoiceNumber").value.trim() || "";
       const mode = document.getElementById("billPaymentMode").value || "";
       const status = document.getElementById("billPaymentStatus").value || "";
-      const grandTotal = document.getElementById("billCompanyTotal").value || document.getElementById("billGrandTotal").value || "0";
+      const grandTotal = document.getElementById("billGrandTotal").value || "0";
       const paidAmount = document.getElementById("billPaidAmount").value || "0";
       return companyScopedKey(`AUTO_PRINT_${invoiceNo}_${mode}_${status}_${grandTotal}_${paidAmount}`);
     }
@@ -2191,9 +2509,19 @@
 
       const dueNote = document.getElementById("billDueNote").value.trim() || "";
       const reminderMode = document.getElementById("billReminderMode").value || "";
-      const metalPercent = num(document.getElementById("billMetalPercent").value);
-      const metalPayable = num((document.getElementById("billMetalPayable").value || "").replace(/[^\d.]/g, ""));
-      const metalNote = document.getElementById("billMetalNote").value.trim() || "";
+      const isMixedPayment = paymentMode === "Cash + Metal";
+      const mixedGrossWeight = num(document.getElementById("billMixedGrossWeight")?.value || 0);
+      const mixedPurity = num(document.getElementById("billMixedPurity")?.value || 0);
+      const mixedFineWeight = num(document.getElementById("billMixedFineWeight")?.value || 0);
+      const mixedMetalRate = num(document.getElementById("billMixedMetalRate")?.value || 0);
+      const mixedMetalValue = num(document.getElementById("billMixedMetalValue")?.value || 0);
+      const mixedMakingCharge = num(document.getElementById("billMixedMakingCharge")?.value || 0);
+      const mixedRemarks = document.getElementById("billMixedRemarks")?.value.trim() || "";
+      const metalPercent = isMixedPayment ? mixedPurity : num(document.getElementById("billMetalPercent").value);
+      const metalPayable = isMixedPayment
+        ? mixedFineWeight
+        : num((document.getElementById("billMetalPayable").value || "").replace(/[^\d.]/g, ""));
+      const metalNote = isMixedPayment ? mixedRemarks : document.getElementById("billMetalNote").value.trim() || "";
       const erpSettings = getErpSettings();
 
       return {
@@ -2234,6 +2562,17 @@
         metalPercent,
         metalPayable,
         metalNote,
+        mixedPayment: {
+          cashAmount: paidAmount,
+          metalType: document.getElementById("billMixedMetalType")?.value || "",
+          grossWeight: mixedGrossWeight,
+          purity: mixedPurity,
+          fineWeight: mixedFineWeight,
+          metalRate: mixedMetalRate,
+          metalValue: mixedMetalValue,
+          makingCharge: mixedMakingCharge,
+          remarks: mixedRemarks
+        },
         companySettings: erpSettings,
         invoiceDraftId: currentInvoiceDraftId,
         company_id: getCurrentCompanyId(),
@@ -2249,6 +2588,46 @@
       }
 
       const record = getBillingRecord();
+      if (record.paymentMode === "Cash + Metal") {
+        const mixed = calculateMixedSettlement() || record.mixedPayment || {};
+        const total = getMixedPaymentBillTotal();
+        const cashAmount = num(mixed.cashAmount || 0);
+        const metalValue = num(mixed.metalValue || 0);
+        const fineWeight = num(mixed.fineWeight || 0);
+        const metalRate = num(mixed.metalRate || 0);
+        const grossWeight = num(mixed.grossWeight || 0);
+        const purity = num(mixed.purity || 0);
+        record.paidAmount = cashAmount;
+        record.dueAmount = num(mixed.dueAmount || 0);
+        record.paymentStatus = record.dueAmount <= 0 ? "Paid" : cashAmount + metalValue > 0 ? "Partial" : "Due";
+        record.metalPercent = purity;
+        record.metalPayable = fineWeight;
+        record.mixedPayment = {
+          ...record.mixedPayment,
+          cashAmount,
+          grossWeight,
+          purity,
+          fineWeight,
+          metalRate,
+          metalValue
+        };
+        if (cashAmount < 0 || metalValue < 0 || record.dueAmount < 0) {
+          showToast("Cash, metal value, and due amount cannot be negative.", "error");
+          return null;
+        }
+        if (fineWeight > 0 && (!record.mixedPayment?.metalType || grossWeight <= 0 || purity <= 0 || metalRate <= 0)) {
+          showToast("Metal type, gross weight, purity, fine weight, and metal rate are required for metal payment.", "error");
+          return null;
+        }
+        if (metalValue - Math.max(total - cashAmount, 0) > 0.009 || cashAmount + metalValue - total > 0.009) {
+          showToast("Cash + Metal cannot exceed bill total.", "error");
+          return null;
+        }
+        if (Math.abs(num(mixed.metalValue || metalValue) - metalValue) > 0.009) {
+          showToast("Please recalculate mixed payment before saving.", "error");
+          return null;
+        }
+      }
       const purityValidation = validateBillingSalePurity(record.items);
       updateBillingSaveState(purityValidation);
       if (!purityValidation.ok) {
@@ -2330,6 +2709,12 @@
             metalPercent: record.metalPercent,
             metalPayable: record.metalPayable,
             metalNote: record.metalNote,
+            metalType: record.paymentMode === "Cash + Metal" ? record.mixedPayment.metalType : "",
+            metalGrossWeight: record.paymentMode === "Cash + Metal" ? record.mixedPayment.grossWeight : 0,
+            metalFineWeight: record.paymentMode === "Cash + Metal" ? record.mixedPayment.fineWeight : 0,
+            metalRate: record.paymentMode === "Cash + Metal" ? record.mixedPayment.metalRate : 0,
+            metalValue: record.paymentMode === "Cash + Metal" ? record.mixedPayment.metalValue : 0,
+            metalMakingCharge: record.paymentMode === "Cash + Metal" ? record.mixedPayment.makingCharge : 0,
             invoiceDraftId: record.invoiceDraftId,
             branchId: getSelectedBillingBranchId(),
             branch_id: getSelectedBillingBranchId(),
@@ -2378,7 +2763,7 @@
     }
 
     function formatCurrency(value) {
-      return `Rs. ${num(value).toFixed(2)}`;
+      return `₹ ${num(value).toFixed(2)}`;
     }
 
     function buildPrintableCustomerAddress(customer = {}) {
@@ -2488,6 +2873,82 @@
       return parts.join(" ").trim();
     }
 
+    function getBillingJsPDFCtor() {
+      return window.jspdf?.jsPDF || window.jsPDF;
+    }
+
+    function loadScriptOnce(src, isReady) {
+      return new Promise((resolve, reject) => {
+        if (typeof isReady === "function" && isReady()) {
+          resolve();
+          return;
+        }
+
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+          if (existing.dataset.loaded === "1") {
+            resolve();
+            return;
+          }
+          existing.addEventListener("load", resolve, { once: true });
+          existing.addEventListener("error", reject, { once: true });
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = src;
+        script.dataset.loaded = "0";
+        script.onload = () => {
+          script.dataset.loaded = "1";
+          resolve();
+        };
+        script.onerror = () => reject(new Error(`Unable to load ${src}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensureBillingPdfLibraries() {
+      const missing = [];
+      try {
+        await loadScriptOnce("js/libs/html2canvas.min.js", () => typeof window.html2canvas === "function");
+      } catch (error) {
+        console.log("html2canvas load failed:", error);
+      }
+      if (typeof window.html2canvas !== "function") missing.push("html2canvas");
+
+      try {
+        await loadScriptOnce("js/libs/jspdf.min.js", () => typeof getBillingJsPDFCtor() === "function");
+      } catch (error) {
+        console.log("jsPDF load failed:", error);
+      }
+      if (typeof getBillingJsPDFCtor() !== "function") missing.push("jsPDF");
+
+      return { ok: missing.length === 0, missing };
+    }
+
+    async function waitForInvoiceAssets(doc) {
+      if (doc.fonts?.ready) {
+        try {
+          await doc.fonts.ready;
+        } catch (error) {
+          console.log("Invoice font readiness skipped:", error);
+        }
+      }
+
+      const imagePromises = Array.from(doc.images || []).map((image) => {
+        if (image.complete && image.naturalWidth !== 0) return Promise.resolve();
+        if (typeof image.decode === "function") {
+          return image.decode().catch(() => {});
+        }
+        return new Promise((resolve) => {
+          image.addEventListener("load", resolve, { once: true });
+          image.addEventListener("error", resolve, { once: true });
+        });
+      });
+
+      await Promise.all(imagePromises);
+    }
+
     function buildBillingPrintHtml(data = getBillingRecord()) {
       const record = data;
       if (!record) return "";
@@ -2551,20 +3012,40 @@
       const adjustment = num(record.roundOff);
       const subtotalBase = metalTotal + makingCharge + adjustment;
       const amountInWords = escapePrintHtml(numberToIndianWords(record.grandTotal));
+      const paidAmount = num(record.paidAmount ?? record.paid_amount ?? 0);
+      const dueAmount = Math.max(num(record.dueAmount ?? record.due_amount ?? 0), 0);
+      const mixedPayment = record.mixedPayment || {};
+      const metalFinePaid = num(mixedPayment.fineWeight ?? record.metalPayable ?? record.metal_payable ?? 0);
+      const metalTypePaid = escapePrintHtml(mixedPayment.metalType || record.metalType || record.metal_type || "");
+      const inferredMetalValue = Math.max(num(record.grandTotal) - paidAmount - dueAmount, 0);
+      const metalValuePaid = metalFinePaid > 0 ? num(mixedPayment.metalValue ?? record.metalValue ?? inferredMetalValue) : 0;
+      const metalPaidText = metalFinePaid > 0
+        ? `${metalTypePaid || "Metal"} Fine ${metalFinePaid.toFixed(3)} gm`
+        : "None";
+      const grandTotalValue = num(record.grandTotal ?? record.totalAmount ?? record.total_amount);
+      const paidTotal = paidAmount + metalValuePaid;
+      const paymentStatusText = grandTotalValue <= 0
+        ? "NO PAYMENT REQUIRED"
+        : paidTotal >= grandTotalValue && dueAmount <= 0
+          ? "FULLY PAID"
+          : paidTotal > 0 && dueAmount > 0
+            ? "PARTIALLY PAID"
+            : "PAYMENT PENDING";
 
-      const rows = items.map((item) => {
-        const qty = getBillingItemQty(item);
-        const rate = num(item.sellingRatePerGram || record.ratePerGram || 0);
-        const mc = num(record.mcRate || item.mcRate || 0);
-        const amount = num(item.totalPrice || 0);
+      const printGroups = getBillingDisplayGroups(items);
+      const rows = printGroups.map((group) => {
+        const firstItem = group.items[0]?.item || {};
+        const rate = num(firstItem.sellingRatePerGram || record.ratePerGram || 0);
+        const mc = num(record.mcRate || firstItem.mcRate || 0);
+        const amount = num(group.totalPrice || 0);
 
         return `
             <tr>
-              <td>${escapePrintHtml(item.itemName || "")}</td>
-              <td class="num">${qty}</td>
-              <td class="num">${num(item.purity).toFixed(2)}</td>
-              <td class="num">${num(item.weight).toFixed(3)} g</td>
-              <td class="num">${num(item.pureWeight).toFixed(3)} g</td>
+              <td>${escapePrintHtml(group.categoryName || "")}</td>
+              <td class="num">${group.quantity}</td>
+              <td class="num">${num(group.purity).toFixed(2)}</td>
+              <td class="num">${num(group.weight).toFixed(3)} g</td>
+              <td class="num">${num(group.pureWeight).toFixed(3)} g</td>
               <td class="rate">${formatCurrency(rate)}</td>
               <td class="rate">${num(mc).toFixed(2)}</td>
               <td class="amount">${formatCurrency(amount)}</td>
@@ -2726,6 +3207,7 @@
     .info-card h3,
     .note-card h4,
     .thanks-card h4,
+    .payment-status-card h4,
     .declaration-card h4,
     .total-card h4 {
       margin: 0 0 6px;
@@ -2811,6 +3293,7 @@
     }
     .note-card,
     .thanks-card,
+    .payment-status-card,
     .declaration-card,
     .total-card {
       border-radius: 10px;
@@ -2829,6 +3312,37 @@
       font-size: 10.5px;
       color: #4a4031;
       line-height: 1.38;
+    }
+    .payment-status-card {
+      padding: 8px 10px;
+      background: linear-gradient(180deg, #fffdfa 0%, #fff6df 100%);
+    }
+    .payment-status-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .payment-status-table td {
+      padding: 3px 0;
+      font-size: 10.5px;
+      border-bottom: 1px solid var(--line-soft);
+      color: #4a4031;
+    }
+    .payment-status-table tr:last-child td {
+      border-bottom: none;
+    }
+    .payment-status-table td:first-child {
+      color: var(--muted);
+    }
+    .payment-status-table td:last-child {
+      text-align: right;
+      font-weight: 700;
+      color: #352d22;
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      font-variant-numeric: tabular-nums lining-nums;
+    }
+    .payment-status-value {
+      color: var(--gold-deep);
+      letter-spacing: 0.04em;
     }
     .totals-table td {
       padding: 4px 0;
@@ -3037,6 +3551,16 @@
             <p>${thankYouHtml}</p>
           </div>
           ` : ""}
+          <div class="payment-status-card">
+            <h4>Payment Status</h4>
+            <table class="payment-status-table">
+              <tr><td>Cash Paid</td><td>${formatCurrency(paidAmount)}</td></tr>
+              <tr><td>Metal Paid</td><td>${metalPaidText}</td></tr>
+              <tr><td>Metal Value</td><td>${formatCurrency(metalValuePaid)}</td></tr>
+              <tr><td>Due</td><td>${formatCurrency(dueAmount)}</td></tr>
+              <tr><td>Status</td><td class="payment-status-value">${paymentStatusText}</td></tr>
+            </table>
+          </div>
         </div>
 
         <div class="total-card">
@@ -3120,36 +3644,136 @@
       printInvoice(record);
     }
 
-    function downloadBillingInvoice() {
+    async function downloadBillingInvoice() {
       if (!billingItems.length) {
       showToast("There are no items in the billing table.", "error");
         return;
       }
 
-      const html = buildBillingPrintHtml();
-      if (!html) return;
-
-      const wrapper = document.createElement("div");
-      wrapper.innerHTML = html;
-
-      const invoiceBox = wrapper.querySelector(".invoice-sheet");
-      if (!invoiceBox) {
-        showToast("Download failed", "error");
+      calculateBillingTotal();
+      const record = getBillingRecord();
+      const pdfLibraries = await ensureBillingPdfLibraries();
+      const jsPDFCtor = getBillingJsPDFCtor();
+      if (!pdfLibraries.ok || typeof window.html2canvas !== "function" || typeof jsPDFCtor !== "function") {
+        const missingText = pdfLibraries.missing.length ? pdfLibraries.missing.join(" and ") : "PDF";
+        showToast(`${missingText} library missing. Please try Print.`, "error");
         return;
       }
 
-      const invoiceNumber = document.getElementById("billInvoiceNumber").value.trim() || ("billing-" + Date.now());
+      const invoiceNumber = record.invoiceNumber || document.getElementById("billInvoiceNumber").value.trim() || ("billing-" + Date.now());
+      const html = buildBillingPrintHtml(record);
+      if (!html) {
+        showToast("PDF generation failed. Please try Print.", "error");
+        return;
+      }
 
-      const opt = {
-        margin: 0,
-        filename: `${invoiceNumber}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
-      };
+      const parser = new DOMParser();
+      const parsedDoc = parser.parseFromString(html, "text/html");
+      const renderHost = document.createElement("div");
+      renderHost.setAttribute("aria-hidden", "true");
+      Object.assign(renderHost.style, {
+        position: "absolute",
+        left: "0",
+        top: "0",
+        width: "210mm",
+        minHeight: "320mm",
+        visibility: "visible",
+        opacity: "1",
+        pointerEvents: "none",
+        zIndex: "-1",
+        background: "#f6f1e7",
+        overflow: "visible"
+      });
 
-      html2pdf().set(opt).from(invoiceBox).save();
-      saveBillingRecord(false);
+      parsedDoc.head.querySelectorAll("style, link[rel='stylesheet']").forEach((node) => {
+        renderHost.appendChild(node.cloneNode(true));
+      });
+      Array.from(parsedDoc.body.children).forEach((node) => {
+        renderHost.appendChild(node.cloneNode(true));
+      });
+      document.body.appendChild(renderHost);
+
+      try {
+        await waitForInvoiceAssets(document);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const invoiceSheet = renderHost.querySelector(".invoice-sheet");
+        if (!invoiceSheet) {
+          showToast("PDF generation failed. Please try Print.", "error");
+          return;
+        }
+
+        Object.assign(invoiceSheet.style, {
+          width: "210mm",
+          maxWidth: "210mm",
+          minHeight: "auto",
+          margin: "0 auto",
+          boxSizing: "border-box",
+          overflow: "visible"
+        });
+
+        const rect = invoiceSheet.getBoundingClientRect();
+        const captureWidth = Math.ceil(Math.max(invoiceSheet.scrollWidth, invoiceSheet.offsetWidth, rect.width));
+        const captureHeight = Math.ceil(Math.max(invoiceSheet.scrollHeight, invoiceSheet.offsetHeight, rect.height));
+        if (captureWidth <= 0 || captureHeight <= 0) {
+          showToast("PDF generation failed. Please try Print.", "error");
+          return;
+        }
+
+        const canvas = await window.html2canvas(invoiceSheet, {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: "#ffffff",
+          scrollX: 0,
+          scrollY: 0,
+          width: captureWidth,
+          height: captureHeight,
+          windowWidth: captureWidth,
+          windowHeight: captureHeight
+        });
+
+        if (!canvas || !canvas.width || !canvas.height) {
+          showToast("PDF generation failed. Please try Print.", "error");
+          return;
+        }
+
+        const filename = `${String(invoiceNumber).replace(/[\\/:*?"<>|]+/g, "-")}.pdf`;
+        const pdf = new jsPDFCtor("p", "mm", "a4");
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = pageWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const pageCanvasHeight = Math.floor((pageHeight * canvas.width) / pageWidth);
+        let sourceY = 0;
+        let pageIndex = 0;
+
+        while (sourceY < canvas.height) {
+          const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
+          const pageCanvas = document.createElement("canvas");
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = sliceHeight;
+          const pageContext = pageCanvas.getContext("2d");
+          pageContext.fillStyle = "#ffffff";
+          pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          pageContext.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+          if (pageIndex > 0) pdf.addPage();
+          const pageImgData = pageCanvas.toDataURL("image/jpeg", 0.98);
+          const pageImgHeight = (sliceHeight * imgWidth) / canvas.width;
+          pdf.addImage(pageImgData, "JPEG", 0, 0, imgWidth, pageImgHeight, undefined, "FAST");
+
+          sourceY += sliceHeight;
+          pageIndex += 1;
+        }
+
+        pdf.save(filename);
+      } catch (error) {
+        console.log("Billing PDF download error:", error);
+        showToast("PDF generation failed. Please try Print.", "error");
+      } finally {
+        renderHost.remove();
+      }
     }
 
     window.addEventListener("load", async function () {
@@ -3221,6 +3845,8 @@
   <script src="js/help-guide.js"></script>
 </body>
 </html>
+
+
 
 
 

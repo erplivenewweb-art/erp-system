@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "data": {
+    "quoteId": "pqt_01JZ8PRICE0000000000000000",
+    "pricingType": "RETAIL",
+    "currency": "INR",
+    "lines": [
+      {
+        "variantId": "var_01JZ8Q00000000000000000000",
+        "quantity": 1,
+        "unitAmount": "42500.00",
+        "lineTotal": "42500.00"
+      }
+    ],
+    "taxDisplay": {
+      "mode": "INCLUSIVE_OR_FINAL_VALIDATION",
+      "message": "Tax is validated by ERP before operational acceptance."
+    },
+    "validUntil": "2026-07-11T10:05:00Z",
+    "freshnessStatus": "FRESH"
+  },
+  "metadata": {
+    "requestId": "01JZ8REQ1000000000000000000",
+    "correlationId": "01JZ8COR1000000000000000000",
+    "generatedAt": "2026-07-11T10:00:00Z",
+    "contractVersion": "1.0.0"
+  }
+}
+

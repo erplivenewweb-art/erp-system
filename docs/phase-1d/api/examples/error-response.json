@@ -1,0 +1,18 @@
+{
+  "success": false,
+  "error": {
+    "code": "WHOLESALE_ACCESS_DENIED",
+    "message": "Approved dealer access is required.",
+    "status": 403,
+    "retryable": false,
+    "correlationId": "01JZ8COR4000000000000000000",
+    "violations": []
+  },
+  "metadata": {
+    "requestId": "01JZ8REQ4000000000000000000",
+    "correlationId": "01JZ8COR4000000000000000000",
+    "generatedAt": "2026-07-11T10:00:00Z",
+    "contractVersion": "1.0.0"
+  }
+}
+

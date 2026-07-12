@@ -1,0 +1,1881 @@
+{
+  "notice": "DESIGN ONLY — NOT RUNTIME",
+  "version": "1.0.0",
+  "page_count": 36,
+  "required_fields": [
+    "purpose",
+    "business_goal",
+    "user_goal",
+    "primary_cta",
+    "secondary_cta",
+    "desktop_layout",
+    "tablet_layout",
+    "mobile_layout",
+    "cms_editable_areas",
+    "seo_areas",
+    "accessibility_notes",
+    "performance_notes",
+    "animation_notes",
+    "analytics_events",
+    "future_app_mapping"
+  ],
+  "pages": [
+    {
+      "id": "page-01",
+      "slug": "home",
+      "name": "Home",
+      "purpose": "Introduce the manufacturer-led luxury brand and route visitors to products, craft, custom and wholesale.",
+      "business_goal": "Increase qualified product discovery and trust.",
+      "user_goal": "Understand the brand and choose a relevant path.",
+      "primary_cta": "Explore Silver Sankha",
+      "secondary_cta": "Discover our craft",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Hero → Trust proof → Collections → Featured products → Manufacturing → Reviews → Wholesale → Journal → Footer; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Hero → Trust proof → Collections → Featured products → Manufacturing then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Hero → Trust proof → Collections → Featured products → Manufacturing → Reviews → Wholesale → Journal → Footer; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "home_view",
+        "home_primary_cta",
+        "home_secondary_cta",
+        "home_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Home screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-02",
+      "slug": "category",
+      "name": "Category",
+      "purpose": "Help users browse a stable product taxonomy.",
+      "business_goal": "Move category intent into product consideration.",
+      "user_goal": "Compare relevant product types quickly.",
+      "primary_cta": "View product",
+      "secondary_cta": "Adjust filters",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Breadcrumb → Editorial intro → Filter/sort → Product grid → FAQ → Related categories; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Breadcrumb → Editorial intro → Filter/sort then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Breadcrumb → Editorial intro → Filter/sort → Product grid → FAQ → Related categories; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "category_view",
+        "category_primary_cta",
+        "category_secondary_cta",
+        "category_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Category screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-03",
+      "slug": "collection",
+      "name": "Collection",
+      "purpose": "Present a curated design story and its products.",
+      "business_goal": "Build collection affinity and product views.",
+      "user_goal": "Understand the collection and find a suitable design.",
+      "primary_cta": "Explore collection",
+      "secondary_cta": "Read collection story",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Breadcrumb → Collection hero → Story → Product grid → Craft note → Related collections; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Breadcrumb → Collection hero → Story then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Breadcrumb → Collection hero → Story → Product grid → Craft note → Related collections; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "collection_view",
+        "collection_primary_cta",
+        "collection_secondary_cta",
+        "collection_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Collection screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-04",
+      "slug": "product",
+      "name": "Product",
+      "purpose": "Enable confident evaluation of one design and variant.",
+      "business_goal": "Drive qualified cart, wishlist, custom or dealer quote intent.",
+      "user_goal": "Judge beauty, facts, fit, price, availability and service.",
+      "primary_cta": "Add to cart",
+      "secondary_cta": "Save or enquire",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Breadcrumb → Gallery → Identity/facts → Price/availability → Options → Delivery/returns → Craft → Reviews → FAQ → Related; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Breadcrumb → Gallery → Identity/facts → Price/availability → Options then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Breadcrumb → Gallery → Identity/facts → Price/availability → Options → Delivery/returns → Craft → Reviews → FAQ → Related; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "product_view",
+        "product_primary_cta",
+        "product_secondary_cta",
+        "product_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Product screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-05",
+      "slug": "search",
+      "name": "Search",
+      "purpose": "Turn explicit intent into relevant discovery.",
+      "business_goal": "Improve findability and product engagement.",
+      "user_goal": "Find products quickly and recover from imperfect queries.",
+      "primary_cta": "View result",
+      "secondary_cta": "Change filters",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Search input → Suggestions → Result count → Filters → Sort → Product grid → Recovery; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Search input → Suggestions → Result count → Filters then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Search input → Suggestions → Result count → Filters → Sort → Product grid → Recovery; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "search_view",
+        "search_primary_cta",
+        "search_secondary_cta",
+        "search_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Search screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-06",
+      "slug": "wishlist",
+      "name": "Wishlist",
+      "purpose": "Hold considered products for later.",
+      "business_goal": "Return users to product/cart decisions.",
+      "user_goal": "Review, compare and move saved items.",
+      "primary_cta": "Move to cart",
+      "secondary_cta": "Remove item",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Saved products → Availability/price freshness → Recommendations; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Saved products → Availability/price freshness then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Saved products → Availability/price freshness → Recommendations; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "wishlist_view",
+        "wishlist_primary_cta",
+        "wishlist_secondary_cta",
+        "wishlist_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Wishlist screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-07",
+      "slug": "cart",
+      "name": "Cart",
+      "purpose": "Review selected items before checkout preview.",
+      "business_goal": "Reduce abandonment and invalid orders.",
+      "user_goal": "Edit quantity and understand current estimate.",
+      "primary_cta": "Review checkout",
+      "secondary_cta": "Continue shopping",
+      "audience": "CUSTOMER_OR_GUEST",
+      "desktop_layout": "12-column composition: Items → Quantity → Freshness → Summary → Delivery/returns trust; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Items → Quantity → Freshness then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Items → Quantity → Freshness → Summary → Delivery/returns trust; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "cart_view",
+        "cart_primary_cta",
+        "cart_secondary_cta",
+        "cart_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Cart screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-08",
+      "slug": "checkout",
+      "name": "Checkout",
+      "purpose": "Collect delivery and payment intent with minimal uncertainty.",
+      "business_goal": "Create a valid staged retail order in future implementation.",
+      "user_goal": "Complete purchase securely without surprises.",
+      "primary_cta": "Place order",
+      "secondary_cta": "Return to cart",
+      "audience": "CUSTOMER_OR_GUEST",
+      "desktop_layout": "12-column composition: Progress → Contact → Address → Delivery → Payment → Review → Consent → Order summary; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Progress → Contact → Address → Delivery then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Progress → Contact → Address → Delivery → Payment → Review → Consent → Order summary; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "checkout_view",
+        "checkout_primary_cta",
+        "checkout_secondary_cta",
+        "checkout_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Checkout screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-09",
+      "slug": "customer-dashboard",
+      "name": "Customer Dashboard",
+      "purpose": "Provide a clear account home.",
+      "business_goal": "Increase self-service and repeat purchase.",
+      "user_goal": "See orders, wishlist, returns and account tasks.",
+      "primary_cta": "View orders",
+      "secondary_cta": "Continue shopping",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Greeting → Active order → Quick links → Wishlist → Notifications → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Greeting → Active order → Quick links then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Greeting → Active order → Quick links → Wishlist → Notifications → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "customer-dashboard_view",
+        "customer-dashboard_primary_cta",
+        "customer-dashboard_secondary_cta",
+        "customer-dashboard_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Customer Dashboard screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-10",
+      "slug": "customer-order-detail",
+      "name": "Customer Order Detail",
+      "purpose": "Explain one order and its immutable purchase details.",
+      "business_goal": "Reduce support contacts and enable allowed actions.",
+      "user_goal": "Understand status, items, payment, shipment and policies.",
+      "primary_cta": "Track order",
+      "secondary_cta": "Request support",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Status timeline → Items snapshot → Address → Price/tax snapshot → Payment state → Shipment → Actions; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Status timeline → Items snapshot → Address → Price/tax snapshot then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Status timeline → Items snapshot → Address → Price/tax snapshot → Payment state → Shipment → Actions; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "customer-order-detail_view",
+        "customer-order-detail_primary_cta",
+        "customer-order-detail_secondary_cta",
+        "customer-order-detail_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Customer Order Detail screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-11",
+      "slug": "returns",
+      "name": "Returns and Refunds",
+      "purpose": "Guide an eligible request without promising approval.",
+      "business_goal": "Capture complete support intent safely.",
+      "user_goal": "Understand eligibility and submit a request.",
+      "primary_cta": "Start request",
+      "secondary_cta": "View policy",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Eligibility → Order/item selection → Reason → Evidence guidance → Resolution preference → Confirmation; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Eligibility → Order/item selection → Reason then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Eligibility → Order/item selection → Reason → Evidence guidance → Resolution preference → Confirmation; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "returns_view",
+        "returns_primary_cta",
+        "returns_secondary_cta",
+        "returns_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Returns and Refunds screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-12",
+      "slug": "dealer-dashboard",
+      "name": "Dealer Dashboard",
+      "purpose": "Surface approved dealer priorities.",
+      "business_goal": "Accelerate wholesale ordering and quotation management.",
+      "user_goal": "Act on quotes, orders, dispatches and terms.",
+      "primary_cta": "Start bulk order",
+      "secondary_cta": "Request quotation",
+      "audience": "APPROVED_DEALER",
+      "desktop_layout": "12-column composition: Status → KPIs → Quotes → Orders → Dispatches → Catalogue → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Status → KPIs → Quotes → Orders then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Status → KPIs → Quotes → Orders → Dispatches → Catalogue → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "dealer-dashboard_view",
+        "dealer-dashboard_primary_cta",
+        "dealer-dashboard_secondary_cta",
+        "dealer-dashboard_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Dealer Dashboard screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-13",
+      "slug": "dealer-registration",
+      "name": "Dealer Registration",
+      "purpose": "Create and submit a dealer application.",
+      "business_goal": "Acquire qualified wholesale partners with complete evidence.",
+      "user_goal": "Apply with clarity and save progress.",
+      "primary_cta": "Save and continue",
+      "secondary_cta": "Save for later",
+      "audience": "DEALER_APPLICANT",
+      "desktop_layout": "12-column composition: Benefits → Eligibility → Stepper → Account → Business → GST reference → Evidence reference → Review; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Benefits → Eligibility → Stepper → Account then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Benefits → Eligibility → Stepper → Account → Business → GST reference → Evidence reference → Review; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "dealer-registration_view",
+        "dealer-registration_primary_cta",
+        "dealer-registration_secondary_cta",
+        "dealer-registration_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Dealer Registration screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-14",
+      "slug": "dealer-catalogue",
+      "name": "Dealer Catalogue",
+      "purpose": "Support dense, entitlement-gated wholesale discovery.",
+      "business_goal": "Increase valid bulk-cart and quote activity.",
+      "user_goal": "Find products, prices, MOQ and slabs efficiently.",
+      "primary_cta": "Add bulk quantity",
+      "secondary_cta": "Request quote",
+      "audience": "APPROVED_DEALER",
+      "desktop_layout": "12-column composition: Bulk search → Filters → List/grid toggle → Authorized prices → MOQ/slabs → Bulk cart tray; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Bulk search → Filters → List/grid toggle then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Bulk search → Filters → List/grid toggle → Authorized prices → MOQ/slabs → Bulk cart tray; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "dealer-catalogue_view",
+        "dealer-catalogue_primary_cta",
+        "dealer-catalogue_secondary_cta",
+        "dealer-catalogue_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Dealer Catalogue screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-15",
+      "slug": "quotation",
+      "name": "Quotation",
+      "purpose": "Make revisions, terms and acceptance understandable.",
+      "business_goal": "Convert agreed wholesale intent once and safely.",
+      "user_goal": "Compare revisions and accept/reject confidently.",
+      "primary_cta": "Accept quotation",
+      "secondary_cta": "Request revision",
+      "audience": "APPROVED_DEALER",
+      "desktop_layout": "12-column composition: Status → Revision selector → Line snapshots → Terms → Messages → Approval action → History; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Status → Revision selector → Line snapshots → Terms then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Status → Revision selector → Line snapshots → Terms → Messages → Approval action → History; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "quotation_view",
+        "quotation_primary_cta",
+        "quotation_secondary_cta",
+        "quotation_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Quotation screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-16",
+      "slug": "order-tracking",
+      "name": "Order Tracking",
+      "purpose": "Communicate shipment progress safely.",
+      "business_goal": "Reduce uncertainty and support load.",
+      "user_goal": "Know current status, next step and help options.",
+      "primary_cta": "View order details",
+      "secondary_cta": "Contact support",
+      "audience": "PUBLIC_OR_CUSTOMER",
+      "desktop_layout": "12-column composition: Reference lookup or auth → Timeline → Package cards → Delivery estimate → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Reference lookup or auth → Timeline → Package cards then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Reference lookup or auth → Timeline → Package cards → Delivery estimate → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "order-tracking_view",
+        "order-tracking_primary_cta",
+        "order-tracking_secondary_cta",
+        "order-tracking_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Order Tracking screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-17",
+      "slug": "support",
+      "name": "Support",
+      "purpose": "Route questions to the right self-service or human channel.",
+      "business_goal": "Resolve issues efficiently.",
+      "user_goal": "Find an answer or contact support.",
+      "primary_cta": "Search help",
+      "secondary_cta": "Contact support",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Help search → Topics → Order help → FAQ → Contact channels → Hours; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Help search → Topics → Order help then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Help search → Topics → Order help → FAQ → Contact channels → Hours; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "support_view",
+        "support_primary_cta",
+        "support_secondary_cta",
+        "support_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Support screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-18",
+      "slug": "blog",
+      "name": "Blog and Guides",
+      "purpose": "Deliver original educational and craft content.",
+      "business_goal": "Build authority and qualified discovery.",
+      "user_goal": "Learn about craft, care and culture.",
+      "primary_cta": "Read article",
+      "secondary_cta": "Explore products",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Editorial hero → Topic filters → Featured article → Article grid → Newsletter; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Editorial hero → Topic filters → Featured article then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Editorial hero → Topic filters → Featured article → Article grid → Newsletter; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "blog_view",
+        "blog_primary_cta",
+        "blog_secondary_cta",
+        "blog_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Blog and Guides screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-19",
+      "slug": "faq",
+      "name": "FAQ",
+      "purpose": "Resolve common objections accessibly.",
+      "business_goal": "Reduce friction and repetitive support.",
+      "user_goal": "Get a clear current answer.",
+      "primary_cta": "Open answer",
+      "secondary_cta": "Contact support",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Search → Topic navigation → Accordions → Escalation; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Search → Topic navigation then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Search → Topic navigation → Accordions → Escalation; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "faq_view",
+        "faq_primary_cta",
+        "faq_secondary_cta",
+        "faq_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral FAQ screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-20",
+      "slug": "contact",
+      "name": "Contact",
+      "purpose": "Offer approved communication choices.",
+      "business_goal": "Create qualified, routable enquiries.",
+      "user_goal": "Reach the correct team with expectations.",
+      "primary_cta": "Send enquiry",
+      "secondary_cta": "Open approved WhatsApp",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Contact reasons → Form → Channels → Hours → Privacy note → Location-safe content; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Contact reasons → Form → Channels then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Contact reasons → Form → Channels → Hours → Privacy note → Location-safe content; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "contact_view",
+        "contact_primary_cta",
+        "contact_secondary_cta",
+        "contact_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Contact screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-21",
+      "slug": "about",
+      "name": "About",
+      "purpose": "Explain the manufacturer-led brand and values.",
+      "business_goal": "Build preference and credibility.",
+      "user_goal": "Know who makes the products and why.",
+      "primary_cta": "Explore manufacturing",
+      "secondary_cta": "View collections",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Brand story → Values → Milestones → People with consent → Trust → CTA; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Brand story → Values → Milestones then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Brand story → Values → Milestones → People with consent → Trust → CTA; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "about_view",
+        "about_primary_cta",
+        "about_secondary_cta",
+        "about_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral About screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-22",
+      "slug": "manufacturing-story",
+      "name": "Manufacturing Story",
+      "purpose": "Show craft evidence without exposing secrets.",
+      "business_goal": "Differentiate the brand through authentic making.",
+      "user_goal": "Understand process, workshop and quality.",
+      "primary_cta": "Explore products",
+      "secondary_cta": "Watch workshop film",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Hero → Process overview → Workshop → Tools → Artisans → Quality → Purity promise → Video/transcript; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Hero → Process overview → Workshop → Tools then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Hero → Process overview → Workshop → Tools → Artisans → Quality → Purity promise → Video/transcript; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "manufacturing-story_view",
+        "manufacturing-story_primary_cta",
+        "manufacturing-story_secondary_cta",
+        "manufacturing-story_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Manufacturing Story screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-23",
+      "slug": "wholesale",
+      "name": "Wholesale Landing",
+      "purpose": "Explain dealer value and application path publicly.",
+      "business_goal": "Acquire qualified dealer applicants.",
+      "user_goal": "Understand eligibility, benefits and process.",
+      "primary_cta": "Apply as dealer",
+      "secondary_cta": "Dealer sign in",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Proposition → Range → Benefits → Process → Eligibility → FAQ → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Proposition → Range → Benefits → Process then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Proposition → Range → Benefits → Process → Eligibility → FAQ → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "wholesale_view",
+        "wholesale_primary_cta",
+        "wholesale_secondary_cta",
+        "wholesale_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Wholesale Landing screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-24",
+      "slug": "policies",
+      "name": "Policies",
+      "purpose": "Present stable, versioned service/legal information.",
+      "business_goal": "Set accurate expectations.",
+      "user_goal": "Understand terms, delivery, returns, privacy or care.",
+      "primary_cta": "Contact support",
+      "secondary_cta": "View related policy",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Policy title → Effective date → Contents → Body → Related policies → Contact; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Policy title → Effective date → Contents then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Policy title → Effective date → Contents → Body → Related policies → Contact; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "policies_view",
+        "policies_primary_cta",
+        "policies_secondary_cta",
+        "policies_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Policies screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-25",
+      "slug": "authentication",
+      "name": "Authentication",
+      "purpose": "Enable secure customer/dealer sign-in and recovery.",
+      "business_goal": "Restore access with minimal abandonment.",
+      "user_goal": "Sign in or recover safely.",
+      "primary_cta": "Continue securely",
+      "secondary_cta": "Reset password",
+      "audience": "CUSTOMER_OR_DEALER",
+      "desktop_layout": "12-column composition: Realm context → Credentials/passkey future → Recovery → Privacy → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Realm context → Credentials/passkey future → Recovery then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Realm context → Credentials/passkey future → Recovery → Privacy → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "authentication_view",
+        "authentication_primary_cta",
+        "authentication_secondary_cta",
+        "authentication_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Authentication screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-26",
+      "slug": "profile",
+      "name": "Profile",
+      "purpose": "Let users manage permitted identity and preferences.",
+      "business_goal": "Improve account accuracy and consent control.",
+      "user_goal": "Update personal information safely.",
+      "primary_cta": "Save changes",
+      "secondary_cta": "Cancel",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Identity fields → Contact verification → Preferences → Consent → Account closure; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Identity fields → Contact verification → Preferences then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Identity fields → Contact verification → Preferences → Consent → Account closure; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "profile_view",
+        "profile_primary_cta",
+        "profile_secondary_cta",
+        "profile_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Profile screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-27",
+      "slug": "address-book",
+      "name": "Address Book",
+      "purpose": "Manage reusable delivery addresses.",
+      "business_goal": "Reduce checkout effort and address errors.",
+      "user_goal": "Add, edit and choose addresses.",
+      "primary_cta": "Add address",
+      "secondary_cta": "Edit address",
+      "audience": "CUSTOMER",
+      "desktop_layout": "12-column composition: Address cards → Default state → Validation → Archive; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Address cards → Default state then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Address cards → Default state → Validation → Archive; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "address-book_view",
+        "address-book_primary_cta",
+        "address-book_secondary_cta",
+        "address-book_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Address Book screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-28",
+      "slug": "notifications",
+      "name": "Notifications",
+      "purpose": "Centralize customer-safe updates and controls.",
+      "business_goal": "Improve timely self-service engagement.",
+      "user_goal": "Review updates and set preferences.",
+      "primary_cta": "View related item",
+      "secondary_cta": "Manage preferences",
+      "audience": "CUSTOMER_OR_DEALER",
+      "desktop_layout": "12-column composition: Inbox → Filters → Unread state → Preference link → Empty state; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Inbox → Filters → Unread state then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Inbox → Filters → Unread state → Preference link → Empty state; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "notifications_view",
+        "notifications_primary_cta",
+        "notifications_secondary_cta",
+        "notifications_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Notifications screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-29",
+      "slug": "cms-preview",
+      "name": "CMS Preview",
+      "purpose": "Preview content across audiences and devices before publication.",
+      "business_goal": "Prevent broken, inaccessible or leaked content.",
+      "user_goal": "Verify layout, visibility, SEO and schedule.",
+      "primary_cta": "Approve for publishing",
+      "secondary_cta": "Return to edit",
+      "audience": "COMMERCE_ADMIN",
+      "desktop_layout": "12-column composition: Device switcher → Locale → Audience → Schedule → Page preview → Accessibility/SEO checks → Version diff; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Device switcher → Locale → Audience → Schedule then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Device switcher → Locale → Audience → Schedule → Page preview → Accessibility/SEO checks → Version diff; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Labels/help content governed by system owner; previewed content remains versioned"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "cms-preview_view",
+        "cms-preview_primary_cta",
+        "cms-preview_secondary_cta",
+        "cms-preview_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral CMS Preview screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-30",
+      "slug": "cms-manager",
+      "name": "CMS Manager",
+      "purpose": "Organize content and publishing work.",
+      "business_goal": "Improve safe editorial throughput.",
+      "user_goal": "Find drafts, approvals, schedules and issues.",
+      "primary_cta": "Create content",
+      "secondary_cta": "Review queue",
+      "audience": "COMMERCE_ADMIN",
+      "desktop_layout": "12-column composition: Navigation → Content inventory → Status filters → Calendar → Approval queue → Alerts; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Navigation → Content inventory → Status filters then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Navigation → Content inventory → Status filters → Calendar → Approval queue → Alerts; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Labels/help content governed by system owner; previewed content remains versioned"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "cms-manager_view",
+        "cms-manager_primary_cta",
+        "cms-manager_secondary_cta",
+        "cms-manager_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral CMS Manager screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-31",
+      "slug": "404",
+      "name": "404 Not Found",
+      "purpose": "Recover from an unavailable URL without blame.",
+      "business_goal": "Retain discovery.",
+      "user_goal": "Find the intended destination.",
+      "primary_cta": "Search products",
+      "secondary_cta": "Go home",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Plain explanation → Search → Popular links → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Plain explanation → Search then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Plain explanation → Search → Popular links → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "404_view",
+        "404_primary_cta",
+        "404_secondary_cta",
+        "404_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral 404 Not Found screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-32",
+      "slug": "empty-states",
+      "name": "Empty States",
+      "purpose": "Explain why a valid view has no content.",
+      "business_goal": "Guide a useful next step.",
+      "user_goal": "Understand the empty condition and continue.",
+      "primary_cta": "Explore products",
+      "secondary_cta": "Adjust filters",
+      "audience": "ALL",
+      "desktop_layout": "12-column composition: Context illustration optional → Heading → Reason → Primary action → Secondary action; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Context illustration optional → Heading → Reason then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Context illustration optional → Heading → Reason → Primary action → Secondary action; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "empty-states_view",
+        "empty-states_primary_cta",
+        "empty-states_secondary_cta",
+        "empty-states_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Empty States screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-33",
+      "slug": "error-states",
+      "name": "Error States",
+      "purpose": "Explain safe failures and preserve progress.",
+      "business_goal": "Support recovery without leaking internals.",
+      "user_goal": "Retry or get help without losing work.",
+      "primary_cta": "Try again",
+      "secondary_cta": "Contact support",
+      "audience": "ALL",
+      "desktop_layout": "12-column composition: Safe message → Preserved content → Recovery → Correlation reference → Support; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Safe message → Preserved content → Recovery then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Safe message → Preserved content → Recovery → Correlation reference → Support; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "error-states_view",
+        "error-states_primary_cta",
+        "error-states_secondary_cta",
+        "error-states_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Error States screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-34",
+      "slug": "loading-states",
+      "name": "Loading States",
+      "purpose": "Provide stable feedback while content is fetched.",
+      "business_goal": "Protect perceived speed and prevent duplicate actions.",
+      "user_goal": "Know progress without distraction.",
+      "primary_cta": "Cancel when meaningful",
+      "secondary_cta": "None",
+      "audience": "ALL",
+      "desktop_layout": "12-column composition: Stable skeleton → Progress label → Loaded regions → Timeout recovery; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Stable skeleton → Progress label then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Stable skeleton → Progress label → Loaded regions → Timeout recovery; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "loading-states_view",
+        "loading-states_primary_cta",
+        "loading-states_secondary_cta",
+        "loading-states_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Loading States screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-35",
+      "slug": "maintenance-mode",
+      "name": "Maintenance Mode",
+      "purpose": "Communicate planned/unplanned unavailability.",
+      "business_goal": "Preserve trust during downtime.",
+      "user_goal": "Know impact and when/how to return.",
+      "primary_cta": "Check status",
+      "secondary_cta": "Contact support",
+      "audience": "PUBLIC",
+      "desktop_layout": "12-column composition: Brand-safe notice → Affected services → Time/status → Alternative channels; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Brand-safe notice → Affected services then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Brand-safe notice → Affected services → Time/status → Alternative channels; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved headings",
+        "Editorial copy",
+        "Published media",
+        "SEO metadata",
+        "CTA labels/destinations within allowlist"
+      ],
+      "seo_areas": [
+        "Title/meta",
+        "Canonical/indexing policy",
+        "H1/headings",
+        "Breadcrumbs where hierarchical",
+        "Structured data only when eligible and visible"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "maintenance-mode_view",
+        "maintenance-mode_primary_cta",
+        "maintenance-mode_secondary_cta",
+        "maintenance-mode_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Maintenance Mode screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    },
+    {
+      "id": "page-36",
+      "slug": "success-pages",
+      "name": "Success Pages",
+      "purpose": "Confirm completed user intent and clarify next steps.",
+      "business_goal": "Reduce duplicate submission and support.",
+      "user_goal": "Know what succeeded and what happens next.",
+      "primary_cta": "View details",
+      "secondary_cta": "Continue",
+      "audience": "ALL",
+      "desktop_layout": "12-column composition: Confirmation → Safe reference → Summary → Next steps → Support → Related action; primary task remains above the first major scroll where appropriate.",
+      "tablet_layout": "8-column responsive reflow: Confirmation → Safe reference → Summary then stacked supporting regions; no desktop-only interaction.",
+      "mobile_layout": "4-column single-task sequence: Confirmation → Safe reference → Summary → Next steps → Support → Related action; 44px targets, safe-area spacing, no horizontal overflow.",
+      "cms_editable_areas": [
+        "Approved help text and empty-state copy only; transactional/user data is not CMS content"
+      ],
+      "seo_areas": [
+        "Noindex/private; semantic headings and stable accessible title"
+      ],
+      "accessibility_notes": [
+        "WCAG 2.2 AA",
+        "Logical heading/landmark and focus order",
+        "Keyboard and screen-reader complete",
+        "Visible 3:1 focus indicator",
+        "Errors and state never color-only",
+        "200% zoom/reflow"
+      ],
+      "performance_notes": [
+        "Stable media ratios and reserved space",
+        "Prioritize only true LCP asset",
+        "Lazy-load below-fold media",
+        "Progressive content without blocking primary task",
+        "Third parties poster/consent gated"
+      ],
+      "animation_notes": [
+        "Purposeful 160–240ms feedback",
+        "No essential animation",
+        "Reduced-motion static equivalent",
+        "No scroll hijacking or autoplay with sound"
+      ],
+      "analytics_events": [
+        "success-pages_view",
+        "success-pages_primary_cta",
+        "success-pages_secondary_cta",
+        "success-pages_error"
+      ],
+      "future_app_mapping": "Maps to a channel-neutral Success Pages screen/deep link using the same content priority, public IDs, states and accessibility semantics; native navigation replaces web chrome only."
+    }
+  ]
+}
+

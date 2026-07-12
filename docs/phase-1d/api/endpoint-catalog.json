@@ -1,0 +1,3184 @@
+{
+  "title": "Commerce and ERP Integration Endpoint Catalogue",
+  "notice": "DESIGN ONLY — NOT RUNTIME",
+  "openapi_equivalent": "3.1 design semantics; dependency-free JSON catalogue",
+  "version": "1.0.0",
+  "namespaces": [
+    "/commerce/v1/public",
+    "/commerce/v1/customer",
+    "/commerce/v1/dealer",
+    "/commerce/v1/admin",
+    "/internal/v1"
+  ],
+  "rules": {
+    "erp_routes_directly_callable": false,
+    "direct_erp_database_access": false,
+    "raw_erp_credentials_in_commerce": false,
+    "erp_staff_jwt_reuse": false,
+    "public_erp_identifiers": false,
+    "unknown_enum_handling": "Map safely and preserve raw value only in restricted telemetry",
+    "money": "Decimal string plus ISO 4217 currency",
+    "timestamps": "RFC 3339 UTC"
+  },
+  "endpoints": [
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/home",
+      "purpose": "Get published homepage content",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "HomeResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/navigation",
+      "purpose": "Get published navigation",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "NavigationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/collections",
+      "purpose": "List visible collections",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CollectionListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/collections/{slug}",
+      "purpose": "Get collection detail",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CollectionResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/categories",
+      "purpose": "List visible categories",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CategoryListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/categories/{slug}",
+      "purpose": "Get category detail",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CategoryResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/products",
+      "purpose": "List public products",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "ProductListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/products/{slug}",
+      "purpose": "Get public product detail",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "ProductResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/products/{productId}/media",
+      "purpose": "Get published product media",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "MediaListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/products/{productId}/related",
+      "purpose": "Get related products",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "ProductListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/search",
+      "purpose": "Search public catalogue",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "SearchResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_SEARCH",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/filters",
+      "purpose": "Get allowed catalogue filters",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "FilterMetadataResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/sorts",
+      "purpose": "Get allowed sorting fields",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "SortMetadataResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/variants/{variantId}/availability",
+      "purpose": "Get customer-safe availability",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "AvailabilityResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "POST",
+      "path": "/commerce/v1/public/price-quotes/retail",
+      "purpose": "Create expiring retail quote",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicCommandRequest",
+      "response_schema": "PriceQuoteResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_QUOTE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/products/{productId}/reviews",
+      "purpose": "List published reviews",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "ReviewListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/faqs",
+      "purpose": "List FAQs",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "FAQListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/blog",
+      "purpose": "List published blog/guides",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "BlogListResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/blog/{slug}",
+      "purpose": "Get blog/guide",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "BlogResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/pages/{slug}",
+      "purpose": "Get published CMS page",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CMSPageResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/contact-config",
+      "purpose": "Get safe contact and WhatsApp configuration",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "ContactConfigResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "POST",
+      "path": "/commerce/v1/public/delivery-estimates",
+      "purpose": "Get non-binding delivery estimate",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicCommandRequest",
+      "response_schema": "DeliveryEstimateResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_QUOTE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "public",
+      "method": "GET",
+      "path": "/commerce/v1/public/capabilities",
+      "purpose": "Discover public API capabilities",
+      "auth_level": "ANONYMOUS",
+      "request_schema": "PublicQueryRequest",
+      "response_schema": "CapabilitiesResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "PUBLIC_CATALOGUE",
+      "status": "DESIGN_ONLY",
+      "permissions": [],
+      "idempotency": "Not applicable",
+      "cache_policy": "Public cache with ETag; endpoint-specific TTL",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/register",
+      "purpose": "Register retail account",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/login",
+      "purpose": "Create customer session",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "AUTH_SENSITIVE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/logout",
+      "purpose": "Revoke current customer session",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/refresh",
+      "purpose": "Rotate customer session",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/password-reset/request",
+      "purpose": "Request password reset",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "AUTH_SENSITIVE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/auth/password-reset/confirm",
+      "purpose": "Confirm password reset",
+      "auth_level": "CUSTOMER_AUTH_FLOW",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "AUTH_SENSITIVE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/profile",
+      "purpose": "Get profile",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "PATCH",
+      "path": "/commerce/v1/customer/profile",
+      "purpose": "Update profile",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/addresses",
+      "purpose": "List addresses",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/addresses",
+      "purpose": "Create address",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "PATCH",
+      "path": "/commerce/v1/customer/addresses/{addressId}",
+      "purpose": "Update address",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "DELETE",
+      "path": "/commerce/v1/customer/addresses/{addressId}",
+      "purpose": "Archive address",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/preferences",
+      "purpose": "Get consent and preferences",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "PATCH",
+      "path": "/commerce/v1/customer/preferences",
+      "purpose": "Update consent and preferences",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/wishlist",
+      "purpose": "Get wishlist",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/wishlist/items",
+      "purpose": "Add wishlist item",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "DELETE",
+      "path": "/commerce/v1/customer/wishlist/items/{itemId}",
+      "purpose": "Remove wishlist item",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/cart",
+      "purpose": "Get retail cart",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/cart/items",
+      "purpose": "Add retail cart item",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "PATCH",
+      "path": "/commerce/v1/customer/cart/items/{itemId}",
+      "purpose": "Update cart item",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "DELETE",
+      "path": "/commerce/v1/customer/cart/items/{itemId}",
+      "purpose": "Remove cart item",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/cart/validate",
+      "purpose": "Revalidate price and availability",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/checkout-preview",
+      "purpose": "Create non-binding checkout preview",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/orders",
+      "purpose": "Create staged website retail order",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "OrderResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ORDER_CREATE",
+      "status": "FUTURE_NOT_IMPLEMENTED",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/orders",
+      "purpose": "List my orders",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "OrderResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/orders/{orderId}",
+      "purpose": "Get order detail",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "OrderResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "GET",
+      "path": "/commerce/v1/customer/orders/{orderId}/tracking",
+      "purpose": "Get safe tracking",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerQueryRequest",
+      "response_schema": "OrderResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/orders/{orderId}/return-requests",
+      "purpose": "Request return/refund review",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "OrderResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "customer",
+      "method": "POST",
+      "path": "/commerce/v1/customer/reviews",
+      "purpose": "Submit review",
+      "auth_level": "CUSTOMER",
+      "request_schema": "CustomerCommandRequest",
+      "response_schema": "CustomerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CUSTOMER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "customer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/register",
+      "purpose": "Register dealer identity and begin application",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/login",
+      "purpose": "Create dealer session",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/logout",
+      "purpose": "Revoke dealer session",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/refresh",
+      "purpose": "Rotate dealer session",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/password-reset/request",
+      "purpose": "Request dealer password reset",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/auth/password-reset/confirm",
+      "purpose": "Confirm dealer password reset",
+      "auth_level": "DEALER_AUTH_FLOW",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/application",
+      "purpose": "Get application status",
+      "auth_level": "DEALER_APPLICANT",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_APPLICATION",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "PUT",
+      "path": "/commerce/v1/dealer/application/business-details",
+      "purpose": "Set business details",
+      "auth_level": "DEALER_APPLICANT",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_APPLICATION",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "PUT",
+      "path": "/commerce/v1/dealer/application/gst-details",
+      "purpose": "Set GST verification reference data",
+      "auth_level": "DEALER_APPLICANT",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_APPLICATION",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/application/document-references",
+      "purpose": "Add protected document reference",
+      "auth_level": "DEALER_APPLICANT",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_APPLICATION",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/application/submit",
+      "purpose": "Submit dealer application",
+      "auth_level": "DEALER_APPLICANT",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_APPLICATION",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/profile",
+      "purpose": "Get approved dealer profile",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "PATCH",
+      "path": "/commerce/v1/dealer/profile",
+      "purpose": "Update permitted dealer fields",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/catalogue/wholesale",
+      "purpose": "List wholesale-visible catalogue",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/catalogue/special",
+      "purpose": "List dealer-special catalogue",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/price-quotes/wholesale",
+      "purpose": "Create wholesale quote",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "PriceQuoteResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_QUOTE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/price-quotes/special",
+      "purpose": "Create dealer-special quote",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "PriceQuoteResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_QUOTE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/variants/{variantId}/moq",
+      "purpose": "Get MOQ rule",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/variants/{variantId}/quantity-breaks",
+      "purpose": "Get authorized quantity slabs",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/cart",
+      "purpose": "Get bulk cart",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/cart/items",
+      "purpose": "Add bulk-cart item",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "PATCH",
+      "path": "/commerce/v1/dealer/cart/items/{itemId}",
+      "purpose": "Update bulk quantity",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "DELETE",
+      "path": "/commerce/v1/dealer/cart/items/{itemId}",
+      "purpose": "Remove bulk item",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/cart/validate",
+      "purpose": "Validate MOQ, slabs, price and availability",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "CART",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/quotations",
+      "purpose": "Request quotation",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/quotations",
+      "purpose": "List quotations",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/quotations/{quotationId}",
+      "purpose": "Get quotation and revisions",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/quotations/{quotationId}/revision-requests",
+      "purpose": "Request quotation revision",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/quotations/{quotationId}/accept",
+      "purpose": "Accept offered quotation",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/quotations/{quotationId}/reject",
+      "purpose": "Reject offered quotation",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "QuotationResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/custom-enquiries/size",
+      "purpose": "Submit custom-size enquiry",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/custom-enquiries/design",
+      "purpose": "Submit custom-design enquiry",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/orders/repeat",
+      "purpose": "Stage repeat order",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "POST",
+      "path": "/commerce/v1/dealer/orders",
+      "purpose": "Create staged wholesale order",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerCommandRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ORDER_CREATE",
+      "status": "FUTURE_NOT_IMPLEMENTED",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/orders",
+      "purpose": "List dealer order history",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/orders/{orderId}",
+      "purpose": "Get dealer order detail",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/credit-terms",
+      "purpose": "View current credit terms",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/catalogue-downloads",
+      "purpose": "Get authorized catalogue download metadata",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "dealer",
+      "method": "GET",
+      "path": "/commerce/v1/dealer/dashboard",
+      "purpose": "Get dealer dashboard summary",
+      "auth_level": "APPROVED_DEALER",
+      "request_schema": "DealerQueryRequest",
+      "response_schema": "DealerResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "DEALER_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "dealer:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/products",
+      "purpose": "List merchandising projections",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:merchandising:projections"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/products",
+      "purpose": "Create merchandising projection",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:merchandising:projection"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/products/{productId}",
+      "purpose": "Update merchandising projection",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:merchandising:projection"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/products/{productId}/publish",
+      "purpose": "Publish product",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:publish:product"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/products/{productId}/unpublish",
+      "purpose": "Unpublish product",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:unpublish:product"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/products/{productId}/seo",
+      "purpose": "Set product SEO",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:set:product:seo"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/categories",
+      "purpose": "List categories",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:categories"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/categories",
+      "purpose": "Create category",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:category"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/categories/{categoryId}",
+      "purpose": "Update category",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:category"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/collections",
+      "purpose": "List collections",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:collections"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/collections",
+      "purpose": "Create collection",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:collection"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/collections/{collectionId}",
+      "purpose": "Update collection",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:collection"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/products/{productId}/media",
+      "purpose": "Attach product media",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:attach:product:media"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "DELETE",
+      "path": "/commerce/v1/admin/products/{productId}/media/{mediaId}",
+      "purpose": "Archive product media",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:archive:product:media"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/banners/hero/{bannerId}",
+      "purpose": "Upsert hero banner",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:upsert:hero:banner"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/banners/category/{bannerId}",
+      "purpose": "Upsert category banner",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:upsert:category:banner"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/banners/festival/{bannerId}",
+      "purpose": "Upsert festival banner",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:upsert:festival:banner"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/homepage-sections",
+      "purpose": "List homepage sections",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:homepage:sections"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/homepage-sections",
+      "purpose": "Create homepage section",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:homepage:section"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/homepage-sections/{sectionId}",
+      "purpose": "Update homepage section",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:homepage:section"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/blog",
+      "purpose": "List blog drafts",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:blog:drafts"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/blog",
+      "purpose": "Create blog",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:blog"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/blog/{postId}",
+      "purpose": "Update blog",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:blog"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/faqs",
+      "purpose": "List FAQ drafts",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:faq:drafts"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/faqs",
+      "purpose": "Create FAQ",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:faq"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/faqs/{faqId}",
+      "purpose": "Update FAQ",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:faq"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/policies",
+      "purpose": "List policy pages",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:policy:pages"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/policies/{policyId}",
+      "purpose": "Version policy page",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:version:policy:page"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/reviews/moderation",
+      "purpose": "List moderation queue",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:moderation:queue"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/reviews/{reviewId}/moderate",
+      "purpose": "Moderate review",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:moderate:review"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/coupons",
+      "purpose": "List coupons",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:coupons"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/coupons",
+      "purpose": "Create coupon",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:coupon"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/coupons/{couponId}",
+      "purpose": "Update coupon",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:coupon"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/campaigns",
+      "purpose": "List campaigns",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:campaigns"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/campaigns",
+      "purpose": "Create campaign",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:create:campaign"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PATCH",
+      "path": "/commerce/v1/admin/campaigns/{campaignId}",
+      "purpose": "Update campaign",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:update:campaign"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/dealers/applications",
+      "purpose": "List dealer applications",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:list:dealer:applications"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/dealers/applications/{applicationId}",
+      "purpose": "Review dealer application",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:review:dealer:application"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "POST",
+      "path": "/commerce/v1/admin/dealers/applications/{applicationId}/decision",
+      "purpose": "Record approval decision",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_SENSITIVE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:record:approval:decision"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/dealers/{dealerId}/classification",
+      "purpose": "Assign level/category",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:assign:level:category"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "PUT",
+      "path": "/commerce/v1/admin/dealers/{dealerId}/price-list",
+      "purpose": "Assign dealer price list",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminCommandRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_SENSITIVE",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:assign:dealer:price:list"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "admin",
+      "method": "GET",
+      "path": "/commerce/v1/admin/audit-logs",
+      "purpose": "Search commerce audit logs",
+      "auth_level": "COMMERCE_ADMIN",
+      "request_schema": "AdminQueryRequest",
+      "response_schema": "AdminResourceResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "ADMIN_STANDARD",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "commerce:search:commerce:audit:logs"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/health",
+      "purpose": "Check integration service health",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/capabilities",
+      "purpose": "Get integration version/capabilities",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/catalogue/products",
+      "purpose": "Read customer-safe ERP catalogue projection",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/catalogue/products/{reference}",
+      "purpose": "Read one ERP product projection",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/catalogue/variants",
+      "purpose": "Read sellable variant projections",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/references/products/{reference}",
+      "purpose": "Resolve opaque ERP product reference",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/references/variants/{reference}",
+      "purpose": "Resolve opaque ERP variant reference",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "POST",
+      "path": "/internal/v1/availability/query",
+      "purpose": "Query customer-safe availability",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalCommandRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "POST",
+      "path": "/internal/v1/pricing/references/query",
+      "purpose": "Retrieve approved price references",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalCommandRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/orders/{commerceOrderRef}/erp-reference",
+      "purpose": "Retrieve ERP order reference",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/orders/{commerceOrderRef}/invoice-reference",
+      "purpose": "Retrieve ERP invoice reference",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "GET",
+      "path": "/internal/v1/orders/{commerceOrderRef}/dispatch-status",
+      "purpose": "Retrieve safe dispatch/tracking projection",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalQueryRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_READ",
+      "status": "DESIGN_ONLY",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "Private, no-store unless explicitly safe",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "POST",
+      "path": "/internal/v1/reservations",
+      "purpose": "Reserve inventory through ERP-owned command adapter",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalCommandRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_MUTATION",
+      "status": "FUTURE_NOT_IMPLEMENTED",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "DELETE",
+      "path": "/internal/v1/reservations/{reservationRef}",
+      "purpose": "Release future reservation",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalCommandRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_MUTATION",
+      "status": "FUTURE_NOT_IMPLEMENTED",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Not applicable",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    },
+    {
+      "group": "internal",
+      "method": "POST",
+      "path": "/internal/v1/order-conversions",
+      "purpose": "Convert staged commerce order through ERP adapter",
+      "auth_level": "SERVICE_TO_SERVICE",
+      "request_schema": "InternalCommandRequest",
+      "response_schema": "InternalResponse",
+      "error_schema": "ErrorResponse",
+      "rate_limit_class": "INTERNAL_MUTATION",
+      "status": "FUTURE_NOT_IMPLEMENTED",
+      "permissions": [
+        [
+          "internal:self"
+        ]
+      ],
+      "idempotency": "Supported or required as documented",
+      "cache_policy": "no-store",
+      "company_scope": "Derived server-side from host/token/service identity; never trusted from public input"
+    }
+  ],
+  "schemas": [
+    {
+      "name": "RequestMetadata",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ResponseMetadata",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "SuccessResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ErrorResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ValidationError",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "PartialFailure",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "Pagination",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "Sorting",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "Filtering",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "Search",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CapabilitiesResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "PublicQueryRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "PublicCommandRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "HomeResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "NavigationResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CollectionListResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CollectionResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CategoryListResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CategoryResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ProductListResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ProductResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "MediaListResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "SearchResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "FilterMetadataResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "SortMetadataResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "AvailabilityResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "PriceQuoteResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ReviewListResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "FAQListResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "BlogListResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "BlogResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CMSPageResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "ContactConfigResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "DeliveryEstimateResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CustomerQueryRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CustomerCommandRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "CustomerResourceResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "DealerQueryRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "DealerCommandRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "DealerResourceResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "QuotationResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "OrderResponse",
+      "source": "Phase 1B contract or Phase 1C entity projection",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "AdminQueryRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "AdminCommandRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "AdminResourceResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "InternalQueryRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "InternalCommandRequest",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    },
+    {
+      "name": "InternalResponse",
+      "source": "Phase 1D API view",
+      "additional_properties": false,
+      "sensitive_fields_excluded": true
+    }
+  ]
+}
+

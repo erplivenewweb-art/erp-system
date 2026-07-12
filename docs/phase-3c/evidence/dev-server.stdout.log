@@ -1,0 +1,19 @@
+
+> silver-sankha-storefront@0.1.0 predev
+> npm run tokens:generate
+
+
+> silver-sankha-storefront@0.1.0 tokens:generate
+> node scripts/generate-tokens.mjs
+
+Generated CSS and TypeScript metadata for 128 tokens.
+
+> silver-sankha-storefront@0.1.0 dev
+> next dev --hostname 127.0.0.1 --port 3100
+
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://127.0.0.1:3100
+- Network:       http://127.0.0.1:3100
+✓ Ready in 1051ms
+
+ GET / 200 in 703ms (next.js: 311ms, application-code: 392ms)

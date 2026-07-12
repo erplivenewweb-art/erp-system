@@ -62,16 +62,16 @@
             <div class="input-box"><label>&nbsp;</label><button type="button" class="primary-btn" onclick="loadLedger()">Load Ledger</button></div>
           </div>
           <div class="summary-grid">
-            <div class="summary-card"><h4>Total Sales</h4><p id="totalSales">Rs 0.00</p></div>
-            <div class="summary-card"><h4>Total Payments</h4><p id="totalPayments">Rs 0.00</p></div>
-            <div class="summary-card"><h4>Total Refunds</h4><p id="totalRefunds">Rs 0.00</p></div>
-            <div class="summary-card"><h4>Metal Settlements</h4><p id="totalMetalSettlements">Rs 0.00</p></div>
-            <div class="summary-card"><h4>Current Due</h4><p id="currentDue">Rs 0.00</p></div>
+            <div class="summary-card"><h4>Total Sales</h4><p id="totalSales">₹ 0.00</p></div>
+            <div class="summary-card"><h4>Total Payments</h4><p id="totalPayments">₹ 0.00</p></div>
+            <div class="summary-card"><h4>Total Refunds</h4><p id="totalRefunds">₹ 0.00</p></div>
+            <div class="summary-card"><h4>Metal Settlements</h4><p id="totalMetalSettlements">₹ 0.00</p></div>
+            <div class="summary-card"><h4>Current Due</h4><p id="currentDue">₹ 0.00</p></div>
           </div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Debit</th><th>Credit</th><th>Running Balance</th><th>Reference Invoice</th><th>Branch</th></tr></thead>
-              <tbody id="ledgerBody"><tr><td colspan="8">No ledger data loaded</td></tr></tbody>
+              <tbody id="ledgerBody"><tr><td colspan="8">No party ledger rows loaded</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -86,13 +86,13 @@
     function isSuperAdmin(){const u=user();return String(u?.role||"").toLowerCase()==="superadmin";}
     function params(includeCompany=true){const p=new URLSearchParams(); if(uid())p.set("actingUserId",uid()); if((includeCompany||isSuperAdmin())&&cid())p.set("companyId",cid()); return p;}
     function esc(v){return String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
-    function money(v){return `Rs ${Number(v||0).toFixed(2)}`;}
+    function money(v){return `₹ ${Number(v||0).toFixed(2)}`;}
     function fmtType(v){return String(v||"").replace(/_/g," ").toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());}
     function setDefaults(){const d=new Date(); const to=d.toISOString().slice(0,10); const from=new Date(d.getFullYear(),d.getMonth(),1).toISOString().slice(0,10); fromDate.value=from; toDate.value=to;}
     async function fetchJson(url){const r=await fetch(url,{cache:"no-store",credentials:"include"}); const d=await r.json(); if(!r.ok||!d.success)throw new Error(d.message||"Request failed"); return d;}
     async function loadParties(){try{const d=await fetchJson(`${API_BASE}/transaction/parties?${params(true)}`); partyId.innerHTML='<option value="">All Customers</option>'+(d.parties||[]).filter(p=>["CUSTOMER","CUSTOMER_SUPPLIER"].includes(String(p.party_type||"").toUpperCase())).map(p=>`<option value="${Number(p.id)}">${esc(p.party_name)}</option>`).join("");}catch(e){console.log(e);}}
     async function loadBranches(){try{const d=await fetchJson(`${API_BASE}/branches?${params(true)}`); branchId.innerHTML='<option value="">All Branches</option>'+(d.branches||[]).map(b=>`<option value="${Number(b.id)}">${esc(b.branch_name||b.branch_code)}</option>`).join("");}catch(e){branchId.closest(".input-box").style.display="none";}}
-    async function loadLedger(){try{const p=params(true); ["partyId","branchId","fromDate","toDate"].forEach(id=>{const v=document.getElementById(id).value;if(v)p.set(id,v);}); if(searchText.value.trim())p.set("search",searchText.value.trim()); const d=await fetchJson(`${API_BASE}/transaction/customer-ledger?${p}`); const s=d.summary||{}; totalSales.textContent=money(s.totalSales); totalPayments.textContent=money(s.totalPayments); totalRefunds.textContent=money(s.totalRefunds); totalMetalSettlements.textContent=money(s.totalMetalSettlements); currentDue.textContent=money(s.currentDue); const rows=d.rows||[]; ledgerBody.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.voucher_date||"")}</td><td>${esc(r.voucher_no||"")}</td><td>${esc(fmtType(r.transaction_type))}</td><td>${money(r.debit)}</td><td>${money(r.credit)}</td><td>${money(r.running_balance)}</td><td>${esc(r.invoice_no||r.reference_no||"")}</td><td>${esc(r.branch_label||"")}</td></tr>`).join(""):'<tr><td colspan="8">No ledger data available</td></tr>';}catch(e){console.log(e);showToast(e.message||"Ledger load failed","error");}}
+    async function loadLedger(){try{const p=params(true); ["partyId","branchId","fromDate","toDate"].forEach(id=>{const v=document.getElementById(id).value;if(v)p.set(id,v);}); if(searchText.value.trim())p.set("search",searchText.value.trim()); const d=await fetchJson(`${API_BASE}/transaction/customer-ledger?${p}`); const s=d.summary||{}; totalSales.textContent=money(s.totalSales); totalPayments.textContent=money(s.totalPayments); totalRefunds.textContent=money(s.totalRefunds); totalMetalSettlements.textContent=money(s.totalMetalSettlements); currentDue.textContent=money(s.currentDue); const rows=d.rows||[]; ledgerBody.innerHTML=rows.length?rows.map(r=>`<tr><td>${esc(r.voucher_date||"")}</td><td>${esc(r.voucher_no||"")}</td><td>${esc(fmtType(r.transaction_type))}</td><td>${money(r.debit)}</td><td>${money(r.credit)}</td><td>${money(r.running_balance)}</td><td>${esc(r.invoice_no||r.reference_no||"")}</td><td>${esc(r.branch_label||"")}</td></tr>`).join(""):'<tr><td colspan="8">No party ledger rows found</td></tr>';}catch(e){console.log(e);showToast(e.message||"Ledger load failed","error");}}
     function toggleSidebar(){document.getElementById("sidebar")?.classList.toggle("collapsed");}
     window.addEventListener("load",async()=>{document.getElementById("profileBox").textContent=user()?.name||user()?.email||"User"; setDefaults(); await Promise.all([loadParties(),loadBranches()]); await loadLedger();});
   </script>

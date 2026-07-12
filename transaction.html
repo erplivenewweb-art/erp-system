@@ -754,17 +754,17 @@
                   </div>
 
                   <div class="input-box txn-metal-field">
-                    <label>Metal Price (Rs/gm)</label>
+                    <label>Metal Price (₹/gm)</label>
                     <input type="number" id="txnMetalPrice" placeholder="0" />
                   </div>
 
                   <div class="input-box txn-metal-field">
-                    <label>M.C (Rs/gm)</label>
+                    <label>M.C (₹/gm)</label>
                     <input type="number" id="txnMc" placeholder="0" />
                   </div>
 
                   <div class="input-box txn-metal-field">
-                    <label>HM / Fluid (Rs/gm)</label>
+                    <label>HM / Fluid (₹/gm)</label>
                     <input type="number" id="txnHmFluid" placeholder="0" />
                   </div>
                 </div>
@@ -803,7 +803,7 @@
 
                   <div class="input-box">
                     <label>Open Cash Due</label>
-                    <input type="text" id="txnSettlementOpenAmount" value="Rs 0.00" readonly />
+                    <input type="text" id="txnSettlementOpenAmount" value="₹ 0.00" readonly />
                   </div>
 
                   <div class="input-box">
@@ -855,7 +855,7 @@
                 <div class="txn-live-grid">
                   <div class="txn-live-card">
                     <h5>Cash Balance</h5>
-                    <p id="txnSelectedCashBalance">Rs 0.00</p>
+                    <p id="txnSelectedCashBalance">₹ 0.00</p>
                   </div>
                   <div class="txn-live-card">
                     <h5>Gold Balance</h5>
@@ -884,8 +884,8 @@
                 <div class="txn-summary-grid" id="txnSummaryGrid">
                   <div class="txn-summary-card">
                     <h4>Cash Summary</h4>
-                    <p id="txnCashReceivableText">Receivable: Rs 0.00</p>
-                    <p id="txnCashPayableText">Payable: Rs 0.00</p>
+                    <p id="txnCashReceivableText">Receivable: ₹ 0.00</p>
+                    <p id="txnCashPayableText">Payable: ₹ 0.00</p>
                   </div>
                   <div class="txn-summary-card">
                     <h4>Gold Summary</h4>
@@ -913,7 +913,7 @@
                     </thead>
                     <tbody id="txnLedgerBody">
                       <tr>
-                        <td colspan="7">No ledger data available</td>
+                        <td colspan="7">No party ledger rows found</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1714,7 +1714,7 @@
       select.innerHTML = '<option value="">Keep as open / standalone entry</option>';
 
       select.innerHTML += openSettlementInvoices.map((item) => {
-        const label = `${item.invoice_no || item.voucher_no || "Invoice"} | Open Rs ${Number(item.open_amount || 0).toFixed(2)} | ${item.voucher_date || ""}`;
+        const label = `${item.invoice_no || item.voucher_no || "Invoice"} | Open ₹ ${Number(item.open_amount || 0).toFixed(2)} | ${item.voucher_date || ""}`;
         return `<option value="${Number(item.transaction_id)}">${escapeHtml(label)}</option>`;
       }).join("");
 
@@ -1728,7 +1728,7 @@
       const weight = Number(document.getElementById("txnGrossWeight")?.value || 0);
 
       if (!selectedInvoice) {
-        openAmountInput.value = "Rs 0.00";
+        openAmountInput.value = "₹ 0.00";
         allocatedAmountInput.value = supportsSettlementSection(currentType)
           ? "No allocation selected"
           : "Settlement not applicable";
@@ -1738,11 +1738,11 @@
         return;
       }
 
-      openAmountInput.value = `Rs ${Number(selectedInvoice.open_amount || 0).toFixed(2)}`;
+      openAmountInput.value = `₹ ${Number(selectedInvoice.open_amount || 0).toFixed(2)}`;
 
       if (isCashTransaction(currentType)) {
         const allocation = amount > 0 ? Math.min(amount, Number(selectedInvoice.open_amount || 0)) : 0;
-        allocatedAmountInput.value = `Cash allocate: Rs ${allocation.toFixed(2)}`;
+        allocatedAmountInput.value = `Cash allocate: ₹ ${allocation.toFixed(2)}`;
       } else if (isMetalTransaction(currentType)) {
         allocatedAmountInput.value = weight > 0
           ? `Metal link: ${weight.toFixed(3)} gm`
@@ -1767,7 +1767,7 @@
 
       if (!party) {
         info.textContent = "Select a party to view live cash, gold, silver, and open settlement context.";
-        cash.textContent = "Rs 0.00";
+        cash.textContent = "₹ 0.00";
         gold.textContent = "0.000 gm";
         silver.textContent = "0.000 gm";
         context.textContent = "No open context";
@@ -1782,8 +1782,8 @@
 
       const summary = getSelectedPartyLedgerSummary();
       const cashLabel = summary.cashBalance >= 0
-        ? `Receivable Rs ${summary.cashBalance.toFixed(2)}`
-        : `Payable Rs ${Math.abs(summary.cashBalance).toFixed(2)}`;
+        ? `Receivable ₹ ${summary.cashBalance.toFixed(2)}`
+        : `Payable ₹ ${Math.abs(summary.cashBalance).toFixed(2)}`;
       const goldLabel = summary.goldBalance >= 0
         ? `Receivable ${summary.goldBalance.toFixed(3)} gm`
         : `Payable ${Math.abs(summary.goldBalance).toFixed(3)} gm`;
@@ -1815,7 +1815,7 @@
           <div class="txn-open-item">
             <strong>${escapeHtml(item.invoice_no || item.voucher_no || "Invoice")}</strong>
             <span>${escapeHtml(item.voucher_date || "")}${item.lot_no ? ` | Lot: ${escapeHtml(item.lot_no)}` : ""}${item.process_lot_no ? ` | Process: ${escapeHtml(item.process_lot_no)}` : ""}</span>
-            <span class="amount">Open Rs ${Number(item.open_amount || 0).toFixed(2)}</span>
+            <span class="amount">Open ₹ ${Number(item.open_amount || 0).toFixed(2)}</span>
           </div>
         `)
         .join("");
@@ -2394,7 +2394,7 @@
       tbody.innerHTML = "";
 
       if (!transactionData.length) {
-        tbody.innerHTML = `<tr><td colspan="14">No transaction history available</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="14">No transaction records found</td></tr>`;
         return;
       }
 
@@ -2423,7 +2423,7 @@
                 <div class="history-actions">
                   ${canReuse
                     ? `<button type="button" class="primary-btn" onclick="editTransaction(${item.id})">Reuse</button>`
-                    : `<button type="button" class="secondary-btn" onclick="showTransactionActionStatus(${item.id})">Coming Soon</button>`}
+                    : `<span class="muted-text">—</span>`}
                 </div>
               </td>
             </tr>
@@ -2469,8 +2469,8 @@
         silverPayable: 0
       };
 
-      document.getElementById("txnCashReceivableText").textContent = `Receivable: Rs ${safe.cashReceivable.toFixed(2)}`;
-      document.getElementById("txnCashPayableText").textContent = `Payable: Rs ${safe.cashPayable.toFixed(2)}`;
+      document.getElementById("txnCashReceivableText").textContent = `Receivable: ₹ ${safe.cashReceivable.toFixed(2)}`;
+      document.getElementById("txnCashPayableText").textContent = `Payable: ₹ ${safe.cashPayable.toFixed(2)}`;
       document.getElementById("txnGoldReceivableText").textContent = `Receivable: ${safe.goldReceivable.toFixed(3)} gm`;
       document.getElementById("txnGoldPayableText").textContent = `Payable: ${safe.goldPayable.toFixed(3)} gm`;
       document.getElementById("txnSilverReceivableText").textContent = `Receivable: ${safe.silverReceivable.toFixed(3)} gm`;
@@ -2485,7 +2485,7 @@
 
       if (!cashLedgerData.length && !metalLedgerData.length) {
         renderLedgerSummaryCards(null);
-        tbody.innerHTML = `<tr><td colspan="7">No ledger data available</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7">No party ledger rows found</td></tr>`;
         return;
       }
 
@@ -2568,7 +2568,7 @@
       const partyIds = Object.keys(ledgerMap);
 
       if (!partyIds.length) {
-        tbody.innerHTML = `<tr><td colspan="7">No ledger data available</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7">No party ledger rows found</td></tr>`;
         return;
       }
 
@@ -2582,8 +2582,8 @@
             <td>${row.goldPayable > 0 ? `<span class="ledger-badge badge-red">${row.goldPayable.toFixed(3)} gm</span>` : "None"}</td>
             <td>${row.silverReceivable > 0 ? `<span class="ledger-badge badge-gray">${row.silverReceivable.toFixed(3)} gm</span>` : "None"}</td>
             <td>${row.silverPayable > 0 ? `<span class="ledger-badge badge-red">${row.silverPayable.toFixed(3)} gm</span>` : "None"}</td>
-            <td>${row.cashReceivable > 0 ? `<span class="ledger-badge badge-green">${row.cashReceivable.toFixed(2)} Rs</span>` : "None"}</td>
-            <td>${row.cashPayable > 0 ? `<span class="ledger-badge badge-red">${row.cashPayable.toFixed(2)} Rs</span>` : "None"}</td>
+            <td>${row.cashReceivable > 0 ? `<span class="ledger-badge badge-green">₹ ${row.cashReceivable.toFixed(2)}</span>` : "None"}</td>
+            <td>${row.cashPayable > 0 ? `<span class="ledger-badge badge-red">₹ ${row.cashPayable.toFixed(2)}</span>` : "None"}</td>
           </tr>
         `;
       }).join("");

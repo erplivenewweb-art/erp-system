@@ -1,0 +1,377 @@
+{
+  "notice": "DESIGN ONLY — NOT RUNTIME",
+  "version": "1.0.0",
+  "decisions": {
+    "stack": "Next.js App Router + React + TypeScript",
+    "styling": "CSS Modules + generated semantic CSS custom properties",
+    "admin": "Separate future application",
+    "deployment": "Storefront separate from ERP",
+    "browser_internal_api_access": false
+  },
+  "route_groups": [
+    "public",
+    "customer",
+    "dealer-applicant",
+    "approved-dealer",
+    "system"
+  ],
+  "modules": [
+    {
+      "id": "module-01",
+      "name": "app-public",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-02",
+      "name": "app-customer",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-03",
+      "name": "app-dealer-apply",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-04",
+      "name": "app-dealer",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-05",
+      "name": "system-errors",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-06",
+      "name": "catalogue",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-07",
+      "name": "search",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-08",
+      "name": "wishlist",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-09",
+      "name": "cart",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-10",
+      "name": "checkout",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-11",
+      "name": "customer-account",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-12",
+      "name": "dealer-application",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-13",
+      "name": "dealer-catalogue",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-14",
+      "name": "quotations",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-15",
+      "name": "orders",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-16",
+      "name": "reviews",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-17",
+      "name": "custom-orders",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-18",
+      "name": "ui-primitives",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-19",
+      "name": "shared-components",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-20",
+      "name": "commerce-components",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-21",
+      "name": "page-sections",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-22",
+      "name": "auth-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-23",
+      "name": "api-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-24",
+      "name": "config-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-25",
+      "name": "error-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-26",
+      "name": "observability-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-27",
+      "name": "security-core",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-28",
+      "name": "state",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-29",
+      "name": "forms",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-30",
+      "name": "styles",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-31",
+      "name": "themes",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-32",
+      "name": "tokens",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-33",
+      "name": "media",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-34",
+      "name": "i18n",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-35",
+      "name": "analytics",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-36",
+      "name": "utilities",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-37",
+      "name": "mocks",
+      "owner": "Storefront",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-38",
+      "name": "unit-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-39",
+      "name": "component-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-40",
+      "name": "contract-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-41",
+      "name": "integration-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-42",
+      "name": "e2e-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-43",
+      "name": "accessibility-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-44",
+      "name": "visual-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-45",
+      "name": "performance-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    },
+    {
+      "id": "module-46",
+      "name": "seo-tests",
+      "owner": "Quality",
+      "erp_dependency": "NONE",
+      "runtime_status": "FUTURE_NOT_CREATED"
+    }
+  ],
+  "testing_layers": [
+    "unit",
+    "component",
+    "contract",
+    "api-client",
+    "integration",
+    "visual-regression",
+    "accessibility",
+    "performance",
+    "e2e",
+    "seo",
+    "security"
+  ],
+  "phase3_subphases": [
+    "3A",
+    "3B",
+    "3C",
+    "3D",
+    "3E",
+    "3F",
+    "3G",
+    "3H",
+    "3I",
+    "3J"
+  ],
+  "forbidden": [
+    "existing ERP imports",
+    "existing ERP routes",
+    "/internal/v1 from browser",
+    "ERP credentials",
+    "ERP JWT reuse",
+    "root package changes",
+    "root service-worker changes"
+  ]
+}
+

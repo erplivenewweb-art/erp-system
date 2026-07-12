@@ -1,0 +1,1360 @@
+{
+  "notice": "DESIGN ONLY — NOT RUNTIME",
+  "version": "1.0.0",
+  "extends": "Phase 2A visual foundations without modifying them",
+  "token_count": 166,
+  "tokens": [
+    {
+      "name": "brand.ink",
+      "category": "color",
+      "value": "#151311",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "brand.ivory",
+      "category": "color",
+      "value": "#F8F4EC",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "brand.silver",
+      "category": "color",
+      "value": "#B9BDC2",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "brand.silver-dark",
+      "category": "color",
+      "value": "#666B70",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "brand.vermilion",
+      "category": "color",
+      "value": "#8C2F2B",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "brand.antique-gold",
+      "category": "color",
+      "value": "#A27B43",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.0",
+      "category": "color",
+      "value": "#FFFFFF",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.50",
+      "category": "color",
+      "value": "#FBFAF7",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.100",
+      "category": "color",
+      "value": "#F1EEE8",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.200",
+      "category": "color",
+      "value": "#DDD8CF",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.300",
+      "category": "color",
+      "value": "#C4BEB4",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.400",
+      "category": "color",
+      "value": "#9E978E",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.500",
+      "category": "color",
+      "value": "#77716A",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.600",
+      "category": "color",
+      "value": "#5F5953",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.700",
+      "category": "color",
+      "value": "#49443F",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.800",
+      "category": "color",
+      "value": "#312D29",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.900",
+      "category": "color",
+      "value": "#211E1B",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "neutral.950",
+      "category": "color",
+      "value": "#151311",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "surface.canvas",
+      "category": "color",
+      "value": "#F8F4EC",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "surface.raised",
+      "category": "color",
+      "value": "#FFFFFF",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "surface.sunken",
+      "category": "color",
+      "value": "#F1EEE8",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "surface.inverse",
+      "category": "color",
+      "value": "#151311",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "surface.glass",
+      "category": "color",
+      "value": "rgba(255,255,255,0.78)",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "surface.glass-dark",
+      "category": "color",
+      "value": "rgba(21,19,17,0.78)",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.primary",
+      "category": "color",
+      "value": "#151311",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.secondary",
+      "category": "color",
+      "value": "#49443F",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.muted",
+      "category": "color",
+      "value": "#66615B",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.inverse",
+      "category": "color",
+      "value": "#FFFFFF",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.link",
+      "category": "color",
+      "value": "#6F211E",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "text.disabled",
+      "category": "color",
+      "value": "#8B857E",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {
+        "dark": "See dark.* semantic mapping"
+      }
+    },
+    {
+      "name": "border.subtle",
+      "category": "color",
+      "value": "#DDD8CF",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "border.strong",
+      "category": "color",
+      "value": "#9E978E",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "border.inverse",
+      "category": "color",
+      "value": "#49443F",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "focus.ring",
+      "category": "color",
+      "value": "#1C65A6",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.success",
+      "category": "color",
+      "value": "#276749",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.success-bg",
+      "category": "color",
+      "value": "#E8F5EE",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.warning",
+      "category": "color",
+      "value": "#8A5A12",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.warning-bg",
+      "category": "color",
+      "value": "#FFF4D6",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.danger",
+      "category": "color",
+      "value": "#9B2C2C",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.danger-bg",
+      "category": "color",
+      "value": "#FCE8E8",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.info",
+      "category": "color",
+      "value": "#285E8E",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "semantic.info-bg",
+      "category": "color",
+      "value": "#E8F1FA",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "overlay.scrim",
+      "category": "color",
+      "value": "rgba(21,19,17,0.64)",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "overlay.soft",
+      "category": "color",
+      "value": "rgba(21,19,17,0.24)",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "disabled.surface",
+      "category": "color",
+      "value": "#ECE9E3",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "disabled.content",
+      "category": "color",
+      "value": "#77716A",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.canvas",
+      "category": "color",
+      "value": "#121110",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.surface",
+      "category": "color",
+      "value": "#1D1B19",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.raised",
+      "category": "color",
+      "value": "#272421",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.text",
+      "category": "color",
+      "value": "#F6F2EA",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.muted",
+      "category": "color",
+      "value": "#C4BEB4",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.border",
+      "category": "color",
+      "value": "#49443F",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "dark.silver",
+      "category": "color",
+      "value": "#C8CCD0",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.diwali",
+      "category": "color",
+      "value": "#7A3517",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.durga",
+      "category": "color",
+      "value": "#8E2521",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.raja",
+      "category": "color",
+      "value": "#8A3159",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.akshaya",
+      "category": "color",
+      "value": "#8C6A2F",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.wedding",
+      "category": "color",
+      "value": "#732B32",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.christmas",
+      "category": "color",
+      "value": "#27513C",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "festival.new-year",
+      "category": "color",
+      "value": "#263B59",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "season.spring",
+      "category": "color",
+      "value": "#647A52",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "season.monsoon",
+      "category": "color",
+      "value": "#395C6B",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "season.winter",
+      "category": "color",
+      "value": "#574B68",
+      "type": "color",
+      "description": "Semantic visual color; use only in approved contrast pairings.",
+      "modes": {}
+    },
+    {
+      "name": "font.family.display",
+      "category": "typography",
+      "value": "Cormorant Garamond, Noto Serif Bengali, Georgia, serif",
+      "type": "fontFamily",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.family.body",
+      "category": "typography",
+      "value": "Inter, Noto Sans Bengali, system-ui, sans-serif",
+      "type": "fontFamily",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.family.mono",
+      "category": "typography",
+      "value": "ui-monospace, monospace",
+      "type": "fontFamily",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.weight.regular",
+      "category": "typography",
+      "value": "400",
+      "type": "fontWeight",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.weight.medium",
+      "category": "typography",
+      "value": "500",
+      "type": "fontWeight",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.weight.semibold",
+      "category": "typography",
+      "value": "600",
+      "type": "fontWeight",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "font.weight.bold",
+      "category": "typography",
+      "value": "700",
+      "type": "fontWeight",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.display-xl",
+      "category": "typography",
+      "value": "76/84",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.display-lg",
+      "category": "typography",
+      "value": "64/72",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.display-md",
+      "category": "typography",
+      "value": "56/64",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h1",
+      "category": "typography",
+      "value": "48/56",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h2",
+      "category": "typography",
+      "value": "40/48",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h3",
+      "category": "typography",
+      "value": "32/40",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h4",
+      "category": "typography",
+      "value": "24/32",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h5",
+      "category": "typography",
+      "value": "20/28",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.h6",
+      "category": "typography",
+      "value": "18/26",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.body-lg",
+      "category": "typography",
+      "value": "18/28",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.body-md",
+      "category": "typography",
+      "value": "16/25",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.body-sm",
+      "category": "typography",
+      "value": "14/22",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.caption",
+      "category": "typography",
+      "value": "12/18",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.overline",
+      "category": "typography",
+      "value": "12/16",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.button",
+      "category": "typography",
+      "value": "15/20",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.navigation",
+      "category": "typography",
+      "value": "15/22",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.table",
+      "category": "typography",
+      "value": "14/20",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.form-label",
+      "category": "typography",
+      "value": "14/20",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.price-lg",
+      "category": "typography",
+      "value": "28/34",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.price-md",
+      "category": "typography",
+      "value": "20/26",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "type.metric",
+      "category": "typography",
+      "value": "32/40",
+      "type": "typographicStyle",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "tracking.display",
+      "category": "typography",
+      "value": "-0.02em",
+      "type": "dimension",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "tracking.heading",
+      "category": "typography",
+      "value": "-0.01em",
+      "type": "dimension",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "tracking.body",
+      "category": "typography",
+      "value": "0",
+      "type": "dimension",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "tracking.overline",
+      "category": "typography",
+      "value": "0.14em",
+      "type": "dimension",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "measure.reading",
+      "category": "typography",
+      "value": "720px",
+      "type": "dimension",
+      "description": "Responsive and locale-aware typography token.",
+      "modes": {}
+    },
+    {
+      "name": "space.0",
+      "category": "spacing",
+      "value": "0px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.1",
+      "category": "spacing",
+      "value": "4px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.2",
+      "category": "spacing",
+      "value": "8px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.3",
+      "category": "spacing",
+      "value": "12px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.4",
+      "category": "spacing",
+      "value": "16px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.5",
+      "category": "spacing",
+      "value": "20px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.6",
+      "category": "spacing",
+      "value": "24px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.7",
+      "category": "spacing",
+      "value": "32px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.8",
+      "category": "spacing",
+      "value": "40px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.9",
+      "category": "spacing",
+      "value": "48px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.10",
+      "category": "spacing",
+      "value": "64px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.11",
+      "category": "spacing",
+      "value": "80px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.12",
+      "category": "spacing",
+      "value": "96px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.13",
+      "category": "spacing",
+      "value": "128px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "space.14",
+      "category": "spacing",
+      "value": "160px",
+      "type": "dimension",
+      "description": "4px-based premium spacing rhythm.",
+      "modes": {}
+    },
+    {
+      "name": "radius.none",
+      "category": "shape",
+      "value": "0px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.xs",
+      "category": "shape",
+      "value": "4px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.sm",
+      "category": "shape",
+      "value": "8px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.md",
+      "category": "shape",
+      "value": "12px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.lg",
+      "category": "shape",
+      "value": "16px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.xl",
+      "category": "shape",
+      "value": "24px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "radius.pill",
+      "category": "shape",
+      "value": "999px",
+      "type": "dimension",
+      "description": "Controlled radius; pill is chips only.",
+      "modes": {}
+    },
+    {
+      "name": "elevation.0",
+      "category": "elevation",
+      "value": "none",
+      "type": "shadow",
+      "description": "Use borders and spacing before shadow.",
+      "modes": {}
+    },
+    {
+      "name": "elevation.1",
+      "category": "elevation",
+      "value": "0 1px 3px rgba(21,19,17,.08)",
+      "type": "shadow",
+      "description": "Use borders and spacing before shadow.",
+      "modes": {}
+    },
+    {
+      "name": "elevation.2",
+      "category": "elevation",
+      "value": "0 8px 28px rgba(21,19,17,.12)",
+      "type": "shadow",
+      "description": "Use borders and spacing before shadow.",
+      "modes": {}
+    },
+    {
+      "name": "elevation.3",
+      "category": "elevation",
+      "value": "0 20px 60px rgba(21,19,17,.20)",
+      "type": "shadow",
+      "description": "Use borders and spacing before shadow.",
+      "modes": {}
+    },
+    {
+      "name": "elevation.focus",
+      "category": "elevation",
+      "value": "0 0 0 3px rgba(28,101,166,.28)",
+      "type": "shadow",
+      "description": "Use borders and spacing before shadow.",
+      "modes": {}
+    },
+    {
+      "name": "size.touch-min",
+      "category": "sizing",
+      "value": "44px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.control",
+      "category": "sizing",
+      "value": "48px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.header-mobile",
+      "category": "sizing",
+      "value": "64px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.header-desktop",
+      "category": "sizing",
+      "value": "80px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.content-max",
+      "category": "sizing",
+      "value": "1440px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.reading-max",
+      "category": "sizing",
+      "value": "720px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.icon-sm",
+      "category": "sizing",
+      "value": "16px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.icon-md",
+      "category": "sizing",
+      "value": "20px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.icon-lg",
+      "category": "sizing",
+      "value": "24px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "size.icon-xl",
+      "category": "sizing",
+      "value": "32px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "stroke.icon",
+      "category": "sizing",
+      "value": "1.5px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "border.hairline",
+      "category": "sizing",
+      "value": "1px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "border.width-strong",
+      "category": "sizing",
+      "value": "2px",
+      "type": "dimension",
+      "description": "Shared component/icon/layout size.",
+      "modes": {}
+    },
+    {
+      "name": "grid.mobile.columns",
+      "category": "responsive",
+      "value": "4",
+      "type": "number",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "grid.tablet.columns",
+      "category": "responsive",
+      "value": "8",
+      "type": "number",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "grid.desktop.columns",
+      "category": "responsive",
+      "value": "12",
+      "type": "number",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "grid.mobile.gutter",
+      "category": "responsive",
+      "value": "16px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "grid.tablet.gutter",
+      "category": "responsive",
+      "value": "24px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "grid.desktop.gutter",
+      "category": "responsive",
+      "value": "32px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "breakpoint.sm",
+      "category": "responsive",
+      "value": "480px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "breakpoint.md",
+      "category": "responsive",
+      "value": "768px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "breakpoint.lg",
+      "category": "responsive",
+      "value": "1024px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "breakpoint.xl",
+      "category": "responsive",
+      "value": "1280px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "breakpoint.2xl",
+      "category": "responsive",
+      "value": "1536px",
+      "type": "dimension",
+      "description": "Reference grid/breakpoint token; content decides actual reflow.",
+      "modes": {}
+    },
+    {
+      "name": "motion.instant",
+      "category": "motion",
+      "value": "80ms",
+      "type": "duration",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "motion.fast",
+      "category": "motion",
+      "value": "160ms",
+      "type": "duration",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "motion.standard",
+      "category": "motion",
+      "value": "240ms",
+      "type": "duration",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "motion.editorial",
+      "category": "motion",
+      "value": "420ms",
+      "type": "duration",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "motion.max",
+      "category": "motion",
+      "value": "600ms",
+      "type": "duration",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "easing.out",
+      "category": "motion",
+      "value": "cubic-bezier(.16,1,.3,1)",
+      "type": "cubicBezier",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "easing.standard",
+      "category": "motion",
+      "value": "cubic-bezier(.2,0,0,1)",
+      "type": "cubicBezier",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "easing.enter",
+      "category": "motion",
+      "value": "cubic-bezier(0,0,.2,1)",
+      "type": "cubicBezier",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "easing.exit",
+      "category": "motion",
+      "value": "cubic-bezier(.4,0,1,1)",
+      "type": "cubicBezier",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "distance.micro",
+      "category": "motion",
+      "value": "2px",
+      "type": "dimension",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "distance.control",
+      "category": "motion",
+      "value": "4px",
+      "type": "dimension",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "distance.reveal",
+      "category": "motion",
+      "value": "16px",
+      "type": "dimension",
+      "description": "Motion must have reduced-motion static equivalent.",
+      "modes": {}
+    },
+    {
+      "name": "z.base",
+      "category": "layer",
+      "value": "0",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.sticky",
+      "category": "layer",
+      "value": "20",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.dropdown",
+      "category": "layer",
+      "value": "30",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.drawer",
+      "category": "layer",
+      "value": "40",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.modal",
+      "category": "layer",
+      "value": "60",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.toast",
+      "category": "layer",
+      "value": "80",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    },
+    {
+      "name": "z.emergency",
+      "category": "layer",
+      "value": "100",
+      "type": "number",
+      "description": "Named layer; avoid arbitrary z-index.",
+      "modes": {}
+    }
+  ]
+}

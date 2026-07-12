@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "data": {
+    "id": "prd_01JZ8P7Y5M2A3B4C5D6E7F8G9H",
+    "slug": "premium-silver-sankha",
+    "title": "Premium Silver Sankha",
+    "visibility": "PUBLIC",
+    "variants": [
+      {
+        "id": "var_01JZ8Q00000000000000000000",
+        "options": {
+          "finish": "Polished"
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "requestId": "01JZ8REQ0000000000000000000",
+    "correlationId": "01JZ8COR0000000000000000000",
+    "generatedAt": "2026-07-11T10:00:00Z",
+    "contractVersion": "1.0.0"
+  }
+}
+

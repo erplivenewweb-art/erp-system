@@ -1,0 +1,1157 @@
+{
+  "notice": "DESIGN ONLY — NOT RUNTIME",
+  "version": "1.0.0",
+  "screen_count": 29,
+  "screens": [
+    {
+      "id": "screen-01",
+      "slug": "home",
+      "name": "Home",
+      "visual_hierarchy": "Lead with Editorial hero; sequence Trust proof → Collections → Featured products → Manufacturing story → Workshop/artisans → Purity/packaging → Reviews → Wholesale/custom → Journal/FAQ → Footer. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Editorial hero",
+        "Trust proof",
+        "Collections",
+        "Featured products",
+        "Manufacturing story",
+        "Workshop + artisans",
+        "Purity + packaging",
+        "Reviews",
+        "Wholesale + custom",
+        "Journal + FAQ",
+        "Footer",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-02",
+      "slug": "collection",
+      "name": "Collection",
+      "visual_hierarchy": "Lead with Breadcrumb; sequence Editorial collection hero → Story → Filter/sort → Product grid → Craft note → Related collections. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Breadcrumb",
+        "Editorial collection hero",
+        "Story",
+        "Filter + sort",
+        "Product grid",
+        "Craft note",
+        "Related collections",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-03",
+      "slug": "category",
+      "name": "Category",
+      "visual_hierarchy": "Lead with Breadcrumb; sequence Category title/count → Filter/sort → Product grid → FAQ → Related taxonomy. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Breadcrumb",
+        "Category title + count",
+        "Filter + sort",
+        "Product grid",
+        "FAQ",
+        "Related taxonomy",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-04",
+      "slug": "product",
+      "name": "Product",
+      "visual_hierarchy": "Lead with Breadcrumb; sequence Gallery/video/360 → Title/reviews → Facts → Price/availability → Variants/quantity → Primary action → Delivery/returns → Craft/packaging/care → FAQ/related. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Breadcrumb",
+        "Gallery + video + 360",
+        "Title + reviews",
+        "Facts",
+        "Price + availability",
+        "Variants + quantity",
+        "Primary action",
+        "Delivery + returns",
+        "Craft + packaging + care",
+        "FAQ + related",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-05",
+      "slug": "search",
+      "name": "Search",
+      "visual_hierarchy": "Lead with Search field/suggestions; sequence Result summary → Filter/sort → Product results → No-results recovery. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Search field + suggestions",
+        "Result summary",
+        "Filter + sort",
+        "Product results",
+        "No-results recovery",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-06",
+      "slug": "wishlist",
+      "name": "Wishlist",
+      "visual_hierarchy": "Lead with Title/count; sequence Saved product grid → Price/availability refresh → Move-to-cart controls → Recommendations. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Title + count",
+        "Saved product grid",
+        "Price + availability refresh",
+        "Move-to-cart controls",
+        "Recommendations",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-07",
+      "slug": "cart",
+      "name": "Cart",
+      "visual_hierarchy": "Lead with Items/quantity; sequence Freshness validation → Trust notes → Order estimate → Primary checkout action. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Items + quantity",
+        "Freshness validation",
+        "Trust notes",
+        "Order estimate",
+        "Primary checkout action",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-08",
+      "slug": "checkout",
+      "name": "Checkout",
+      "visual_hierarchy": "Lead with Progress; sequence Contact/address → Delivery → Future payment → Review/consent → Sticky order summary. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Progress",
+        "Contact + address",
+        "Delivery",
+        "Future payment",
+        "Review + consent",
+        "Sticky order summary",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-09",
+      "slug": "customer-dashboard",
+      "name": "Customer Dashboard",
+      "visual_hierarchy": "Lead with Greeting; sequence Active order → Quick links → Orders → Wishlist → Notifications/support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Greeting",
+        "Active order",
+        "Quick links",
+        "Orders",
+        "Wishlist",
+        "Notifications + support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-10",
+      "slug": "dealer-dashboard",
+      "name": "Dealer Dashboard",
+      "visual_hierarchy": "Lead with Dealer status; sequence Operational metrics → Expiring quotations → Orders/dispatch → Bulk actions → Support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Dealer status",
+        "Operational metrics",
+        "Expiring quotations",
+        "Orders + dispatch",
+        "Bulk actions",
+        "Support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-11",
+      "slug": "dealer-catalogue",
+      "name": "Dealer Catalogue",
+      "visual_hierarchy": "Lead with Bulk search; sequence Filter rail → Dense list/grid → Authorized price/MOQ/slabs → Bulk cart tray. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Bulk search",
+        "Filter rail",
+        "Dense list + grid",
+        "Authorized price + MOQ + slabs",
+        "Bulk cart tray",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-12",
+      "slug": "quotation",
+      "name": "Quotation",
+      "visual_hierarchy": "Lead with Status/revision; sequence Change comparison → Line snapshots → Terms/messages → Accept/revise/reject → History. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Status + revision",
+        "Change comparison",
+        "Line snapshots",
+        "Terms + messages",
+        "Accept + revise + reject",
+        "History",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-13",
+      "slug": "dealer-registration",
+      "name": "Dealer Registration",
+      "visual_hierarchy": "Lead with Value/eligibility; sequence Progress stepper → Business/GST/evidence fields → Save/resume → Review/support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Value + eligibility",
+        "Progress stepper",
+        "Business + GST + evidence fields",
+        "Save + resume",
+        "Review + support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-14",
+      "slug": "manufacturing-story",
+      "name": "Manufacturing Story",
+      "visual_hierarchy": "Lead with Film hero; sequence Process overview → Workshop → Tools → Artisans → Quality/purity → Product bridge. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Film hero",
+        "Process overview",
+        "Workshop",
+        "Tools",
+        "Artisans",
+        "Quality + purity",
+        "Product bridge",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-15",
+      "slug": "workshop",
+      "name": "Workshop",
+      "visual_hierarchy": "Lead with Place portrait; sequence Photo essay → Tools/materials → People with consent → Process boundaries → Visit products. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Place portrait",
+        "Photo essay",
+        "Tools + materials",
+        "People with consent",
+        "Process boundaries",
+        "Visit products",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-16",
+      "slug": "about",
+      "name": "About",
+      "visual_hierarchy": "Lead with Brand thesis; sequence Values → Manufacturer evidence → Milestones → People → Trust/CTA. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Brand thesis",
+        "Values",
+        "Manufacturer evidence",
+        "Milestones",
+        "People",
+        "Trust + CTA",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-17",
+      "slug": "blog",
+      "name": "Blog",
+      "visual_hierarchy": "Lead with Editorial hero; sequence Topics → Featured guide → Article grid → Newsletter. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Editorial hero",
+        "Topics",
+        "Featured guide",
+        "Article grid",
+        "Newsletter",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-18",
+      "slug": "faq",
+      "name": "FAQ",
+      "visual_hierarchy": "Lead with Search; sequence Topic navigation → Accessible accordions → Support escalation. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Search",
+        "Topic navigation",
+        "Accessible accordions",
+        "Support escalation",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-19",
+      "slug": "support",
+      "name": "Support",
+      "visual_hierarchy": "Lead with Help search; sequence Topic cards → Order help → Contact channels → Hours/status. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Help search",
+        "Topic cards",
+        "Order help",
+        "Contact channels",
+        "Hours + status",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-20",
+      "slug": "contact",
+      "name": "Contact",
+      "visual_hierarchy": "Lead with Reason selector; sequence Accessible form → Approved WhatsApp/contact → Hours → Privacy. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Reason selector",
+        "Accessible form",
+        "Approved WhatsApp + contact",
+        "Hours",
+        "Privacy",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-21",
+      "slug": "profile",
+      "name": "Profile",
+      "visual_hierarchy": "Lead with Identity summary; sequence Editable contact → Preferences/consent → Security → Account closure. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Identity summary",
+        "Editable contact",
+        "Preferences + consent",
+        "Security",
+        "Account closure",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-22",
+      "slug": "policies",
+      "name": "Policies",
+      "visual_hierarchy": "Lead with Title/effective date; sequence Contents rail → Readable policy body → Related policies → Support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Title + effective date",
+        "Contents rail",
+        "Readable policy body",
+        "Related policies",
+        "Support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-23",
+      "slug": "cms-preview",
+      "name": "CMS Preview",
+      "visual_hierarchy": "Lead with CMS chrome; sequence Device/locale/audience controls → Rendered preview → SEO/a11y/performance checks → Version diff → Publish action. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "CMS chrome",
+        "Device + locale + audience controls",
+        "Rendered preview",
+        "SEO + a11y + performance checks",
+        "Version diff",
+        "Publish action",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Control labels are system-owned; previewed structured content retains its original CMS ownership"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-24",
+      "slug": "404",
+      "name": "404",
+      "visual_hierarchy": "Lead with Quiet error mark; sequence Explanation → Search → Curated destinations → Support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Quiet error mark",
+        "Explanation",
+        "Search",
+        "Curated destinations",
+        "Support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-25",
+      "slug": "loading",
+      "name": "Loading",
+      "visual_hierarchy": "Lead with Stable shell; sequence Content-shaped skeletons → Progress label → Timeout recovery. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Stable shell",
+        "Content-shaped skeletons",
+        "Progress label",
+        "Timeout recovery",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-26",
+      "slug": "empty",
+      "name": "Empty",
+      "visual_hierarchy": "Lead with Contextual illustration; sequence Reason → Primary recovery → Secondary discovery. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Contextual illustration",
+        "Reason",
+        "Primary recovery",
+        "Secondary discovery",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-27",
+      "slug": "success",
+      "name": "Success",
+      "visual_hierarchy": "Lead with Restrained confirmation; sequence Safe reference → Summary → Next steps → Support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Restrained confirmation",
+        "Safe reference",
+        "Summary",
+        "Next steps",
+        "Support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-28",
+      "slug": "error",
+      "name": "Error",
+      "visual_hierarchy": "Lead with Safe error heading; sequence Preserved context → Recovery action → Correlation reference → Support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Safe error heading",
+        "Preserved context",
+        "Recovery action",
+        "Correlation reference",
+        "Support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    },
+    {
+      "id": "screen-29",
+      "slug": "maintenance",
+      "name": "Maintenance",
+      "visual_hierarchy": "Lead with Brand mark; sequence Service notice → Affected scope → Status/time → Alternative support. One dominant action and restrained evidence-led supporting actions.",
+      "grid": "Mobile 4 columns/16px gutter; tablet 8/24px; desktop 12/32px; max 1440px; editorial reading measure 720px.",
+      "spacing": "Use 4px base; 24–32px component groups, 48–80px sections mobile/tablet, 80–128px desktop editorial sections; density reduces only in dealer/CMS operational regions.",
+      "typography": "One display/H1; serif display for editorial titles only; sans body/UI; 16px minimum body; tabular numerals for price/metrics; responsive clamp without line or layout clipping.",
+      "color_usage": "Gallery Ivory canvas, Brand Ink text, white raised surfaces, silver borders/details, vermilion one-primary-accent maximum, semantic colors for states; decorative gold never conveys status.",
+      "motion": "160ms controls, 240ms navigation/layout, ≤420ms editorial reveal; transform/opacity only; reduced-motion static equivalent; no essential autoplay.",
+      "cta_hierarchy": "Primary filled ink or inverse high-contrast button; secondary outline/text; destructive separated and confirmed; dealer/admin high-risk actions use explicit labels.",
+      "component_usage": [
+        "Brand mark",
+        "Service notice",
+        "Affected scope",
+        "Status + time",
+        "Alternative support",
+        "Header/navigation",
+        "Breadcrumb when hierarchical",
+        "Footer/help",
+        "Loading/empty/error variants"
+      ],
+      "responsive_rules": "Mobile source order is canonical; tablet composes paired regions; desktop may split editorial/task columns. Sticky regions disable when viewport/zoom cannot fit. No hover-only information.",
+      "accessibility": "WCAG 2.2 AA; logical landmarks/headings/focus; 44px targets; keyboard/screen-reader complete; 3:1 focus; 4.5:1 normal text; 200% zoom; state not color-only; reduced motion.",
+      "seo_placeholders": [
+        "Document title/meta/canonical intent",
+        "One H1 and structured headings",
+        "Breadcrumb/schema placeholder when public and eligible",
+        "CMS-provided OG/social image",
+        "Private/state screens noindex"
+      ],
+      "cms_editable_zones": [
+        "Approved editorial copy/media/SEO only",
+        "CTA labels/destinations within allowlist",
+        "Transactional, price, stock, identity and ERP-derived facts are not freeform CMS fields"
+      ],
+      "dark_mode": "Map semantic surfaces/text/borders; protect product color accuracy; no image inversion; use charcoal not pure black; revalidate all contrast and media overlays.",
+      "performance": "Reserve media dimensions; prioritize only true LCP; responsive AVIF/WebP/JPEG; lazy-load below fold; poster-gate video/social; no visual dependency required for comprehension."
+    }
+  ]
+}
+
