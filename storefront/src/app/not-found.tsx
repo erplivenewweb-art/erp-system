@@ -6,9 +6,8 @@ export default function NotFound() {
     <section className={styles.state}>
       <p className={styles.eyebrow}>404</p>
       <h1>Page not found</h1>
-      <p>This scaffold contains only its foundational route.</p>
-      <Link className={styles.action} href="/">Return to scaffold</Link>
+      <p>The page may have moved or may not be available in this storefront preview.</p>
+      <Link className={styles.action} href="/">Return to homepage</Link>
     </section>
   );
 }
-

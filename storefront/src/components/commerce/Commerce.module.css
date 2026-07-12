@@ -5,8 +5,8 @@
 .imagePlaceholder { display: grid; place-items: center; aspect-ratio: 4 / 5; border-radius: var(--sf-radius-medium); background: var(--sf-color-surface-subtle); color: var(--sf-color-text-muted); }
 .productHeading { display: flex; align-items: start; justify-content: space-between; gap: var(--sf-space-3); }
 .productHeading h3 { margin: var(--sf-space-2) 0 0; font-family: var(--sf-font-family-display); font-size: var(--sf-font-size-h4); }
+.pricingPlaceholder { margin: 0; color: var(--sf-color-text-secondary); font-size: var(--sf-font-size-small); font-weight: var(--sf-font-weight-semibold); }
 .review { display: grid; gap: var(--sf-space-3); }
 .review blockquote, .review p { margin: 0; }
 .review blockquote { color: var(--sf-color-text-secondary); }
 .review p { font-size: var(--sf-font-size-small); }
-

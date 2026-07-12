@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{HomepageManager}from"@/features/cms";export const metadata:Metadata={title:"Homepage manager preview",description:"Static homepage content editor.",robots:{index:false,follow:false}};export default function Page(){return <HomepageManager/>}

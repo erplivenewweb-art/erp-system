@@ -12,7 +12,7 @@ Created components: `PublicHeader`, accessible desktop disclosures/mega menus, m
 
 ## Verification
 
-Tests: 25/25 across 7 files. Lint, strict typecheck, boundary/style guards, production build and audit pass. Axe shell foundation passes with browser-only contrast work deferred to Phase 3J. Live 1440x900, 1024x768, 768x1024 and 390x844 checks pass with zero horizontal overflow. Sticky behavior, responsive switching, drawer focus trap/restore, footer, newsletter and touch target sizing were verified.
+Tests: 25/25 across 7 files. Lint, strict typecheck, boundary/style guards, production build and audit pass. Axe shell foundation passes with browser-only contrast work deferred to Phase 3J. Live 1440x900, 1024x768, 768x1024 and 390x844 checks pass with zero horizontal overflow. Sticky behavior, responsive switching, final native desktop disclosure/mega-menu content and bounds, drawer focus trap/restore, footer, newsletter and touch target sizing were verified. The post-disclosure tablet/mobile regression pass remained clean with no browser warnings or errors.
 
 Evidence: `docs/phase-3c/evidence/`.
 
@@ -24,7 +24,7 @@ Phase 1A integrity recomputation matches exactly: 252 ordered routes, route SHA-
 
 ## Build size
 
-Static 711,697 bytes; server 4,455,596 bytes; standalone 16,472,077 bytes. Phase 3B deltas: +13,148, +187,282 and +154,225 bytes respectively. Actual transfer/performance qualification remains Phase 3J.
+Static 713,327 bytes; server 4,460,567 bytes; standalone 16,476,170 bytes. Phase 3B deltas: +14,778, +192,253 and +158,318 bytes respectively. Actual transfer/performance qualification remains Phase 3J.
 
 ## Rollback
 

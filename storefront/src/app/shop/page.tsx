@@ -1,0 +1,11 @@
+import type { Metadata } from "next";
+import { Container, Section, Stack } from "@/components/layout";
+import { LinkButton } from "@/components/ui";
+import { CatalogueMedia, CollectionCard, FilterPanel, ProductGrid, categories, collections, products } from "@/features/catalog";
+import styles from "@/features/catalog/Catalog.module.css";
+
+export const metadata: Metadata = { title: "Shop Silver Sankha & Pola", description: "Explore a static preview of Silver Sankha and Pola collections from a manufacturer-led jewellery brand.", alternates: { canonical: "/shop" }, openGraph: { title: "Shop Silver Sankha & Pola", description: "A CMS-ready catalogue preview with transparent product-fact placeholders.", type: "website" } };
+
+export default function ShopPage() {
+  return <><Section><Container><div className={styles.hero}><Stack className={styles.heroCopy} gap="lg"><span className={styles.eyebrow}>Manufacturer-led catalogue</span><h1>Silver forms, presented with clarity</h1><p className={styles.lede}>Explore a synthetic, CMS-ready retail catalogue where purity, weight and size will be published only after approval.</p><div className={styles.actions}><LinkButton href="/collections">Explore collections</LinkButton><LinkButton href="/wholesale" variant="secondary">Dealer introduction</LinkButton></div></Stack><CatalogueMedia media={{ alt: "Reserved catalogue hero media for Silver Sankha and Pola", label: "Catalogue hero media", ratio: "landscape" }} /></div></Container></Section><Section><Container><Stack gap="lg"><span className={styles.eyebrow}>Collection highlights</span><h2>Begin with a considered collection</h2><div className={styles.cardGrid}>{collections.slice(0, 3).map((collection) => <CollectionCard collection={collection} key={collection.slug} />)}</div></Stack></Container></Section><Section><Container><Stack gap="lg"><span className={styles.eyebrow}>Featured categories</span><h2>Browse by form</h2><div className={styles.actions}>{categories.map((category) => <LinkButton href={`/category/${category.slug}`} key={category.slug} variant="secondary">{category.name}</LinkButton>)}</div><div className={styles.catalogueLayout}><FilterPanel /><div><h2>Featured product shells</h2><ProductGrid products={products.filter((product) => product.featured)} /></div></div></Stack></Container></Section></>;
+}

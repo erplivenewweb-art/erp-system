@@ -1,0 +1,5 @@
+import Link from "next/link";
+import type { CommerceItem } from "./data";
+import styles from "./CommerceFlow.module.css";
+
+export function CartItem({ item }: { item: CommerceItem }) { return <article className={styles.item}><div aria-label={`Reserved image for ${item.name}`} className={styles.media} role="img">SS</div><div className={styles.itemBody}><h2><Link href={`/product/${item.slug}`}>{item.name}</Link></h2><p>{item.detail}</p><p>{item.price}</p><div className={styles.controls} aria-label={`Quantity for ${item.name}`}><button aria-label={`Decrease ${item.name} quantity`} className={styles.controlButton} type="button">−</button><output aria-live="polite" className={styles.quantity}>{item.quantity}</output><button aria-label={`Increase ${item.name} quantity`} className={styles.controlButton} type="button">+</button></div><div className={styles.actions}><button className={styles.controlButton} type="button">Save for later</button><button className={styles.controlButton} type="button">Remove item</button></div></div></article>; }

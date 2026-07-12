@@ -1,0 +1,6 @@
+import { Checkbox } from "@/components/forms";
+import { AccountHeader, AccountShell } from "./AccountShell";
+import { syntheticNotifications } from "./data";
+import styles from "./Account.module.css";
+export function EmptyNotifications() { return <div className={styles.empty} role="status"><h2>No notifications</h2><p>Future account messages will appear here only after an approved service exists.</p></div>; }
+export function NotificationsPage() { return <AccountShell><AccountHeader eyebrow="Message centre preview" title="Notifications" description="Synthetic messages only; nothing was delivered to a real customer." /><div className={styles.list}>{syntheticNotifications.map((item) => <article className={styles.card} key={item.title}><div className={styles.cardHeader}><h2>{item.title}</h2>{item.unread ? <span className={`${styles.badge} ${styles.unread}`}>Unread preview</span> : null}</div><p>{item.body}</p></article>)}</div><section className={styles.card}><h2>Notification settings</h2><Checkbox defaultChecked>Collection and care updates placeholder</Checkbox><Checkbox>Order-message placeholder</Checkbox><button className={styles.button} type="button">Save preferences preview</button></section><EmptyNotifications /></AccountShell>; }

@@ -1,0 +1,5 @@
+import { LinkButton } from "@/components/ui";
+import styles from "./CommerceFlow.module.css";
+
+export function PriceRow({ label, value, total = false }: { label: string; value: string; total?: boolean }) { return <div className={`${styles.priceRow} ${total ? styles.total : ""}`}><span>{label}</span><span>{value}</span></div>; }
+export function OrderSummary({ action = true }: { action?: boolean }) { return <aside aria-label="Order summary" className={styles.summary}><h2>Order summary</h2><PriceRow label="Subtotal" value="Pending cart calculation" /><PriceRow label="Shipping" value="Selected at checkout" /><PriceRow label="Taxes" value="Calculated only by future commerce service" /><PriceRow label="Estimated total" value="Pending publication" total />{action ? <div className={styles.buttonStack}><LinkButton href="/checkout">Continue to checkout</LinkButton><LinkButton href="/shop" variant="secondary">Continue shopping</LinkButton></div> : null}<p>No amount is calculated or submitted in this static experience.</p></aside>; }

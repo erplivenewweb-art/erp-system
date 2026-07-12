@@ -11,4 +11,4 @@
 .swatch[data-swatch="danger"] span { --swatch-color: var(--sf-color-semantic-danger); }
 .swatch[data-swatch="info"] span { --swatch-color: var(--sf-color-semantic-info); }
 .spacingSample { padding: var(--sf-space-8); border-radius: var(--sf-radius-medium); background: var(--sf-color-surface-subtle); box-shadow: var(--sf-elevation-raised); }
-@media (max-width: 47.99rem) { .preview { margin-inline: calc(-1 * var(--sf-space-4)); padding-inline: var(--sf-space-4); } }
+@media (max-width: 47.99rem) { .preview { padding-inline: var(--sf-space-4); } }

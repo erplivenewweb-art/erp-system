@@ -17,11 +17,10 @@ export function WishlistButton({ initial = false, label = "Save item" }: { initi
   return <IconButton label={saved ? "Remove saved item" : label} onClick={() => setSaved((value) => !value)} pressed={saved}><Icon name="heart" /></IconButton>;
 }
 
-export function ProductCardShell({ availability = "Available", name, price = "₹0.00" }: { availability?: string; name: string; price?: string }) {
-  return <Card className={styles.productCard}><div aria-label="Product image placeholder" className={styles.imagePlaceholder} role="img"><span>4:5 media</span></div><div className={styles.productHeading}><div><Badge>Product shell</Badge><h3>{name}</h3></div><WishlistButton label={"Save " + name} /></div><PriceBlock amount={price} note="Synthetic showcase value" /><AvailabilityIndicator label={availability} status="success" /><Button disabled>Commerce action unavailable</Button></Card>;
+export function ProductCardShell({ availability = "Available", name, price = "₹0.00", priceLabel }: { availability?: string; name: string; price?: string; priceLabel?: string }) {
+  return <Card className={styles.productCard}><div aria-label="Product image placeholder" className={styles.imagePlaceholder} role="img"><span>4:5 media</span></div><div className={styles.productHeading}><div><Badge>Product shell</Badge><h3>{name}</h3></div><WishlistButton label={"Save " + name} /></div>{priceLabel ? <p className={styles.pricingPlaceholder}>{priceLabel}</p> : <PriceBlock amount={price} note="Synthetic showcase value" />}<AvailabilityIndicator label={availability} status="success" /><Button disabled>Commerce action unavailable</Button></Card>;
 }
 
 export function ReviewCardShell({ author = "Sample customer", text = "Synthetic review content for component verification." }: { author?: string; text?: string }) {
   return <Card className={styles.review}><Rating count={1} value={5} /><blockquote>{text}</blockquote><p><strong>{author}</strong> · <span>Verified label unavailable in scaffold</span></p></Card>;
 }
-

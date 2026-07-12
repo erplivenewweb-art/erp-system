@@ -1,15 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import RootLayout from "@/app/layout";
-import ScaffoldPage from "@/app/page";
+import HomePage from "@/app/page";
 import Loading from "@/app/loading";
 import NotFound from "@/app/not-found";
 
-describe("Phase 3A scaffold", () => {
-  it("renders the root page identity and scope", () => {
-    const html = renderToStaticMarkup(<ScaffoldPage />);
-    expect(html).toContain("Isolated storefront scaffold");
-    expect(html).toContain("Foundation only");
+describe("storefront root foundation", () => {
+  it("renders the approved static homepage without commerce actions", () => {
+    const html = renderToStaticMarkup(<HomePage />);
+    expect(html).toContain("Ceremonial silver, shaped with modern discipline.");
+    expect(html).toContain("Synthetic homepage product shells");
     expect(html).not.toContain("Add to cart");
   });
 
@@ -33,4 +33,3 @@ describe("Phase 3A scaffold", () => {
     expect(notFound).toContain('href="/"');
   });
 });
-

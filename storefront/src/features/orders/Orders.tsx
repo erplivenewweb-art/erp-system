@@ -1,0 +1,7 @@
+import Link from "next/link";
+import { AccountHeader, AccountShell, syntheticOrders } from "@/features/account";
+import styles from "@/features/account/Account.module.css";
+
+export function OrderCard({ order }: { order: (typeof syntheticOrders)[number] }) { return <article className={styles.card}><div className={styles.cardHeader}><h2>{order.title}</h2><span className={styles.badge}>{order.status}</span></div><dl className={styles.summary}><div><dt>Date</dt><dd>{order.date}</dd></div><div><dt>Total</dt><dd>{order.total}</dd></div></dl><div className={styles.actions}><Link className={styles.button} href={`/account/orders/${order.slug}`}>View order detail</Link><button className={styles.button} type="button">Track order placeholder</button><button className={styles.button} type="button">Invoice unavailable</button></div></article>; }
+export function EmptyOrders() { return <div className={styles.empty} role="status"><h2>No live orders</h2><p>This account preview has no authenticated order history.</p></div>; }
+export function OrdersPage() { return <AccountShell><AccountHeader eyebrow="Order history preview" title="Your orders" description="Synthetic order cards demonstrate future information architecture without order or customer records." /><div className={styles.list}>{syntheticOrders.map((order) => <OrderCard key={order.slug} order={order} />)}</div><EmptyOrders /></AccountShell>; }

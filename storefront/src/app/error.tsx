@@ -17,12 +17,11 @@ export default function RouteError({
   return (
     <section className={styles.state} role="alert">
       <p className={styles.eyebrow}>Unable to continue</p>
-      <h1>The scaffold encountered an error</h1>
-      <p>No commerce or ERP operation was attempted.</p>
+      <h1>We could not prepare this page</h1>
+      <p>Please try again. No order or account action was completed.</p>
       <button className={styles.action} onClick={reset} type="button">
         Try again
       </button>
     </section>
   );
 }
-

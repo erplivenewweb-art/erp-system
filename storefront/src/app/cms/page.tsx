@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{CMSDashboard}from"@/features/cms";export const metadata:Metadata={title:"CMS dashboard preview",description:"Static content studio.",robots:{index:false,follow:false}};export default function Page(){return <CMSDashboard/>}

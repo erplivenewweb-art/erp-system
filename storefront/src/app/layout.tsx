@@ -6,8 +6,18 @@ import styles from "./shell.module.css";
 
 export const metadata: Metadata = {
   title: { default: "Silver Sankha", template: "%s | Silver Sankha" },
-  description: "Public storefront shell for Silver Sankha Jewellery House.",
-  robots: { index: false, follow: false },
+  description: "Manufacturer-led Silver Sankha and Pola jewellery, presented with clear product information and considered craftsmanship.",
+  robots: { index: true, follow: true },
+  openGraph: {
+    title: "Silver Sankha Jewellery House",
+    description: "A manufacturer-led home for Silver Sankha and Pola jewellery.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Silver Sankha Jewellery House",
+    description: "A manufacturer-led home for Silver Sankha and Pola jewellery.",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

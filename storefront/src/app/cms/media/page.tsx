@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{MediaLibrary}from"@/features/media";export const metadata:Metadata={title:"Media library preview",description:"Static asset library without uploads.",robots:{index:false,follow:false}};export default function Page(){return <MediaLibrary/>}

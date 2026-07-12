@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{NavigationManager}from"@/features/admin";export const metadata:Metadata={title:"Navigation manager preview",description:"Static menu manager.",robots:{index:false,follow:false}};export default function Page(){return <NavigationManager/>}

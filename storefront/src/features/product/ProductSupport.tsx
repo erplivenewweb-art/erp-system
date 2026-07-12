@@ -1,0 +1,8 @@
+import { Accordion } from "@/components/navigation";
+import { LinkButton } from "@/components/ui";
+import styles from "./Product.module.css";
+
+export function CareGuide() { return <Accordion items={[{ id: "care", title: "Jewellery care guide", content: <p>Store separately, keep dry and use only a care method approved for the final published material specification.</p> }, { id: "shipping", title: "Shipping information", content: <p>Shipping coverage, charges and timelines are placeholders until a commerce policy is approved.</p> }, { id: "returns", title: "Return information", content: <p>No return eligibility is implied. Final policy content requires legal and operational approval.</p> }]} />; }
+export function PackagingStory() { return <article className={styles.storyCard}><h2>Presentation, considered</h2><p>A future CMS-owned packaging story will describe only the materials and contents actually supplied. The current visual is a lightweight local placeholder.</p></article>; }
+export function ManufacturingStory() { return <article className={styles.storyCard}><h2>Made with disciplined attention</h2><p>This reserved manufacturer story can later explain approved workshop stages without unsupported certification or process claims.</p></article>; }
+export function ProductEnquiryActions() { return <div className={styles.ctaGroup}><LinkButton href="/contact">Enquire about a custom order</LinkButton><LinkButton href="/wholesale" variant="secondary">Request a dealer quotation</LinkButton><p>No order, quotation or availability request is submitted from this static screen.</p></div>; }

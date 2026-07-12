@@ -1,0 +1,1 @@
+import type{Metadata}from"next";import{FooterManager}from"@/features/admin";export const metadata:Metadata={title:"Footer manager preview",description:"Static footer content manager.",robots:{index:false,follow:false}};export default function Page(){return <FooterManager/>}

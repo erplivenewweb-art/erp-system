@@ -12,7 +12,6 @@ Final gates:
 - static routes unchanged: `/`, `/_not-found`, `/design-system`
 - npm audit: zero vulnerabilities
 
-Generated build sizes: `.next/static` 711,697 bytes; `.next/server` 4,455,596 bytes; `.next/standalone` 16,472,077 bytes. These are local generated artifacts, not browser transfer sizes. Compared with the recorded Phase 3B build: static +13,148 bytes, server +187,282 bytes, standalone +154,225 bytes.
+Generated build sizes: `.next/static` 713,327 bytes; `.next/server` 4,460,567 bytes; `.next/standalone` 16,476,170 bytes. These are local generated artifacts, not browser transfer sizes. Compared with the recorded Phase 3B build: static +14,778 bytes, server +192,253 bytes, standalone +158,318 bytes.
 
 No dependency or package manifest changed in Phase 3C.
-

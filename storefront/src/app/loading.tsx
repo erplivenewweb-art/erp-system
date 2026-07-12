@@ -4,9 +4,8 @@ export default function Loading() {
   return (
     <section className={styles.state} aria-busy="true" aria-live="polite">
       <p className={styles.eyebrow}>Loading</p>
-      <h1>Preparing the storefront scaffold</h1>
-      <p>Please wait. No commerce operation is being performed.</p>
+      <h1>Preparing your Silver Sankha experience</h1>
+      <p>Please wait while this page is prepared.</p>
     </section>
   );
 }
-
