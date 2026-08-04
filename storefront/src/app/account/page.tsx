@@ -1,4 +1,13 @@
 import type { Metadata } from "next";
-import { Dashboard } from "@/features/account";
-export const metadata: Metadata = { title: "Customer account preview", description: "Static customer dashboard without authentication or account data.", alternates: { canonical: "/account" }, robots: { index: false, follow: false } };
-export default function Page() { return <Dashboard />; }
+import { SimulationAccountDashboard } from "@/features/customer-account-simulation";
+
+export const metadata: Metadata = {
+  title: "Simulated customer account",
+  description: "A browser-only customer account simulation.",
+  alternates: { canonical: "/account" },
+  robots: { index: false, follow: false, nocache: true },
+};
+
+export default function Page() {
+  return <SimulationAccountDashboard />;
+}

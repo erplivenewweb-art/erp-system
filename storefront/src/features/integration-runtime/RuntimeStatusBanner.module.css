@@ -1,0 +1,103 @@
+.banner {
+  position: relative;
+  z-index: var(--sf-z-sticky);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--sf-space-3);
+  align-items: center;
+  padding: var(--sf-space-2) var(--sf-space-4);
+  border-block-end: 1px solid var(--sf-color-border-strong);
+  background: var(--sf-color-surface-subtle);
+  color: var(--sf-color-text-primary);
+  font-size: var(--sf-font-size-caption);
+}
+
+.marker {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: var(--sf-radius-pill);
+  background: var(--sf-color-semantic-info);
+  box-shadow: 0 0 0 3px var(--sf-color-surface-canvas);
+}
+
+.marker[data-state="healthy"] {
+  background: var(--sf-color-semantic-success);
+}
+
+.marker[data-state="error"] {
+  background: var(--sf-color-semantic-danger);
+}
+
+.summary {
+  min-width: 0;
+}
+
+.summary strong {
+  margin-inline-end: var(--sf-space-2);
+}
+
+.summary span {
+  overflow-wrap: anywhere;
+  color: var(--sf-color-text-secondary);
+}
+
+.refresh {
+  min-width: var(--sf-layout-touch-min);
+  min-height: var(--sf-layout-touch-min);
+  border: 1px solid var(--sf-color-border-subtle);
+  border-radius: var(--sf-radius-medium);
+  background: var(--sf-color-surface-canvas);
+  color: inherit;
+  cursor: pointer;
+}
+
+.details {
+  grid-column: 2 / -1;
+}
+
+.details summary {
+  cursor: pointer;
+  font-weight: var(--sf-font-weight-semibold);
+}
+
+.details dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sf-space-2) var(--sf-space-4);
+  margin-block-end: 0;
+}
+
+.details div {
+  min-width: 0;
+}
+
+.details dt {
+  color: var(--sf-color-text-secondary);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--sf-font-family-mono);
+}
+
+@media (max-width: 48rem) {
+  .banner {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding-inline: var(--sf-space-3);
+  }
+
+  .details {
+    grid-column: 1 / -1;
+  }
+
+  .details dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 30rem) {
+  .details dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

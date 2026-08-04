@@ -1,4 +1,13 @@
 import type { Metadata } from "next";
-import { AddressesPage } from "@/features/address";
-export const metadata: Metadata = { title: "Address book preview", description: "Static customer address-management UI.", alternates: { canonical: "/account/addresses" }, robots: { index: false, follow: false } };
-export default function Page() { return <AddressesPage />; }
+import { SimulationAddressBookPage } from "@/features/customer-account-simulation";
+
+export const metadata: Metadata = {
+  title: "Simulated address book",
+  description: "A browser-only delivery-address simulation.",
+  alternates: { canonical: "/account/addresses" },
+  robots: { index: false, follow: false, nocache: true },
+};
+
+export default function Page() {
+  return <SimulationAddressBookPage />;
+}

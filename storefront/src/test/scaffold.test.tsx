@@ -10,17 +10,20 @@ describe("storefront root foundation", () => {
     const html = renderToStaticMarkup(<HomePage />);
     expect(html).toContain("Ceremonial silver, shaped with modern discipline.");
     expect(html).toContain("Synthetic homepage product shells");
-    expect(html).not.toContain("Add to cart");
+    expect(html).toContain("Add to cart");
+    expect(html).not.toContain("Place order");
   });
 
   it("renders semantic root layout with skip link and landmarks", () => {
     const html = renderToStaticMarkup(
-      <RootLayout><p>Test content</p></RootLayout>,
+      <RootLayout>
+        <p>Test content</p>
+      </RootLayout>,
     );
     expect(html).toContain('lang="en"');
     expect(html).toContain('href="#main-content"');
     expect(html).toContain("<header");
-    expect(html).toContain('<main');
+    expect(html).toContain("<main");
     expect(html).toContain("<footer");
   });
 

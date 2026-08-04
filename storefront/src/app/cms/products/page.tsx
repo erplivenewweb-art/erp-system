@@ -1,1 +1,10 @@
-import type{Metadata}from"next";import{ProductManager}from"@/features/admin";export const metadata:Metadata={title:"Product CMS preview",description:"Static product manager.",robots:{index:false,follow:false}};export default function Page(){return <ProductManager/>}
+import type { Metadata } from "next";
+import { ProductCMSManager } from "@/features/product-cms-simulation";
+export const metadata: Metadata = {
+  title: "Development product CMS simulation",
+  description: "Browser-only product, category and collection manager.",
+  robots: { index: false, follow: false, nocache: true },
+};
+export default function Page() {
+  return <ProductCMSManager />;
+}

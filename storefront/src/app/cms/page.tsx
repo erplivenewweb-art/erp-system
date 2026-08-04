@@ -1,1 +1,13 @@
-import type{Metadata}from"next";import{CMSDashboard}from"@/features/cms";export const metadata:Metadata={title:"CMS dashboard preview",description:"Static content studio.",robots:{index:false,follow:false}};export default function Page(){return <CMSDashboard/>}
+import type { Metadata } from "next";
+import { CMSDashboard } from "@/features/cms";
+
+export const metadata: Metadata = {
+  title: "Development CMS simulation",
+  description: "Browser-only homepage and marketing content editor.",
+  alternates: { canonical: "/cms" },
+  robots: { index: false, follow: false, nocache: true },
+};
+
+export default function Page() {
+  return <CMSDashboard />;
+}

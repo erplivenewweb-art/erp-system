@@ -1,2 +1,12 @@
-import {Field,Input,Label,Select} from "@/components/forms";import {CMSHeader,CMSShell,cmsContent} from "@/features/cms";import styles from "@/features/cms/CMS.module.css";
-export function MediaLibrary(){return <CMSShell><CMSHeader eyebrow="Asset library preview" title="Media library" description="Search, filter, folder and preview UI without real media or upload backend."/><div className={styles.toolbar}><Field><Label htmlFor="media-search">Search media</Label><Input id="media-search" placeholder="Search placeholders"/></Field><Field><Label htmlFor="media-folder">Folder</Label><Select defaultValue="all" id="media-folder"><option value="all">All folders</option><option>Homepage</option><option>Products</option></Select></Field><button className={styles.button} disabled type="button">Upload unavailable</button></div><div className={styles.grid}>{cmsContent.media.map(item=><article className={styles.card} key={item}><div aria-label={item} className={styles.media} role="img">Media</div><h2>{item}</h2><span className={styles.badge}>Placeholder</span><button className={styles.button} type="button">Preview media</button></article>)}</div></CMSShell>}
+import { MediaCMSProvider } from "@/features/media-cms-simulation/MediaCMSProvider";
+import { MediaLibraryManager } from "@/features/media-cms-simulation/MediaLibraryManager";
+
+/** Compatibility wrapper for isolated component tests. The application route
+ * uses the root-scoped provider directly so live synchronization is shared. */
+export function MediaLibrary() {
+  return (
+    <MediaCMSProvider enabled>
+      <MediaLibraryManager />
+    </MediaCMSProvider>
+  );
+}

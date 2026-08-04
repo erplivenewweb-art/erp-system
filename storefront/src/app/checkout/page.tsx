@@ -1,4 +1,13 @@
 import type { Metadata } from "next";
-import { CheckoutPage } from "@/features/checkout";
-export const metadata: Metadata = { title: "Checkout preview", description: "Static shipping, billing, payment and order-review interface.", alternates: { canonical: "/checkout" }, robots: { index: false, follow: false } };
-export default function Page() { return <CheckoutPage />; }
+import { SimulationCheckoutPage } from "@/features/customer-account-simulation";
+
+export const metadata: Metadata = {
+  title: "Checkout readiness preview",
+  description: "A local simulation that cannot create an order or payment.",
+  alternates: { canonical: "/checkout" },
+  robots: { index: false, follow: false, nocache: true },
+};
+
+export default function Page() {
+  return <SimulationCheckoutPage />;
+}

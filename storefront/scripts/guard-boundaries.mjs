@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = path.join(root, "src");
+const serverRuntimeRoot = path.join(
+  sourceRoot,
+  "server",
+  "integration-runtime",
+);
 const forbidden = [
   "/internal/v1/",
   "/getStock",
@@ -32,11 +37,18 @@ const violations = [];
 for (const file of scanned) {
   const content = fs.readFileSync(file, "utf8");
   for (const term of forbidden) {
-    if (content.includes(term)) violations.push(`${path.relative(root, file)} contains forbidden term ${term}`);
+    if (term === "/internal/v1/" && file.startsWith(serverRuntimeRoot))
+      continue;
+    if (content.includes(term))
+      violations.push(
+        `${path.relative(root, file)} contains forbidden term ${term}`,
+      );
   }
 }
 if (violations.length) {
   violations.forEach((item) => console.error(`BOUNDARY ERROR: ${item}`));
   process.exit(1);
 }
-console.log(`Boundary validation passed across ${scanned.length} storefront source files.`);
+console.log(
+  `Boundary validation passed across ${scanned.length} storefront source files.`,
+);

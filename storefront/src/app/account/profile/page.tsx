@@ -1,4 +1,13 @@
 import type { Metadata } from "next";
-import { ProfilePage } from "@/features/profile";
-export const metadata: Metadata = { title: "Customer profile preview", description: "Static profile and communication-preference UI.", alternates: { canonical: "/account/profile" }, robots: { index: false, follow: false } };
-export default function Page() { return <ProfilePage />; }
+import { SimulationProfilePage } from "@/features/customer-account-simulation";
+
+export const metadata: Metadata = {
+  title: "Simulated customer profile",
+  description: "A browser-only, unverified customer profile simulation.",
+  alternates: { canonical: "/account/profile" },
+  robots: { index: false, follow: false, nocache: true },
+};
+
+export default function Page() {
+  return <SimulationProfilePage />;
+}

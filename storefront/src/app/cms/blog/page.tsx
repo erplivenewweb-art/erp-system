@@ -1,1 +1,10 @@
-import type{Metadata}from"next";import{BlogManager}from"@/features/blog";export const metadata:Metadata={title:"Blog CMS preview",description:"Static editorial manager.",robots:{index:false,follow:false}};export default function Page(){return <BlogManager/>}
+import type { Metadata } from "next";
+import { BlogManager } from "@/features/blog";
+export const metadata: Metadata = {
+  title: "Blog CMS preview",
+  description: "Static editorial manager.",
+  robots: { index: false, follow: false, nocache: true },
+};
+export default function Page() {
+  return <BlogManager />;
+}
