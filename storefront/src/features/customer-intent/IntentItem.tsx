@@ -49,7 +49,7 @@ export function CartIntentItem({
 }
 
 export function WishlistIntentItem({ item }: { item: WishlistItem }) {
-  const { addToCart, removeFromWishlist } = useCustomerIntent();
+  const { moveWishlistToCart, removeFromWishlist } = useCustomerIntent();
   return (
     <article className={styles.wishlistCard}>
       <IntentMedia label={item.imageLabel} />
@@ -66,12 +66,13 @@ export function WishlistIntentItem({ item }: { item: WishlistItem }) {
         <p>{item.availability.replaceAll("_", " ")}</p>
         <div className={styles.inlineActions}>
           <button
+            aria-label="Add to simulated cart"
             className={styles.primaryAction}
             disabled={item.availability === "OUT_OF_STOCK"}
-            onClick={() => addToCart(item)}
+            onClick={() => moveWishlistToCart(item.key)}
             type="button"
           >
-            Add to simulated cart
+            Move to simulated cart
           </button>
           <button
             aria-label={`Remove ${item.name} from development wishlist`}

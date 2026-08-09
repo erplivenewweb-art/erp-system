@@ -1,7 +1,7 @@
 import {
   developmentCategories,
   developmentProducts,
-} from "@/features/catalogue-simulation";
+} from "@/features/catalogue-simulation/fixtures";
 import {
   PRODUCT_CMS_SCHEMA_VERSION,
   type CMSManagedCollection,

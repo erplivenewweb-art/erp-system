@@ -57,7 +57,7 @@ export default async function ProductsPage({
     ),
   );
   const result = await Promise.all([
-    service.listProducts(query),
+    service.listProducts({ limit: 100 }),
     service.listCategories(),
   ])
     .then(([catalogue, categories]) => ({

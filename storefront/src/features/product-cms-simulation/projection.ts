@@ -1,7 +1,5 @@
-import {
-  developmentProducts,
-  type CatalogueProduct,
-} from "@/features/catalogue-simulation";
+import { developmentProducts } from "@/features/catalogue-simulation/fixtures";
+import type { CatalogueProduct } from "@/features/catalogue-simulation/types";
 import type { CMSManagedCategory, CMSManagedProduct } from "./types";
 
 export function projectCMSProduct(

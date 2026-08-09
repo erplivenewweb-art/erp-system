@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ProductIntentActions } from "@/features/customer-intent";
+import { useDiscovery } from "@/features/discovery-simulation/DiscoveryProvider";
 import { useMediaCMS } from "@/features/media-cms-simulation/MediaCMSProvider";
 import { projectProductMedia } from "@/features/media-cms-simulation/projection";
 import { CatalogueProductMedia } from "./CatalogueMedia";
@@ -23,9 +24,14 @@ const availabilityLabel = {
 
 export function SimulationProductCard({
   product,
+  highlight = "",
+  onNavigate,
 }: {
   product: CatalogueProduct;
+  highlight?: string;
+  onNavigate?: () => void;
 }) {
+  const discovery = useDiscovery();
   const mediaCMS = useMediaCMS();
   const displayedProduct = projectProductMedia(product, mediaCMS.content);
   const sizes = displayedProduct.variants
@@ -49,8 +55,12 @@ export function SimulationProductCard({
           {availabilityLabel[product.availability]}
         </p>
         <h3>
-          <Link className={styles.cardLink} href={`/products/${product.slug}`}>
-            {product.title}
+          <Link
+            className={styles.cardLink}
+            href={`/products/${product.slug}`}
+            onClick={onNavigate}
+          >
+            <HighlightedTitle query={highlight} title={product.title} />
           </Link>
         </h3>
         <p className={styles.subtitle}>{product.category.title}</p>
@@ -72,6 +82,24 @@ export function SimulationProductCard({
             View product details
           </Link>
           <ProductIntentActions compact product={product} />
+          {discovery.enabled ? (
+            <button
+              aria-label={`${
+                discovery.state.comparison.includes(product.id)
+                  ? "Remove"
+                  : "Add"
+              } ${product.title} ${
+                discovery.state.comparison.includes(product.id) ? "from" : "to"
+              } comparison`}
+              aria-pressed={discovery.state.comparison.includes(product.id)}
+              onClick={() => discovery.toggleComparison(product.id)}
+              type="button"
+            >
+              {discovery.state.comparison.includes(product.id)
+                ? "Compared"
+                : "Compare"}
+            </button>
+          ) : null}
           <button
             aria-label={`Quick view ${product.title}`}
             disabled
@@ -83,5 +111,20 @@ export function SimulationProductCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function HighlightedTitle({ title, query }: { title: string; query: string }) {
+  const normalized = query.trim();
+  const index = title
+    .toLocaleLowerCase("en")
+    .indexOf(normalized.toLocaleLowerCase("en"));
+  if (!normalized || index < 0) return title;
+  return (
+    <>
+      {title.slice(0, index)}
+      <mark>{title.slice(index, index + normalized.length)}</mark>
+      {title.slice(index + normalized.length)}
+    </>
   );
 }

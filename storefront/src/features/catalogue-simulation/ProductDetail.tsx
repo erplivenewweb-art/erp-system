@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Container, Section, Stack } from "@/components/layout";
 import { Breadcrumb } from "@/components/navigation";
 import { ProductDetailIntent } from "@/features/customer-intent";
+import { ProductDiscoveryBoundary } from "@/features/discovery-simulation";
+import { developmentProducts } from "./fixtures";
 import { DevelopmentCatalogueIndicator } from "./DevelopmentIndicator";
 import { SimulationProductGallery } from "./ProductGallery";
 import { SimulationProductCard } from "./ProductCard";
@@ -196,6 +198,15 @@ export function SimulationProductDetail({
               <p>No related development products are available.</p>
             )}
           </Stack>
+        </Container>
+      </Section>
+      <Section>
+        <Container>
+          <ProductDiscoveryBoundary
+            enabled={showDevelopmentIndicator}
+            product={product}
+            products={developmentProducts}
+          />
         </Container>
       </Section>
     </>

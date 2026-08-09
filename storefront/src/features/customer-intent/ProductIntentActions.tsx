@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/icons";
 import type { CatalogueProduct } from "@/features/catalogue-simulation";
 import { productToIntent } from "./types";
@@ -11,10 +12,14 @@ export function ProductIntentActions({
   product,
   variantId,
   compact = false,
+  quantity = 1,
+  showBuyNow = false,
 }: {
   product: CatalogueProduct;
   variantId?: string;
   compact?: boolean;
+  quantity?: number;
+  showBuyNow?: boolean;
 }) {
   const intent = useCustomerIntent();
   const [feedback, setFeedback] = useState("");
@@ -24,7 +29,7 @@ export function ProductIntentActions({
   const wishlisted = intent.isWishlisted(projection);
 
   function add() {
-    const result = intent.addToCart(projection);
+    const result = intent.addToCart(projection, quantity);
     setFeedback(
       result.status === "merged"
         ? `Quantity updated to ${result.quantity}.`
@@ -32,6 +37,12 @@ export function ProductIntentActions({
           ? "Maximum simulated quantity reached."
           : "Added to simulated cart.",
     );
+  }
+
+  function buyNowPreview() {
+    const result = intent.addToCart(projection, quantity);
+    if (result.status === "invalid" || result.status === "unavailable") return;
+    setFeedback("Opening simulation-only checkout preview.");
   }
 
   return (
@@ -48,6 +59,21 @@ export function ProductIntentActions({
           ? "Unavailable"
           : "Add to cart"}
       </button>
+      {showBuyNow ? (
+        unavailable ? (
+          <button className={styles.buyNowAction} disabled type="button">
+            Buy now preview
+          </button>
+        ) : (
+          <Link
+            className={styles.buyNowAction}
+            href="/checkout"
+            onClick={buyNowPreview}
+          >
+            Buy now preview
+          </Link>
+        )
+      ) : null}
       <button
         aria-label={`${wishlisted ? "Remove" : "Save"} ${product.title} ${wishlisted ? "from" : "to"} development wishlist`}
         aria-pressed={wishlisted}

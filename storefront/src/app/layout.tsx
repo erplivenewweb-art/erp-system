@@ -4,6 +4,7 @@ import { PublicFooter, PublicHeader } from "@/components/public-shell";
 import { CMSContentProvider } from "@/features/cms";
 import { CustomerAccountProvider } from "@/features/customer-account-simulation";
 import { CartDrawer, CustomerIntentProvider } from "@/features/customer-intent";
+import { DiscoveryProvider } from "@/features/discovery-simulation";
 import { RuntimeStatusBanner } from "@/features/integration-runtime";
 import { MediaCMSProvider } from "@/features/media-cms-simulation/MediaCMSProvider";
 import { ProductCMSProvider } from "@/features/product-cms-simulation";
@@ -44,28 +45,32 @@ export default function RootLayout({
             <SiteConfigProvider
               enabled={process.env.NODE_ENV === "development"}
             >
-              <MediaCMSProvider
+              <DiscoveryProvider
                 enabled={process.env.NODE_ENV === "development"}
               >
-                <CustomerIntentProvider
+                <MediaCMSProvider
                   enabled={process.env.NODE_ENV === "development"}
                 >
-                  <CustomerAccountProvider
+                  <CustomerIntentProvider
                     enabled={process.env.NODE_ENV === "development"}
                   >
-                    <a className={styles.skipLink} href="#main-content">
-                      Skip to main content
-                    </a>
-                    {showRuntimeStatus ? <RuntimeStatusBanner /> : null}
-                    <PublicHeader />
-                    <CartDrawer />
-                    <main className={styles.main} id="main-content">
-                      {children}
-                    </main>
-                    <PublicFooter />
-                  </CustomerAccountProvider>
-                </CustomerIntentProvider>
-              </MediaCMSProvider>
+                    <CustomerAccountProvider
+                      enabled={process.env.NODE_ENV === "development"}
+                    >
+                      <a className={styles.skipLink} href="#main-content">
+                        Skip to main content
+                      </a>
+                      {showRuntimeStatus ? <RuntimeStatusBanner /> : null}
+                      <PublicHeader />
+                      <CartDrawer />
+                      <main className={styles.main} id="main-content">
+                        {children}
+                      </main>
+                      <PublicFooter />
+                    </CustomerAccountProvider>
+                  </CustomerIntentProvider>
+                </MediaCMSProvider>
+              </DiscoveryProvider>
             </SiteConfigProvider>
           </ProductCMSProvider>
         </CMSContentProvider>

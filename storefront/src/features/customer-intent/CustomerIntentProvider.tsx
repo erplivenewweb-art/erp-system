@@ -50,11 +50,13 @@ export interface CustomerIntentContextValue {
   persistenceStatus: PersistenceStatus;
   announcement: string;
   addToCart(product: CustomerIntentProduct, quantity?: number): IntentResult;
+  addBundleToCart(products: readonly CustomerIntentProduct[]): number;
   setQuantity(key: string, quantity: number): IntentResult;
   removeFromCart(key: string): void;
   clearCart(): void;
   toggleWishlist(product: CustomerIntentProduct): boolean;
   removeFromWishlist(key: string): void;
+  moveWishlistToCart(key: string): IntentResult;
   clearWishlist(): void;
   isWishlisted(product: CustomerIntentProduct): boolean;
   openCart(): void;
@@ -72,11 +74,13 @@ const disabledContext: CustomerIntentContextValue = {
   persistenceStatus: "disabled",
   announcement: "",
   addToCart: () => ({ status: "invalid", quantity: 0 }),
+  addBundleToCart: () => 0,
   setQuantity: () => ({ status: "invalid", quantity: 0 }),
   removeFromCart: () => undefined,
   clearCart: () => undefined,
   toggleWishlist: () => false,
   removeFromWishlist: () => undefined,
+  moveWishlistToCart: () => ({ status: "invalid", quantity: 0 }),
   clearWishlist: () => undefined,
   isWishlisted: () => false,
   openCart: () => undefined,
@@ -160,6 +164,12 @@ export function CustomerIntentProvider({
     queueMicrotask(() => setAnnouncement(message));
   }, []);
 
+  useEffect(() => {
+    if (!announcement) return;
+    const timeout = window.setTimeout(() => setAnnouncement(""), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [announcement]);
+
   const addToCart = useCallback(
     (product: CustomerIntentProduct, quantity = 1): IntentResult => {
       if (!enabled || !isAvailable(product)) {
@@ -226,6 +236,28 @@ export function CustomerIntentProvider({
     [announce, cartItems],
   );
 
+  const addBundleToCart = useCallback(
+    (products: readonly CustomerIntentProduct[]) => {
+      if (!enabled) return 0;
+      const available = products.filter(isAvailable);
+      if (!available.length) {
+        announce("No available pieces could be added to the simulated cart.");
+        return 0;
+      }
+      setCartItems((current) =>
+        available.reduce(
+          (next, product) => addCartItem(next, product),
+          current,
+        ),
+      );
+      announce(
+        `${available.length} ${available.length === 1 ? "piece" : "pieces"} added to the simulated cart together.`,
+      );
+      return available.length;
+    },
+    [announce, enabled],
+  );
+
   const removeFromCart = useCallback(
     (key: string) => {
       const item = cartItems.find((candidate) => candidate.key === key);
@@ -268,6 +300,25 @@ export function CustomerIntentProvider({
     [announce, wishlistItems],
   );
 
+  const moveWishlistToCart = useCallback(
+    (key: string): IntentResult => {
+      const item = wishlistItems.find((candidate) => candidate.key === key);
+      if (!item) return { status: "invalid", quantity: 0 };
+      if (!isAvailable(item)) {
+        announce(`${item.name} is unavailable for the simulated cart.`);
+        return { status: "unavailable", quantity: 0 };
+      }
+      const existing = cartItems.find((candidate) => candidate.key === key);
+      const nextCart = addCartItem(cartItems, item);
+      const quantity = nextCart.find((candidate) => candidate.key === key)?.quantity ?? 0;
+      setCartItems(nextCart);
+      setWishlistItems(removeWishlistItem(wishlistItems, key));
+      announce(`${item.name} moved to the simulated cart.`);
+      return { status: existing ? "merged" : "added", quantity };
+    },
+    [announce, cartItems, wishlistItems],
+  );
+
   const clearWishlist = useCallback(() => {
     setWishlistItems([]);
     announce("Development wishlist cleared.");
@@ -285,11 +336,13 @@ export function CustomerIntentProvider({
       persistenceStatus,
       announcement,
       addToCart,
+      addBundleToCart,
       setQuantity,
       removeFromCart,
       clearCart,
       toggleWishlist,
       removeFromWishlist,
+      moveWishlistToCart,
       clearWishlist,
       isWishlisted: (product) => isWishlistItem(wishlistItems, product),
       openCart: () => setCartOpen(true),
@@ -297,6 +350,7 @@ export function CustomerIntentProvider({
     }),
     [
       addToCart,
+      addBundleToCart,
       announcement,
       cartItems,
       cartOpen,
@@ -307,6 +361,7 @@ export function CustomerIntentProvider({
       persistenceStatus,
       removeFromCart,
       removeFromWishlist,
+      moveWishlistToCart,
       setQuantity,
       toggleWishlist,
       totals,
@@ -317,13 +372,11 @@ export function CustomerIntentProvider({
   return (
     <CustomerIntentContext.Provider value={value}>
       {children}
-      <p
-        aria-atomic="true"
-        aria-live="polite"
-        className={styles.visuallyHidden}
-      >
-        {announcement}
-      </p>
+      {announcement ? (
+        <div aria-atomic="true" aria-live="polite" className={styles.intentToast}>
+          {announcement}
+        </div>
+      ) : null}
     </CustomerIntentContext.Provider>
   );
 }

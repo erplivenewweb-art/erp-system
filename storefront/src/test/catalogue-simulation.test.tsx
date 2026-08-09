@@ -28,6 +28,11 @@ import {
   normalizeKeyword,
 } from "@/features/catalogue-simulation";
 
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
