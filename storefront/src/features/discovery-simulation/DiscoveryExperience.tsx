@@ -132,24 +132,37 @@ function DiscoveryListingContent({
     () => filterAndSortDiscoveryProducts(items, discovery.state.filters),
     [discovery.state.filters, items],
   );
-  const visible = filtered.slice(0, discovery.state.visibleCount);
+  const visible = useMemo(
+    () => filtered.slice(0, discovery.state.visibleCount),
+    [discovery.state.visibleCount, filtered],
+  );
   const keyword = discovery.state.filters.search.trim();
-  const suggestions = keyword
-    ? items
-        .filter((item) =>
-          item.searchTerms
-            .join(" ")
-            .toLocaleLowerCase("en")
-            .includes(keyword.toLocaleLowerCase("en")),
-        )
-        .slice(0, 24)
-    : [];
-  const collectionOptions = [
-    ...new Map(
-      items.map((item) => [item.collectionId, item.collectionName]),
-    ).entries(),
-  ];
-  const activeFilters = activeFilterLabels(discovery.state.filters);
+  const suggestions = useMemo(
+    () =>
+      keyword
+        ? items
+            .filter((item) =>
+              item.searchTerms
+                .join(" ")
+                .toLocaleLowerCase("en")
+                .includes(keyword.toLocaleLowerCase("en")),
+            )
+            .slice(0, 24)
+        : [],
+    [items, keyword],
+  );
+  const collectionOptions = useMemo(
+    () => [
+      ...new Map(
+        items.map((item) => [item.collectionId, item.collectionName]),
+      ).entries(),
+    ],
+    [items],
+  );
+  const activeFilters = useMemo(
+    () => activeFilterLabels(discovery.state.filters),
+    [discovery.state.filters],
+  );
 
   function updateActiveSuggestion(index: number) {
     activeSuggestionRef.current = index;
@@ -170,7 +183,8 @@ function DiscoveryListingContent({
         <h2>Discover products</h2>
         <div className={styles.searchBox} ref={searchBoxRef}>
           <label htmlFor="discovery-search">Search products</label>
-          <input
+          <div className={styles.searchInputRow}>
+            <input
             aria-activedescendant={
               activeSuggestion >= 0
                 ? `${suggestionListId}-option-${activeSuggestion}`
@@ -222,19 +236,20 @@ function DiscoveryListingContent({
             role="combobox"
             type="search"
             value={discovery.state.filters.search}
-          />
-          {keyword ? (
-            <button
-              onClick={() => {
-                discovery.setFilters({ search: "" });
-                setSuggestionsOpen(false);
-                updateActiveSuggestion(-1);
-              }}
-              type="button"
-            >
-              Clear search
-            </button>
-          ) : null}
+            />
+            {keyword ? (
+              <button
+                onClick={() => {
+                  discovery.setFilters({ search: "" });
+                  setSuggestionsOpen(false);
+                  updateActiveSuggestion(-1);
+                }}
+                type="button"
+              >
+                Clear search
+              </button>
+            ) : null}
+          </div>
           {suggestionsOpen && keyword ? (
             <div
               className={styles.suggestions}

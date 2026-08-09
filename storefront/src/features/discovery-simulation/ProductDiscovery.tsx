@@ -330,6 +330,12 @@ function ComparisonTable({
           </section>
           <table>
             <caption>Browser-local simulated product comparison</caption>
+            <colgroup>
+              <col className={styles.attributeColumn} />
+              {selected.map((item) => (
+                <col className={styles.productColumn} key={item.product.id} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
                 <th className={styles.attributeHeading} scope="col">

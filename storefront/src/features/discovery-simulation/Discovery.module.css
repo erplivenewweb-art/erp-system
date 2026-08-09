@@ -17,8 +17,8 @@
 
 .filters {
   position: sticky;
-  z-index: var(--sf-z-dropdown);
-  top: var(--sf-space-4);
+  z-index: var(--sf-z-sticky);
+  top: calc(var(--sf-layout-header-height) + var(--sf-space-4));
   overflow: visible;
   padding: var(--sf-space-5);
   border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
@@ -56,18 +56,40 @@
 
 .searchBox {
   position: relative;
+  isolation: isolate;
+}
+
+.searchInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sf-space-2);
+  align-items: stretch;
+  min-width: 0;
+}
+
+.searchInputRow button {
+  border: var(--sf-border-hairline) solid var(--sf-color-border-strong);
+  border-radius: var(--sf-radius-small);
+  background: var(--sf-color-surface-raised);
+  color: var(--sf-color-text-link);
 }
 
 .suggestions {
+  position: relative;
+  z-index: var(--sf-z-dropdown);
   display: grid;
   gap: var(--sf-space-1);
-  max-height: 28rem;
+  width: 100%;
+  max-height: 26rem;
+  margin-block-start: var(--sf-space-1);
   overflow-y: auto;
   padding: var(--sf-space-3);
   border: var(--sf-border-hairline) solid var(--sf-color-border-strong);
   border-radius: var(--sf-radius-large);
   background: var(--sf-color-surface-raised);
   box-shadow: var(--sf-elevation-overlay);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .suggestionRow {
@@ -294,6 +316,8 @@
   padding: var(--sf-space-6);
   border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
   background: var(--sf-color-surface-raised);
+  border-radius: var(--sf-radius-large);
+  box-shadow: var(--sf-elevation-subtle);
 }
 
 .share a {
@@ -327,7 +351,7 @@
 .tableScroll {
   max-width: 100%;
   overflow-x: auto;
-  padding: var(--sf-space-2);
+  padding: var(--sf-space-4);
   border-radius: var(--sf-radius-large);
   background: var(--sf-color-surface-subtle);
   box-shadow: var(--sf-elevation-subtle);
@@ -336,6 +360,18 @@
 
 .comparisonMatrix {
   min-width: 48rem;
+}
+
+.comparisonMatrix[data-columns="2"] {
+  min-width: 44rem;
+}
+
+.comparisonMatrix[data-columns="3"] {
+  min-width: 60rem;
+}
+
+.comparisonMatrix[data-columns="4"] {
+  min-width: 76rem;
 }
 
 .compareCardsRow {
@@ -362,8 +398,16 @@
   min-width: 48rem;
   margin-top: var(--sf-space-8);
   border-collapse: separate;
-  border-spacing: 0 var(--sf-space-2);
+  border-spacing: var(--sf-space-2);
   table-layout: fixed;
+}
+
+.attributeColumn {
+  width: 10rem;
+}
+
+.productColumn {
+  width: auto;
 }
 
 .comparison caption {
@@ -378,11 +422,13 @@
 
 .comparison th,
 .comparison td {
+  height: var(--sf-space-12);
   padding: var(--sf-space-4);
   border-radius: var(--sf-radius-medium);
   background: var(--sf-color-surface-raised);
   text-align: left;
   vertical-align: middle;
+  border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
 }
 
 .comparison thead th {
@@ -394,6 +440,7 @@
   left: 0;
   z-index: var(--sf-z-sticky);
   min-width: 10rem;
+  width: 10rem;
   background: var(--sf-color-surface-raised);
   box-shadow: var(--sf-elevation-subtle);
   font-family: var(--sf-font-family-display);
@@ -436,6 +483,9 @@
   border-radius: var(--sf-radius-large);
   background: var(--sf-color-surface-raised);
   box-shadow: var(--sf-elevation-raised);
+  transition:
+    border-color var(--sf-motion-fast) var(--sf-easing-out),
+    box-shadow var(--sf-motion-fast) var(--sf-easing-out);
 }
 
 .compareProductMedia {
@@ -516,6 +566,12 @@
   background: var(--sf-color-semantic-danger-bg);
 }
 
+.compareProductCard:focus-within,
+.compareProductCard:hover {
+  border-color: var(--sf-color-border-strong);
+  box-shadow: var(--sf-elevation-raised);
+}
+
 .compareTableProductName {
   display: block;
   overflow: hidden;
@@ -551,8 +607,11 @@
   .discoveryPanel {
     padding: var(--sf-space-4);
   }
+  .searchInputRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .tableScroll {
-    padding: var(--sf-space-1);
+    padding: var(--sf-space-2);
   }
   .compareCardsRow {
     grid-template-columns: 8rem repeat(1, minmax(15rem, 1fr));

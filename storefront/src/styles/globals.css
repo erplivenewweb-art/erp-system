@@ -18,6 +18,8 @@ body {
   min-width: 20rem;
   min-height: 100vh;
   background: inherit;
+  overflow-x: clip;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -25,6 +27,28 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+p {
+  overflow-wrap: break-word;
 }
 
 a {
@@ -35,6 +59,24 @@ a {
 :focus-visible {
   outline: 3px solid var(--sf-color-focus-ring);
   outline-offset: 3px;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    color var(--sf-motion-fast) var(--sf-easing-out),
+    background-color var(--sf-motion-fast) var(--sf-easing-out),
+    border-color var(--sf-motion-fast) var(--sf-easing-out),
+    box-shadow var(--sf-motion-fast) var(--sf-easing-out),
+    transform var(--sf-motion-fast) var(--sf-easing-out);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  transform: translateY(var(--sf-border-hairline));
 }
 
 ::selection {
@@ -52,4 +94,3 @@ a {
     transition-duration: var(--sf-motion-reduced) !important;
   }
 }
-

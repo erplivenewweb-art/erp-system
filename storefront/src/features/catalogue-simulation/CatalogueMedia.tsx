@@ -1,7 +1,12 @@
+import { memo } from "react";
 import type { ProductMedia } from "./types";
 import styles from "./Catalogue.module.css";
 
-export function CatalogueProductMedia({ media }: { media: ProductMedia }) {
+export const CatalogueProductMedia = memo(function CatalogueProductMedia({
+  media,
+}: {
+  media: ProductMedia;
+}) {
   return (
     <div
       aria-label={media.alt}
@@ -18,4 +23,4 @@ export function CatalogueProductMedia({ media }: { media: ProductMedia }) {
       <strong aria-hidden="true">SS</strong>
     </div>
   );
-}
+});

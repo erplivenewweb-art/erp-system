@@ -22,6 +22,7 @@
   border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
   border-radius: var(--sf-radius-large);
   background: var(--sf-color-surface-raised);
+  box-shadow: var(--sf-elevation-subtle);
 }
 
 .pageHeader,
@@ -79,6 +80,11 @@
   display: grid;
   gap: var(--sf-space-3);
   padding: var(--sf-space-5);
+  min-width: 0;
+  box-shadow: var(--sf-elevation-subtle);
+  transition:
+    transform var(--sf-motion-standard) var(--sf-easing-out),
+    box-shadow var(--sf-motion-standard) var(--sf-easing-out);
 }
 
 .card h2,
@@ -194,6 +200,16 @@
   background: var(--sf-color-surface-canvas);
   color: var(--sf-color-text-primary);
   font: inherit;
+  transition:
+    border-color var(--sf-motion-fast) var(--sf-easing-out),
+    box-shadow var(--sf-motion-fast) var(--sf-easing-out);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  border-color: var(--sf-component-focus);
+  box-shadow: 0 0 0 var(--sf-space-1) var(--sf-color-surface-subtle);
 }
 
 .field textarea {
@@ -244,6 +260,10 @@
   padding: var(--sf-space-4);
   border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
   border-radius: var(--sf-radius-medium);
+  background: var(--sf-color-surface-raised);
+  transition:
+    border-color var(--sf-motion-fast) var(--sf-easing-out),
+    background-color var(--sf-motion-fast) var(--sf-easing-out);
 }
 
 .choice:has(input:checked) {
@@ -279,6 +299,7 @@
   inset-block-start: calc(var(--sf-layout-header-height) + var(--sf-space-6));
   display: grid;
   gap: var(--sf-space-4);
+  box-shadow: var(--sf-elevation-raised);
 }
 
 .summary dl,
@@ -330,6 +351,14 @@
     var(--sf-color-border-strong);
   color: var(--sf-color-text-secondary);
   text-align: center;
+  font-weight: var(--sf-font-weight-semibold);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: var(--sf-elevation-raised);
+    transform: translateY(calc(-1 * var(--sf-space-1)));
+  }
 }
 
 .empty {
@@ -377,5 +406,16 @@
   .formActions > *,
   .actionGrid > * {
     width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .choice,
+  .field input,
+  .field select,
+  .field textarea {
+    transition: none;
+    transform: none;
   }
 }

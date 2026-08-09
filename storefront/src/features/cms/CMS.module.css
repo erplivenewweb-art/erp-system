@@ -11,6 +11,9 @@
   padding: var(--sf-space-6);
   position: sticky;
   top: calc(var(--sf-layout-header-height) + var(--sf-space-6));
+  overflow: hidden;
+  border-radius: var(--sf-radius-large);
+  box-shadow: var(--sf-elevation-raised);
 }
 .nav h2 {
   color: inherit;
@@ -35,6 +38,15 @@
   padding: var(--sf-space-3);
   text-decoration: none;
   width: 100%;
+  border-radius: var(--sf-radius-small);
+}
+
+.nav a:hover,
+.nav a:focus-visible,
+.nav button:hover,
+.nav button:focus-visible {
+  border-color: var(--sf-color-border-strong);
+  background: var(--sf-color-surface-overlay);
 }
 .nav button {
   border-top-color: var(--sf-color-border-strong);
@@ -83,6 +95,8 @@
   display: grid;
   gap: var(--sf-space-4);
   padding: var(--sf-space-6);
+  border-radius: var(--sf-radius-large);
+  box-shadow: var(--sf-elevation-subtle);
 }
 .card p,
 .empty p {
@@ -94,6 +108,7 @@
   font-size: var(--sf-font-size-caption);
   padding: var(--sf-space-2) var(--sf-space-3);
   width: fit-content;
+  border-radius: var(--sf-radius-pill);
 }
 .actions {
   display: flex;
@@ -110,6 +125,7 @@
   min-height: var(--sf-layout-touch-min);
   padding: var(--sf-space-3) var(--sf-space-4);
   text-decoration: none;
+  border-radius: var(--sf-radius-small);
 }
 .primary {
   background: var(--sf-color-surface-inverse);
@@ -258,6 +274,7 @@
   background: var(--sf-color-surface-raised);
   color: var(--sf-color-text-primary);
   font: inherit;
+  border-radius: var(--sf-radius-small);
 }
 
 .field textarea {
@@ -311,6 +328,7 @@
   border: var(--sf-border-hairline) solid var(--sf-color-border-subtle);
   background: var(--sf-color-surface-subtle);
   box-shadow: var(--sf-elevation-raised);
+  border-radius: var(--sf-radius-large);
 }
 
 .livePreview h2 {

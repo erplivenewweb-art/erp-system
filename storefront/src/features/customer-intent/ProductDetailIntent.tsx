@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   developmentProducts,
   type CatalogueProduct,
@@ -20,17 +20,20 @@ export function ProductDetailIntent({
   const [variantId, setVariantId] = useState(product.variants[0]?.id ?? "");
   const [quantity, setQuantity] = useState(1);
   const intent = useCustomerIntent();
-  const bundle = [
-    product,
-    ...developmentProducts
-      .filter((candidate) => candidate.id !== product.id)
-      .toSorted(
-        (left, right) =>
-          Number(right.category.slug === product.category.slug) -
-          Number(left.category.slug === product.category.slug),
-      )
-      .slice(0, 2),
-  ];
+  const bundle = useMemo(
+    () => [
+      product,
+      ...developmentProducts
+        .filter((candidate) => candidate.id !== product.id)
+        .toSorted(
+          (left, right) =>
+            Number(right.category.slug === product.category.slug) -
+            Number(left.category.slug === product.category.slug),
+        )
+        .slice(0, 2),
+    ],
+    [product],
+  );
   return (
     <>
       <div className={styles.field}>
