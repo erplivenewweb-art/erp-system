@@ -5,6 +5,15 @@
   "scripts": {
     "start": "node js/backend/server.js",
     "dev": "node js/backend/server.js",
+    "test": "node --test tests/*.test.js",
+    "test:startup-safety": "node --test tests/startupSafety.test.js",
+    "db:migrate": "node js/backend/server.js migrate",
+    "admin:bootstrap-superadmin": "node js/backend/server.js bootstrap-superadmin",
+    "phase2:db": "node scripts/phase2-disposable-db.js",
+    "test:colour-plant:integration": "node scripts/verify-colour-plant.js",
+    "test:process-pin:integration": "node scripts/verify-process-pin.js",
+    "test:sticker-save:integration": "node scripts/verify-sticker-save.js",
+    "test:branch-transfer-draft:integration": "node scripts/verify-branch-transfer-draft.js",
     "backup:mysql": "node scripts/backup-mysql.js",
     "restore:mysql": "node scripts/restore-mysql.js"
   },

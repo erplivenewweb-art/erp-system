@@ -1042,6 +1042,24 @@
       return new URL(String(pathname || "").replace(/^\//, ""), `${base}/`).toString();
     }
 
+    async function resolvePostLoginHref(token) {
+      try {
+        const response = await fetch(resolveAuthApiUrl("/company-module-context"), {
+          credentials: "include",
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${String(token || "").trim()}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.success === false) return "dashboard.html";
+        const modules = data.modules || {};
+        const hasProduction = modules.PRODUCTION === true;
+        const hasStore = modules.STORE === true;
+        const hasColourPlant = modules.COLOUR_PLANT === true;
+        if (hasColourPlant && !hasProduction && !hasStore) return "colour-plant.html#dashboard";
+      } catch (_) {}
+      return "dashboard.html";
+    }
+
     async function loginUser() {
       const email = document.getElementById("loginEmail").value.trim().toLowerCase();
       const password = document.getElementById("loginPassword").value.trim();
@@ -1114,8 +1132,8 @@
 
         showStatus("loginStatus", "Login successful. Redirecting...", "success");
 
-        setTimeout(() => {
-          window.location.href = "dashboard.html";
+        setTimeout(async () => {
+          window.location.href = await resolvePostLoginHref(data.token);
         }, 700);
       } catch (error) {
         console.log("Login error:", error);

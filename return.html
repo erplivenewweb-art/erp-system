@@ -176,6 +176,113 @@
       font-size: 13px;
     }
 
+    .return-disposition {
+      grid-column: 1 / -1;
+      margin-top: 2px;
+    }
+
+    .return-disposition > label {
+      display: block;
+      margin-bottom: 8px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+    }
+
+    .return-type-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .return-type-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 70px;
+      padding: 13px 15px;
+      border: 2px solid #e2e8f0;
+      border-radius: 14px;
+      background: #fff;
+      color: #334155;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .return-type-option i {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 38px;
+      border-radius: 10px;
+      background: #f1f5f9;
+      font-size: 17px;
+    }
+
+    .return-type-option strong,
+    .return-type-option small {
+      display: block;
+    }
+
+    .return-type-option strong {
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .return-type-option small {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .return-type-option.selected.stock-option {
+      border-color: #16a34a;
+      background: #f0fdf4;
+      box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
+    }
+
+    .return-type-option.selected.stock-option i {
+      background: #dcfce7;
+      color: #15803d;
+    }
+
+    .return-type-option.selected.damage-option {
+      border-color: #dc2626;
+      background: #fef2f2;
+      box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.09);
+    }
+
+    .return-type-option.selected.damage-option i {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .return-action-hint {
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #475569;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .return-action-hint.ready {
+      background: #ecfdf5;
+      color: #166534;
+    }
+
+    .return-action-hint.blocked {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+
     .empty-state {
       padding: 20px;
       text-align: center;
@@ -262,7 +369,8 @@
 
     @media (max-width: 720px) {
       .detail-grid,
-      .settlement-list {
+      .settlement-list,
+      .return-type-options {
         grid-template-columns: 1fr;
       }
     }
@@ -440,12 +548,25 @@
                   <input type="text" id="returnSku" readonly />
                 </div>
 
-                <div class="input-box">
-                  <label for="returnType">Return Type</label>
-                  <select id="returnType">
-                    <option value="RETURN_TO_STOCK">Return to Stock</option>
-                    <option value="DAMAGED_RETURN">Damaged Return</option>
-                  </select>
+                <div class="return-disposition">
+                  <label>Item ko kahan bhejna hai?</label>
+                  <input type="hidden" id="returnType" value="RETURN_TO_STOCK" />
+                  <div class="return-type-options" role="radiogroup" aria-label="Return destination">
+                    <button type="button" id="returnTypeStock" class="return-type-option stock-option selected" role="radio" aria-checked="true" onclick="selectReturnType('RETURN_TO_STOCK')">
+                      <i class="fas fa-box-open"></i>
+                      <span>
+                        <strong>Return to Stock</strong>
+                        <small>Item theek hai—saleable stock mein wapas jayega</small>
+                      </span>
+                    </button>
+                    <button type="button" id="returnTypeDamaged" class="return-type-option damage-option" role="radio" aria-checked="false" onclick="selectReturnType('DAMAGED_RETURN')">
+                      <i class="fas fa-triangle-exclamation"></i>
+                      <span>
+                        <strong>Mark as Damaged</strong>
+                        <small>Item damaged hai—normal stock mein nahi jayega</small>
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 <div class="input-box">
@@ -518,6 +639,7 @@
               </div>
 
               <div class="btn-row" style="margin-top:16px;">
+                <p id="returnActionHint" class="return-action-hint">Barcode scan karke Fetch Details dabaiye.</p>
                 <button type="button" id="saveReturnBtn" class="primary-btn" onclick="saveReturnEntry()">Save Return</button>
                 <button type="button" id="createRefundPayableBtn" class="primary-btn" onclick="createRefundPayableEntry()" style="display:none;">Create Refund Payable</button>
                 <button type="button" class="secondary-btn" onclick="clearReturnForm()">Clear</button>
@@ -723,6 +845,7 @@
     let selectedReturnItem = null;
     let selectedReturnPreview = null;
     let activeRefundPayable = null;
+    let returnSubmissionPending = false;
     let returnCurrentPage = 1;
     let returnHasNextPage = false;
 
@@ -881,7 +1004,51 @@
       const button = document.getElementById("saveReturnBtn");
       if (!button) return;
       button.disabled = !enabled;
-      button.style.display = enabled ? "" : "none";
+      button.style.display = "";
+    }
+
+    function updateReturnSubmitButtonLabel() {
+      const button = document.getElementById("saveReturnBtn");
+      if (!button) return;
+      const returnType = safeText(document.getElementById("returnType")?.value).toUpperCase();
+      if (selectedReturnPreview?.canCreateRefundPayable && !selectedReturnPreview?.canReturn) {
+        button.innerHTML = returnType === "DAMAGED_RETURN"
+          ? '<i class="fas fa-triangle-exclamation"></i> Return as Damaged + Adjust Payment'
+          : '<i class="fas fa-rotate-left"></i> Return Item + Adjust Payment';
+        return;
+      }
+      button.innerHTML = returnType === "DAMAGED_RETURN"
+        ? '<i class="fas fa-triangle-exclamation"></i> Save as Damaged Return'
+        : '<i class="fas fa-box-open"></i> Return Item to Stock';
+    }
+
+    function setReturnActionHint(message, state = "") {
+      const hint = document.getElementById("returnActionHint");
+      if (!hint) return;
+      hint.textContent = message;
+      hint.classList.toggle("ready", state === "ready");
+      hint.classList.toggle("blocked", state === "blocked");
+    }
+
+    function selectReturnType(returnType) {
+      const normalizedType = returnType === "DAMAGED_RETURN" ? "DAMAGED_RETURN" : "RETURN_TO_STOCK";
+      const input = document.getElementById("returnType");
+      const stockButton = document.getElementById("returnTypeStock");
+      const damagedButton = document.getElementById("returnTypeDamaged");
+      const saveButton = document.getElementById("saveReturnBtn");
+
+      if (input) input.value = normalizedType;
+      if (stockButton) {
+        const selected = normalizedType === "RETURN_TO_STOCK";
+        stockButton.classList.toggle("selected", selected);
+        stockButton.setAttribute("aria-checked", String(selected));
+      }
+      if (damagedButton) {
+        const selected = normalizedType === "DAMAGED_RETURN";
+        damagedButton.classList.toggle("selected", selected);
+        damagedButton.setAttribute("aria-checked", String(selected));
+      }
+      if (saveButton) updateReturnSubmitButtonLabel();
     }
 
     function setRefundPayableEnabled(enabled) {
@@ -889,6 +1056,13 @@
       if (!button) return;
       button.disabled = !enabled;
       button.style.display = enabled ? "" : "none";
+    }
+
+    function setReturnSubmissionPending(pending) {
+      returnSubmissionPending = Boolean(pending);
+      if (!returnSubmissionPending) return;
+      setSaveReturnEnabled(false);
+      setRefundPayableEnabled(false);
     }
 
     function clearSettlementSummary() {
@@ -914,6 +1088,7 @@
       }
       setSaveReturnEnabled(false);
       setRefundPayableEnabled(false);
+      setReturnActionHint("Barcode scan karke Fetch Details dabaiye.");
     }
 
     function getPayableRemainingCash(payable) {
@@ -1047,8 +1222,16 @@
         reasons.textContent = "";
       }
 
-      setSaveReturnEnabled(Boolean(preview?.canReturn));
+      setSaveReturnEnabled(Boolean(preview?.canReturn || canCreateRefundPayable));
       setRefundPayableEnabled(canCreateRefundPayable);
+      updateReturnSubmitButtonLabel();
+      if (preview?.canReturn) {
+        setReturnActionHint("Item mil gaya. Return type choose karke neeche save karein.", "ready");
+      } else if (canCreateRefundPayable) {
+        setReturnActionHint("Paid invoice hai—Return dabane par stock restore hoga aur payment adjustment/refund payable banega.", "ready");
+      } else {
+        setReturnActionHint(allReasons[0] || "Is item ka return abhi save nahi ho sakta.", "blocked");
+      }
       const openPayable = Array.isArray(preview?.duplicateRefundPayables) ? preview.duplicateRefundPayables[0] : null;
       renderCashRefundPanel(openPayable);
       renderMetalRefundPanel(openPayable);
@@ -1188,7 +1371,7 @@
       document.getElementById("returnProductName").value = "";
       document.getElementById("returnSku").value = "";
       document.getElementById("returnReason").value = "";
-      document.getElementById("returnType").value = "RETURN_TO_STOCK";
+      selectReturnType("RETURN_TO_STOCK");
 
       fillReturnDetails({
         barcode: "-",
@@ -1205,9 +1388,14 @@
     }
 
     async function saveReturnEntry() {
+      if (returnSubmissionPending) return;
       if (!selectedReturnItem) {
       alert("Please fetch the barcode details first.");
         return;
+      }
+
+      if (selectedReturnPreview?.canCreateRefundPayable && !selectedReturnPreview?.canReturn) {
+        return createRefundPayableEntry();
       }
 
       if (!selectedReturnPreview?.canReturn) {
@@ -1231,6 +1419,7 @@
       }
 
       try {
+        setReturnSubmissionPending(true);
         const res = await fetch(`${API_BASE}/saveReturn`, {
           method: "POST",
           headers: {
@@ -1265,10 +1454,14 @@
       } catch (error) {
         console.log("Return save error:", error);
         alert("Return save error");
+      } finally {
+        returnSubmissionPending = false;
+        if (selectedReturnItem && selectedReturnPreview) renderSettlementSummary(selectedReturnPreview);
       }
     }
 
     async function createRefundPayableEntry() {
+      if (returnSubmissionPending) return;
       if (!selectedReturnItem) {
       alert("Please fetch the barcode details first.");
         return;
@@ -1294,7 +1487,9 @@
         return;
       }
 
+      let created = false;
       try {
+        setReturnSubmissionPending(true);
         const res = await fetch(`${API_BASE}/returns/create-refund-payable`, {
           method: "POST",
           headers: {
@@ -1324,12 +1519,23 @@
         }
 
         alert(data.message || "Refund payable created successfully");
+        created = true;
+        selectedReturnPreview = {
+          ...selectedReturnPreview,
+          canReturn: false,
+          canCreateRefundPayable: false
+        };
+        setSaveReturnEnabled(false);
+        setRefundPayableEnabled(false);
         renderCashRefundPanel(data.payable);
         renderMetalRefundPanel(data.payable);
         await loadReturnDashboard();
       } catch (error) {
         console.log("Refund payable creation error:", error);
         alert("Refund payable creation error");
+      } finally {
+        returnSubmissionPending = false;
+        if (!created && selectedReturnItem && selectedReturnPreview) renderSettlementSummary(selectedReturnPreview);
       }
     }
 
@@ -1535,10 +1741,16 @@
       }
     }
 
-    window.addEventListener("load", () => {
+    window.addEventListener("load", async () => {
       renderProfileBox();
       clearReturnForm();
-      loadReturnDashboard();
+      await loadReturnDashboard();
+
+      const barcodeFromLink = safeText(new URLSearchParams(window.location.search).get("barcode"));
+      if (barcodeFromLink) {
+        document.getElementById("returnBarcode").value = barcodeFromLink;
+        await fetchBarcodeDetails();
+      }
     });
   </script>
 

@@ -1889,6 +1889,10 @@
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processGuideData = null;
+    let processLotCompletionInProgress = false;
+    let additiveIssueInProgress = false;
+    let additiveIssueRequestKey = "";
+    const additiveReturnInProgress = new Set();
     let testProcessLotDeleteConfig = {
       loaded: false,
       enabled: false,
@@ -2854,7 +2858,7 @@
     }
 
     function isFittingLikeStepName(value = "") {
-      return normalizeStepNameForMatch(value) === "fitting";
+      return ["fitting", "pin"].includes(normalizeStepNameForMatch(value));
     }
 
     function getActiveAdditiveStepName() {
@@ -3419,7 +3423,7 @@
             <span>Issued ${formatProcessWeight(issue.givenWeight)}g | Returned ${formatProcessWeight(issue.returnedWeight)}g | Used ${formatProcessWeight(usedWeight)}g</span>
             <div class="additive-return-control" style="margin-top:8px;">
               <input id="additiveReturnWeight_${issue.id}" type="number" step="0.001" min="0" max="${issue.givenWeight}" placeholder="Returned Weight" ${canReturn ? "" : "disabled"} />
-              <button class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return ${escapeHtml(label)}</button>
+              <button id="additiveReturnButton_${issue.id}" class="secondary-btn" type="button" onclick="returnAdditiveIssue(${issue.id})" ${canReturn ? "" : "disabled"}>Return ${escapeHtml(label)}</button>
               <span class="additive-status-badge">${escapeHtml(issue.status)}</span>
             </div>
           </div>
@@ -3547,6 +3551,7 @@
 
     async function issueAdditiveMaterial() {
       if (!isAdditiveMaterialStepActive()) return;
+      if (additiveIssueInProgress) return;
 
       const givenInput = document.getElementById("additiveIssueGivenWeight");
       const karigarInput = document.getElementById("additiveIssueKarigarName");
@@ -3575,6 +3580,14 @@
         return;
       }
 
+      const issueButton = document.getElementById("additiveIssueButton");
+      let receivedResponse = false;
+      additiveIssueInProgress = true;
+      if (issueButton) issueButton.disabled = true;
+      if (!additiveIssueRequestKey) {
+        additiveIssueRequestKey = globalThis.crypto?.randomUUID?.() || `additive-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
+
       try {
         const wasAlreadyOpen = Boolean(currentOpenProcessStep?.id);
         const issueStep = currentOpenProcessStep?.id
@@ -3592,9 +3605,11 @@
             karigar,
             given_weight: givenWeight,
             material_label: materialType,
+            idempotency_key: additiveIssueRequestKey,
             notes
           }))
         });
+        receivedResponse = true;
         const data = await res.json();
 
         if (!res.ok || data?.success === false) {
@@ -3603,13 +3618,18 @@
 
         showToast(wasAlreadyOpen ? (data?.message || `${materialType} issued successfully`) : `${issueStep.processName || "Process"} step opened and ${materialType} issued.`, "success", "Issued");
         applyAdditiveMutationResponse(data);
+        additiveIssueRequestKey = "";
         if (givenInput) givenInput.value = "";
         if (notesInput) notesInput.value = "";
         loadAdditiveIssues(lotNo).catch((refreshError) => console.log("KDM issue refresh error:", refreshError));
         loadLotAdditiveStatus(lotNo).catch((refreshError) => console.log("KDM status refresh error:", refreshError));
       } catch (error) {
+        if (receivedResponse) additiveIssueRequestKey = "";
         console.log("Additive issue save error:", error);
         showToast(error.message || `${materialType} issue failed`, "error", "Issue Failed");
+      } finally {
+        additiveIssueInProgress = false;
+        if (issueButton) issueButton.disabled = false;
       }
     }
 
@@ -3622,6 +3642,7 @@
       const materialType = getActiveAdditiveMaterialType();
 
       if (!id || !issue) return;
+      if (additiveReturnInProgress.has(id)) return;
 
       input?.setCustomValidity("");
       if (rawReturnedWeight === "" || rawReturnedWeight === null || rawReturnedWeight === undefined) {
@@ -3648,6 +3669,10 @@
         return;
       }
 
+      const returnButton = document.getElementById(`additiveReturnButton_${id}`);
+      additiveReturnInProgress.add(id);
+      if (returnButton) returnButton.disabled = true;
+
       try {
         const res = await fetch(`${API_BASE}/process/additive-issues/${id}/return`, {
           method: "PUT",
@@ -3673,6 +3698,9 @@
       } catch (error) {
         console.log("Additive issue return error:", error);
         showToast(error.message || `${materialType} return failed`, "error", "Return Failed");
+      } finally {
+        additiveReturnInProgress.delete(id);
+        if (returnButton && issue.pendingWeight > 0) returnButton.disabled = false;
       }
     }
 
@@ -4629,8 +4657,24 @@
           throw new Error(data?.message || "Next input fetch failed");
         }
 
+        const resolvedInputWeight = Number(data?.inputWeight);
+        const previousOutputWeight = Number(
+          data?.lastCompletedStep?.outputWeight ?? data?.lastCompletedStep?.output_weight
+        );
+
+        if (!Number.isFinite(resolvedInputWeight) || resolvedInputWeight <= 0) {
+          throw new Error("Previous process output weight is missing or invalid. Complete the previous step before continuing.");
+        }
+
+        if (
+          data?.lastCompletedStep &&
+          (!Number.isFinite(previousOutputWeight) || Math.abs(resolvedInputWeight - previousOutputWeight) > 0.0005)
+        ) {
+          throw new Error("Process input does not match the previous completed step output. Refresh and try again.");
+        }
+
         currentOpenProcessStep = null;
-        setBaseProcessInputWeight(data?.inputWeight || 0);
+        setBaseProcessInputWeight(resolvedInputWeight);
         document.getElementById("stepInputQty").value = data?.inputQty ? formatProcessQty(data.inputQty) : "";
         document.getElementById("stepInputQty").readOnly = Number(data?.stepNo || 1) > 1;
         document.getElementById("stepOutputWeight").value = "";
@@ -4638,7 +4682,7 @@
         document.getElementById("stepOutputQty").value = "";
         document.getElementById("stepLossWeight").value = "";
         document.getElementById("stepLossQty").value = "";
-        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(data?.inputWeight || 0)}g | input qty (Pair): ${formatProcessQty(data?.inputQty || 0)}`);
+        setProcessStepHint(`Step ${data?.stepNo || 1} input weight: ${formatProcessWeight(resolvedInputWeight)}g | input qty (Pair): ${formatProcessQty(data?.inputQty || 0)}`);
         renderRecoveryStockOptions();
         renderProcessGuide();
         renderJobSlipPreview();
@@ -4693,6 +4737,7 @@
       await loadLotAdditiveStatus(lotNo);
       await loadAdditiveIssues(lotNo);
       await loadLotMaterialLedgerSummary(lotNo);
+      await autoCompleteDirectStockLotIfReady();
     }
 
     function scheduleProcessStepContextLoad() {
@@ -4717,18 +4762,21 @@
       const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
       const workCategory = getActiveStepWorkCategory();
 
+      if (processLotCompletionInProgress) return false;
+
       if (!lotNo) {
         showToast("Please select a lot first.", "error", "Missing Lot");
-        return;
+        return false;
       }
 
       if (!isCompleteLotAvailable()) {
         showToast("This lot is not ready to complete yet.", "error", "Lot Not Ready");
         renderProcessGuide();
-        return;
+        return false;
       }
 
       const button = document.getElementById("completeLotButton");
+      processLotCompletionInProgress = true;
       if (button) button.disabled = true;
 
       try {
@@ -4760,13 +4808,34 @@
         loadKarigarLotDropdown();
         await loadOutsideKarigarLedger();
         await loadProcessStepContext();
+        return true;
       } catch (error) {
         console.log("Complete lot error:", error);
         showToast(error.message || "Lot completion failed", "error", "Complete Lot Failed");
+        return false;
       } finally {
+        processLotCompletionInProgress = false;
         if (button) button.disabled = false;
         renderProcessGuide();
       }
+    }
+
+    async function autoCompleteDirectStockLotIfReady() {
+      const workCategory = getActiveStepWorkCategory();
+      if (
+        processLotCompletionInProgress ||
+        getWorkCategoryDestination(workCategory) !== "STOCK" ||
+        !isCompleteLotAvailable()
+      ) {
+        return false;
+      }
+
+      showToast(
+        `Final ${workCategory} step completed. Moving the lot to stock...`,
+        "info",
+        "Adding to Stock"
+      );
+      return completeCurrentProcessLot();
     }
 
     function renderDeleteTestLotScanResult(scanData = {}) {

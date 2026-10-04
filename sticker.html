@@ -1628,12 +1628,14 @@
       try {
         serverDuplicateSerial = await checkSerialExistsOnServer(data.lot, data.serial);
       } catch (error) {
-        logStickerDebug("addStickerItem serial server check failed; falling back to local check", {
+        logStickerDebug("addStickerItem serial server check failed", {
           reason: "SERIAL_CHECK_API_FAILED",
           lot: data.lot,
           serial: data.serial,
           message: error?.message || String(error)
         });
+        showToast("Serial verification failed. Please try again before printing this sticker.", "error");
+        return;
       }
       if (Number(data.serial) < expectedNextSerial && (serverDuplicateSerial || isDuplicateLotSerialEverywhere(data.lot, data.serial))) {
         showToast(`Duplicate serial: Serial ${data.serial} already exists in stock for lot ${data.lot}.`, "error");
@@ -1849,7 +1851,21 @@
         return;
       }
 
-      if (isDuplicateLotSerialEverywhere(data.lot, data.serial, oldBarcode)) {
+      let serverDuplicateSerial = false;
+      try {
+        serverDuplicateSerial = await checkSerialExistsOnServer(data.lot, data.serial, oldBarcode);
+      } catch (error) {
+        logStickerDebug("saveInlineEdit serial server check failed", {
+          reason: "SERIAL_CHECK_API_FAILED",
+          lot: data.lot,
+          serial: data.serial,
+          message: error?.message || String(error)
+        });
+        showToast("Serial verification failed. Please try again before printing this sticker.", "error");
+        return;
+      }
+
+      if (serverDuplicateSerial || isDuplicateLotSerialEverywhere(data.lot, data.serial, oldBarcode)) {
       showToast(`Serial ${data.serial} already exists in lot ${data.lot}.`, "error");
         return;
       }

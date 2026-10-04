@@ -66,7 +66,7 @@
                 <div class="field"><label>Challan Number</label><input id="challanNo" placeholder="Optional"></div>
                 <div class="field"><label>Notes</label><textarea id="notes" placeholder="Optional transfer notes"></textarea></div>
               </div>
-              <div class="action-row"><button class="btn primary" type="button" onclick="createTransfer()"><i class="fas fa-file-circle-plus"></i> Create Draft</button></div>
+              <div class="action-row"><button class="btn primary" id="createTransferBtn" type="button" onclick="createTransfer()"><i class="fas fa-file-circle-plus"></i> Create Draft</button></div>
             </div>
             <div class="panel">
               <h3><i class="fas fa-list"></i> Draft Transfers</h3>
@@ -111,6 +111,9 @@
     let transfers = [];
     let activeTransfer = null;
     let activeItems = [];
+    let creatingTransfer = false;
+    let createTransferRequestId = "";
+    let addingBarcode = false;
 
     function notify(message, type = "info") { if (window.showToast) showToast(message, type); else alert(message); }
     function api(path, options = {}) { return fetch(path, { credentials: "include", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } }); }
@@ -125,11 +128,18 @@
     }
 
     async function loadBranches() {
-      const data = await readJson(await api("/branches"));
+      const data = await readJson(await api("/branches/transfer-options"));
       branches = data.branches || [];
-      const options = branches.map((branch) => `<option value="${branch.id}">${branch.branch_name} (${branch.branch_code})</option>`).join("");
-      document.getElementById("fromBranch").innerHTML = `<option value="">Select source</option>${options}`;
-      document.getElementById("toBranch").innerHTML = `<option value="">Select destination</option>${options}`;
+      const sourceBranches = data.branch_locked
+        ? branches.filter((branch) => Number(branch.id) === Number(data.source_branch_id))
+        : branches;
+      const sourceOptions = sourceBranches.map((branch) => `<option value="${branch.id}">${branch.branch_name} (${branch.branch_code})</option>`).join("");
+      const destinationOptions = branches.map((branch) => `<option value="${branch.id}">${branch.branch_name} (${branch.branch_code})</option>`).join("");
+      document.getElementById("fromBranch").innerHTML = `<option value="">Select source</option>${sourceOptions}`;
+      document.getElementById("toBranch").innerHTML = `<option value="">Select destination</option>${destinationOptions}`;
+      if (data.branch_locked && data.source_branch_id) {
+        document.getElementById("fromBranch").value = String(data.source_branch_id);
+      }
     }
 
     async function loadDrafts() {
@@ -175,23 +185,47 @@
     }
 
     async function createTransfer() {
+      if (creatingTransfer) return;
       const from = Number(document.getElementById("fromBranch").value || 0);
       const to = Number(document.getElementById("toBranch").value || 0);
       if (!from || !to) return notify("Select both branches", "warning");
       if (from === to) return notify("Source and destination branch cannot be same", "warning");
-      const data = await readJson(await api("/branch-transfers", {
-        method: "POST",
-        body: JSON.stringify({ from_branch_id: from, to_branch_id: to, challan_no: document.getElementById("challanNo").value, notes: document.getElementById("notes").value })
-      }));
-      notify("Transfer draft created", "success");
-      await loadDrafts();
-      await openTransfer(data.transfer.id);
-      document.getElementById("barcodeInput").focus();
+      const button = document.getElementById("createTransferBtn");
+      creatingTransfer = true;
+      button.disabled = true;
+      createTransferRequestId = createTransferRequestId || `BRANCH-DRAFT-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      try {
+        const data = await readJson(await api("/branch-transfers", {
+          method: "POST",
+          body: JSON.stringify({
+            from_branch_id: from,
+            to_branch_id: to,
+            challan_no: document.getElementById("challanNo").value,
+            notes: document.getElementById("notes").value,
+            idempotency_key: createTransferRequestId
+          })
+        }));
+        createTransferRequestId = "";
+        notify(data.reused ? "Transfer draft already created" : "Transfer draft created", "success");
+        await loadDrafts();
+        await openTransfer(data.transfer.id);
+        document.getElementById("barcodeInput").focus();
+      } catch (error) {
+        notify(error.message || "Transfer draft could not be created", "error");
+      } finally {
+        creatingTransfer = false;
+        button.disabled = false;
+      }
     }
 
-    function handleBarcodeKey(event) { if (event.key === "Enter") { event.preventDefault(); scanBarcode(); } }
+    function handleBarcodeKey(event) {
+      if (event.key !== "Enter" || event.repeat) return;
+      event.preventDefault();
+      scanBarcode();
+    }
 
     async function scanBarcode() {
+      if (addingBarcode) return;
       if (!activeTransfer) return notify("Create or open a draft transfer first", "warning");
       const input = document.getElementById("barcodeInput");
       const barcode = input.value.trim();
@@ -200,11 +234,29 @@
         input.select();
         return notify("Barcode already added in this transfer", "warning");
       }
-      await readJson(await api(`/branch-transfers/${activeTransfer.id}/items/scan`, { method: "POST", body: JSON.stringify({ barcode }) }));
-      input.value = "";
-      notify("Barcode added", "success");
-      await openTransfer(activeTransfer.id);
-      input.focus();
+      const transferId = Number(activeTransfer.id);
+      const addButton = document.getElementById("addBarcodeBtn");
+      addingBarcode = true;
+      input.disabled = true;
+      addButton.disabled = true;
+      try {
+        await readJson(await api(`/branch-transfers/${transferId}/items/scan`, {
+          method: "POST",
+          body: JSON.stringify({ barcode })
+        }));
+        input.value = "";
+        notify("Barcode added", "success");
+        await openTransfer(transferId);
+      } catch (error) {
+        notify(error.message || "Barcode could not be added to this transfer", "error");
+      } finally {
+        addingBarcode = false;
+        const isCreated = String(activeTransfer?.status || "").toUpperCase() === "CREATED";
+        input.disabled = !isCreated;
+        addButton.disabled = !isCreated;
+        input.focus();
+        if (input.value) input.select();
+      }
     }
 
     async function removeItem(itemId) {

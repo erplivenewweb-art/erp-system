@@ -21,10 +21,41 @@ const {
 } = require("./authMiddleware");
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
+const {
+  ensureColourPlantSchema,
+  registerColourPlantRoutes
+} = require("./colourPlant");
+const {
+  PrivateCreateWebsiteSaleError,
+  createPrivateCreateWebsiteSaleTransport
+} = require("./privateCreateWebsiteSaleTransport");
+const { ensureStockCostBasisSchema } = require("./stockCostAuthority");
+const {
+  calculateReturnRefundAllocation,
+  getInitialRefundPayableStatus
+} = require("./returnPolicy");
+const {
+  assertDisposableDatabaseTarget,
+  createGracefulShutdownController,
+  createStartupStatus,
+  getReadinessSnapshot,
+  validateRuntimeConfiguration,
+  verifySchemaCompatibility
+} = require("./startupSafety");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path === "/ready") return next();
+
+  const readiness = getReadinessSnapshot(startupStatus);
+  if (!readiness.ready) {
+    return res.status(503).json(readiness.body);
+  }
+
+  return next();
+});
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");
 const FRONTEND_INDEX_FILE = path.join(FRONTEND_ROOT, "index.html");
 const FRONTEND_CSS_DIR = path.join(FRONTEND_ROOT, "css");
@@ -81,7 +112,8 @@ const PROTECTED_PAGES = new Set([
   "branch-snapshots.html",
   "branch-reconciliation-runs.html",
   "branch-exception-queue.html",
-  "backup-health.html"
+  "backup-health.html",
+  "colour-plant.html"
 ]);
 
 const DEFAULT_ALLOWED_APP_ORIGINS = [
@@ -114,7 +146,8 @@ const OPERATIONAL_MUTATION_PATHS = [
   "/transaction/party-metal",
   "/transaction/parties",
   "/transaction/transactions",
-  "/updatesticker/"
+  "/updatesticker/",
+  "/colour-jobs"
 ];
 const ALLOWED_APP_ORIGINS = new Set(
   [
@@ -369,7 +402,7 @@ function parseEnvBoolean(value, fallback = false) {
 }
 
 function isSmtpEnabled() {
-  return parseEnvBoolean(process.env.SMTP_ENABLED, true);
+  return parseEnvBoolean(process.env.SMTP_ENABLED, false);
 }
 
 function isSmtpDebugEnabled() {
@@ -422,8 +455,6 @@ function getEnvWithLocalDefault(key, fallback = "") {
 function logEnvStatus() {
   const missingMysqlEnv = getMissingEnvKeys(MYSQL_ENV_KEYS);
   const missingSmtpEnv = isSmtpEnabled() ? getMissingEnvKeys(SMTP_REQUIRED_ENV_KEYS) : [];
-  const missingSuperAdminPassword = !String(process.env.SUPERADMIN_PASSWORD || "").trim();
-  const duplicateSuperAdminKeys = getDuplicateLocalEnvKeys(["SUPERADMIN_PASSWORD"]);
 
   if (missingMysqlEnv.length && canUseLocalDbDefaults()) {
     console.warn(
@@ -432,22 +463,6 @@ function logEnvStatus() {
   } else if (missingMysqlEnv.length) {
     console.error(
       `[CONFIG] Missing MySQL environment variables: ${missingMysqlEnv.join(", ")}`
-    );
-  }
-
-  if (missingSuperAdminPassword && isProductionRuntime()) {
-    console.error(
-      "[CONFIG] SUPERADMIN_PASSWORD is missing. Production startup will fail safely until it is set."
-    );
-  } else if (missingSuperAdminPassword) {
-    console.warn(
-      "[CONFIG] SUPERADMIN_PASSWORD is missing. Startup will fail safely until it is set."
-    );
-  }
-
-  if (duplicateSuperAdminKeys.length) {
-    console.warn(
-      "[CONFIG] Duplicate SUPERADMIN_PASSWORD entries found in local .env. Dotenv uses the last value; remove duplicates to avoid login confusion."
     );
   }
 
@@ -472,11 +487,9 @@ const MYSQL_CONFIG = {
 
 const pool = mysql.createPool(MYSQL_CONFIG);
 
-const startupStatus = {
-  port: PORT,
-  db: "pending",
-  smtp: "pending"
-};
+const startupStatus = createStartupStatus(PORT);
+let server = null;
+let shutdownController = null;
 
 function logDbStartupConfig() {
   console.log("[STARTUP] DB CONFIG:", getSafeMysqlStartupConfig());
@@ -521,7 +534,7 @@ function logSmtpStartupConfig() {
   const enabled = isSmtpEnabled();
   if (!isSmtpDebugEnabled()) {
     if (!enabled) {
-      console.log("[STARTUP] SMTP disabled for local development.");
+      console.log("[STARTUP] SMTP disabled.");
     }
     return;
   }
@@ -786,10 +799,20 @@ const loginRateLimiter = rateLimit({
 
 process.on("uncaughtException", (err) => {
   console.error("UNCAUGHT EXCEPTION:", err);
+  if (shutdownController) {
+    shutdownController.shutdown("uncaughtException", 1).catch(() => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
 
 process.on("unhandledRejection", (reason) => {
   console.error("UNHANDLED REJECTION:", reason);
+  if (shutdownController) {
+    shutdownController.shutdown("unhandledRejection", 1).catch(() => process.exit(1));
+  } else {
+    process.exit(1);
+  }
 });
 
 function requireAuthPage(req, res, next) {
@@ -799,6 +822,37 @@ function requireAuthPage(req, res, next) {
 function format3(value) {
   const n = Number(value || 0);
   return Number.isNaN(n) ? "0.000" : n.toFixed(3);
+}
+
+function validateWebStartupConfiguration() {
+  const normalizedEnvironment = {
+    ...process.env,
+    MYSQLHOST: getEnvWithLocalDefault("MYSQLHOST"),
+    MYSQLUSER: getEnvWithLocalDefault("MYSQLUSER"),
+    MYSQLPASSWORD: getEnvWithLocalDefault("MYSQLPASSWORD"),
+    MYSQLDATABASE: getEnvWithLocalDefault("MYSQLDATABASE"),
+    MYSQLPORT: getEnvWithLocalDefault("MYSQLPORT", "3306")
+  };
+
+  return validateRuntimeConfiguration(normalizedEnvironment, {
+    production: isProductionRuntime()
+  });
+}
+
+function decimalToThousandths(value) {
+  const clean = String(value ?? "").trim();
+  const match = clean.match(/^([+-]?)(\d+)(?:\.(\d{1,3}))?$/);
+  if (!match) return null;
+
+  const whole = Number(match[2]);
+  const fraction = Number(String(match[3] || "").padEnd(3, "0"));
+  const scaled = (whole * 1000) + fraction;
+  if (!Number.isSafeInteger(scaled)) return null;
+  return match[1] === "-" ? -scaled : scaled;
+}
+
+function thousandthsToNumber(value) {
+  return Number((Number(value || 0) / 1000).toFixed(3));
 }
 
 function normalizeReturnType(value) {
@@ -826,6 +880,7 @@ const OTP_REQUEST_LIMIT_COUNT = 3;
 const SMTP_CONNECTION_TIMEOUT_MS = 8000;
 const SMTP_GREETING_TIMEOUT_MS = 8000;
 const SMTP_SOCKET_TIMEOUT_MS = 12000;
+const SMTP_VERIFY_DEADLINE_MS = 15000;
 
 let mailTransporter = null;
 let smtpReady = false;
@@ -945,6 +1000,24 @@ function getMailTransporter() {
   return mailTransporter;
 }
 
+async function verifySmtpWithDeadline(transporter) {
+  let timeoutId;
+  const deadline = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("SMTP verification exceeded the startup deadline");
+      error.code = "ETIMEDOUT";
+      reject(error);
+    }, SMTP_VERIFY_DEADLINE_MS);
+    timeoutId.unref?.();
+  });
+
+  try {
+    await Promise.race([transporter.verify(), deadline]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function testSmtpConnection() {
   const config = getSmtpConfig();
   if (!config.enabled) {
@@ -975,9 +1048,12 @@ async function testSmtpConnection() {
   startupStatus.smtp = "pending";
   const transporter = getMailTransporter();
   try {
-    await transporter.verify();
+    await verifySmtpWithDeadline(transporter);
     smtpReady = true;
   } catch (error) {
+    try {
+      transporter.close();
+    } catch {}
     startupStatus.smtp = "failed";
     markSmtpUnavailable(getSafeSmtpDiagnostic(error));
     console.warn("[STARTUP] SMTP verification failed. Email features are disabled until SMTP settings are fixed.");
@@ -1694,7 +1770,7 @@ function normalizeAdditiveMaterialType(value = "") {
 function getAdditiveMaterialForStep(stepName = "") {
   const normalizedStepName = normalizeTemplateStepName(stepName);
   if (["soldering", "solding", "solder", "kdm"].includes(normalizedStepName)) return "KDM";
-  if (normalizedStepName === "fitting") return "PIN";
+  if (["fitting", "pin"].includes(normalizedStepName)) return "PIN";
   return "";
 }
 
@@ -1703,19 +1779,25 @@ function getAdditiveStockSource(materialType = "KDM") {
   return material === "PIN" ? "PROCESS_PIN" : "PROCESS_KDM";
 }
 
-async function findAdditiveStockItemForCompany(connection, companyId, materialType = "KDM", { forUpdate = false } = {}) {
+async function findAdditiveStockItemForCompany(connection, companyId, materialType = "KDM", { forUpdate = false, branchId = null } = {}) {
   const cleanCompanyId = Number(companyId || 0);
   if (!cleanCompanyId) return null;
+  const cleanBranchId = Number(branchId || 0) || null;
   const material = normalizeAdditiveMaterialType(materialType) || "KDM";
   const source = getAdditiveStockSource(material);
   const likeMaterial = `%${material}%`;
+  const barcodeFilterSql = material === "KDM"
+    ? "AND (barcode IS NULL OR TRIM(COALESCE(barcode, '')) = '')"
+    : "";
 
   const [rows] = await connection.query(
     `
     SELECT *
     FROM stock
     WHERE company_id = ?
+      ${cleanBranchId ? "AND current_branch_id = ?" : ""}
       AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+      AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
       AND deleted_at IS NULL
       AND (
         UPPER(COALESCE(source, '')) = ?
@@ -1724,10 +1806,7 @@ async function findAdditiveStockItemForCompany(connection, companyId, materialTy
         OR UPPER(COALESCE(product_name, '')) = ?
         OR UPPER(COALESCE(product_name, '')) LIKE ?
       )
-      AND (
-        barcode IS NULL
-        OR TRIM(COALESCE(barcode, '')) = ''
-      )
+      ${barcodeFilterSql}
     ORDER BY
       CASE WHEN UPPER(COALESCE(source, '')) = ? THEN 0 ELSE 1 END,
       CASE WHEN UPPER(COALESCE(category, '')) = ? THEN 0 ELSE 1 END,
@@ -1736,19 +1815,23 @@ async function findAdditiveStockItemForCompany(connection, companyId, materialTy
     LIMIT 1
     ${forUpdate ? "FOR UPDATE" : ""}
     `,
-    [cleanCompanyId, source, material, likeMaterial, material, likeMaterial, source, material, material]
+    [cleanCompanyId, ...(cleanBranchId ? [cleanBranchId] : []), source, material, likeMaterial, material, likeMaterial, source, material, material]
   );
 
   return rows.length ? rows[0] : null;
 }
 
-async function getAdditiveStockItemById(connection, companyId, stockItemId, materialType = "KDM", { forUpdate = false } = {}) {
+async function getAdditiveStockItemById(connection, companyId, stockItemId, materialType = "KDM", { forUpdate = false, branchId = null } = {}) {
   const cleanCompanyId = Number(companyId || 0);
   const cleanStockItemId = Number(stockItemId || 0);
   if (!cleanCompanyId || !cleanStockItemId) return null;
+  const cleanBranchId = Number(branchId || 0) || null;
   const material = normalizeAdditiveMaterialType(materialType) || "KDM";
   const source = getAdditiveStockSource(material);
   const likeMaterial = `%${material}%`;
+  const barcodeFilterSql = material === "KDM"
+    ? "AND (barcode IS NULL OR TRIM(COALESCE(barcode, '')) = '')"
+    : "";
 
   const [rows] = await connection.query(
     `
@@ -1756,7 +1839,9 @@ async function getAdditiveStockItemById(connection, companyId, stockItemId, mate
     FROM stock
     WHERE company_id = ?
       AND id = ?
+      ${cleanBranchId ? "AND current_branch_id = ?" : ""}
       AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
+      AND UPPER(COALESCE(NULLIF(TRIM(stock_state), ''), status, 'IN_STOCK')) = 'IN_STOCK'
       AND deleted_at IS NULL
       AND (
         UPPER(COALESCE(source, '')) = ?
@@ -1765,14 +1850,11 @@ async function getAdditiveStockItemById(connection, companyId, stockItemId, mate
         OR UPPER(COALESCE(product_name, '')) = ?
         OR UPPER(COALESCE(product_name, '')) LIKE ?
       )
-      AND (
-        barcode IS NULL
-        OR TRIM(COALESCE(barcode, '')) = ''
-      )
+      ${barcodeFilterSql}
     LIMIT 1
     ${forUpdate ? "FOR UPDATE" : ""}
     `,
-    [cleanCompanyId, cleanStockItemId, source, material, likeMaterial, material, likeMaterial]
+    [cleanCompanyId, cleanStockItemId, ...(cleanBranchId ? [cleanBranchId] : []), source, material, likeMaterial, material, likeMaterial]
   );
 
   return rows.length ? rows[0] : null;
@@ -5589,6 +5671,30 @@ async function ensureBranchTransferNumberUniqueIndexSafe() {
   }
 }
 
+async function ensureBranchTransferIdempotencyUniqueIndexSafe() {
+  try {
+    if (!(await tableExists("branch_transfers"))) return;
+    await addColumnIfMissingSafe("branch_transfers", "idempotency_key", "VARCHAR(120) DEFAULT ''");
+    if (await indexExists("branch_transfers", "uq_branch_transfers_company_idempotency")) return;
+
+    const generatedColumnReady = await addGeneratedColumnIfMissingSafe(
+      "branch_transfers",
+      "idempotency_unique_key",
+      "VARCHAR(120) GENERATED ALWAYS AS (CASE WHEN TRIM(COALESCE(idempotency_key, '')) = '' THEN NULL ELSE TRIM(idempotency_key) END) STORED"
+    );
+    if (!generatedColumnReady || !(await columnExists("branch_transfers", "idempotency_unique_key"))) {
+      console.warn("Branch transfer idempotency unique index skipped: generated column is not supported by this database.");
+      return;
+    }
+
+    await pool.query("ALTER TABLE branch_transfers ADD UNIQUE INDEX uq_branch_transfers_company_idempotency (company_id, idempotency_unique_key)");
+    console.log("Branch transfer idempotency unique index added: branch_transfers.uq_branch_transfers_company_idempotency");
+  } catch (error) {
+    if (error?.code === "ER_DUP_KEYNAME") return;
+    console.warn("Branch transfer idempotency unique index skipped safely:", error?.code || error?.message || error);
+  }
+}
+
 async function ensureBranchTransferOpenItemUniqueIndexSafe() {
   try {
     if (!(await tableExists("branch_transfer_items"))) return;
@@ -6850,31 +6956,16 @@ function buildReturnRefundEstimate(saleItem = null, settlementSummary = null) {
   const hasCashSettlement = cashSettledAmount > 0 || toNumber(settlementSummary?.paidAmount) > 0;
   const hasMetalSettlement = metalGrossIn > 0 || metalCreditIds.size > 0;
   const dueAmount = Math.max(toNumber(settlementSummary?.dueAmount), 0);
-  const refundModeHint = hasCashSettlement && hasMetalSettlement
-    ? "MIXED"
-    : hasMetalSettlement
-      ? "METAL"
-      : hasCashSettlement
-        ? "CASH"
-        : "UNKNOWN";
-  const ratio = invoiceTotal > 0 ? Math.min(Math.max(lineAmount / invoiceTotal, 0), 1) : 0;
-  const estimatedRefundMetalWeight = hasMetalSettlement ? metalGrossIn * ratio : 0;
-  const estimatedRefundCashAmount = refundModeHint === "METAL" ? 0 : Math.max(lineAmount - dueAmount, 0);
-
-  return {
-    estimatedRefundCashAmount,
-    estimatedRefundMetalWeight,
-    refundModeHint,
-    estimatedReturnAmount: lineAmount,
-    settlementAllocation: {
-      cashSettledAmount,
-      metalSettledValue,
-      metalGrossIn,
-      dueAmount,
-      invoiceTotal,
-      returnRatio: ratio
-    }
-  };
+  return calculateReturnRefundAllocation({
+    returnAmount: lineAmount,
+    invoiceTotal,
+    dueAmount,
+    cashSettledAmount,
+    metalSettledValue,
+    metalGrossIn,
+    hasCashSettlement,
+    hasMetalSettlement
+  });
 }
 
 async function getOpenReturnRefundPayables(connection, companyId, invoiceNumber, barcode, forUpdate = false) {
@@ -6944,6 +7035,7 @@ async function buildReturnPreview(connection, {
   const currentStatus = String(stock?.status || "").trim().toUpperCase();
   const currentState = stock ? getEffectiveStockState(stock) : "";
   const rawStockState = String(stock?.stock_state || "").trim().toUpperCase();
+  const isLegacySoldStockState = currentStatus === "SOLD" && rawStockState === "IN_STOCK";
 
   if (stock && Number(stock.company_id || 0) !== cleanCompanyId) {
     blockingReasons.push("Stock belongs to another company");
@@ -6957,7 +7049,7 @@ async function buildReturnPreview(connection, {
     blockingReasons.push("Stock must be SOLD before return");
   }
 
-  if (stock && !["SOLD", ""].includes(rawStockState) && currentState !== "SOLD") {
+  if (stock && !isLegacySoldStockState && !["SOLD", ""].includes(rawStockState) && currentState !== "SOLD") {
     blockingReasons.push("Stock state is not a valid sold state");
   }
 
@@ -6969,8 +7061,12 @@ async function buildReturnPreview(connection, {
     blockingReasons.push("Stock is deleted, damaged, already returned, or available");
   }
 
-  if (stock && ["DELETED", "DAMAGED_RETURN", "DAMAGED", "IN_STOCK"].includes(currentState)) {
+  if (stock && !isLegacySoldStockState && ["DELETED", "DAMAGED_RETURN", "DAMAGED", "IN_STOCK"].includes(currentState)) {
     blockingReasons.push("Stock state is deleted, damaged, already returned, or available");
+  }
+
+  if (isLegacySoldStockState) {
+    warnings.push("Legacy sold stock state detected; the verified sale record will control this return.");
   }
 
   const saleLockSql = forUpdate ? "FOR UPDATE" : "";
@@ -7897,6 +7993,7 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
   const refundCashAmount = toNumber(payload.refundCashAmount);
   const refundMetalWeight = toNumber(payload.refundMetalWeight);
   const refundModeHint = String(payload.refundModeHint || "UNKNOWN").trim().toUpperCase();
+  const payableStatus = String(payload.payableStatus || "OPEN").trim().toUpperCase();
   const returnValue = estimateReturnLineAmount(saleItem, saleItem);
 
   const party = await findOrCreateBillingParty(connection, {
@@ -7916,7 +8013,7 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
       status, reference_no, invoice_no, source_module, payment_mode, payment_status,
       remarks, note, created_by
     )
-    VALUES (?, ?, ?, 'RETURN_REFUND_PAYABLE', ?, ?, 'POSTED', ?, ?, 'return', ?, 'OPEN', ?, ?, ?)
+    VALUES (?, ?, ?, 'RETURN_REFUND_PAYABLE', ?, ?, 'POSTED', ?, ?, 'return', ?, ?, ?, ?, ?)
     `,
     [
       companyId,
@@ -7927,6 +8024,7 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
       barcode || invoiceNumber,
       invoiceNumber,
       refundModeHint,
+      payableStatus,
       "Refund payable created from return module",
       `${returnType} | ${returnReason || "No reason"} | Cash ${refundCashAmount.toFixed(2)} | Metal ${refundMetalWeight.toFixed(3)}g`,
       createdBy
@@ -7966,6 +8064,23 @@ async function postReturnRefundPayableToTransactionFoundation(connection, payloa
     `,
     [companyId, invoiceNumber, transactionId, branchId, "Return refund payable posting", createdBy]
   );
+
+  await createCashLedgerEntry(connection, {
+    companyId,
+    partyId: party.id,
+    transactionId,
+    entryDate: returnDate,
+    entryType: "CREDIT",
+    debitAmount: 0,
+    creditAmount: returnValue,
+    referenceType: "RETURN_REFUND_PAYABLE",
+    referenceNo: voucherNo,
+    remarks: `Paid sale return credit for ${invoiceNumber || barcode}`,
+    branchId,
+    createdBy
+  });
+
+  await recalcPartyBalanceSummary(connection, companyId, party.id, transactionId);
 
   return {
     transactionId,
@@ -8599,6 +8714,7 @@ const ERP_MODULE_CATALOG = [
   { key: "PROCESS", name: "Process", category: "PRODUCTION", description: "Manufacturing process and lot tracking", sortOrder: 110 },
   { key: "STICKER", name: "Sticker", category: "PRODUCTION", description: "Barcode sticker creation and management", sortOrder: 120 },
   { key: "MATERIAL_STOCK", name: "Material Stock", category: "PRODUCTION", description: "Raw material stock management", sortOrder: 130 },
+  { key: "COLOUR_PLANT", name: "Colour Plant System", category: "COLOUR_PLANT", description: "Independent customer-owned colour, plating, and job-work workspace", sortOrder: 180 },
   { key: "PRODUCTION_REPORTS", name: "Production Reports", category: "PRODUCTION", description: "Production reporting and analytics", sortOrder: 140 },
   { key: "STORE", name: "Store", category: "STORE", description: "Store and sales dashboard workspace", sortOrder: 200 },
   { key: "STOCK", name: "Stock", category: "STORE", description: "Finished goods stock management", sortOrder: 210 },
@@ -8633,6 +8749,7 @@ const ERP_PLAN_CATALOG = [
   { key: "STORE_SYSTEM", name: "Store System", description: "Store, stock, billing, invoice, return, and sales workflow access", isCustom: 0 },
   { key: "PRODUCTION_ONLY", name: "Production Only", description: "Alias for Production System", isCustom: 0 },
   { key: "STORE_ONLY", name: "Store Only", description: "Alias for Store System", isCustom: 0 },
+  { key: "COLOUR_PLANT_SYSTEM", name: "Colour Plant System", description: "Customer-owned job-work and colour processing workspace access", isCustom: 0 },
   { key: "BRANCH_STORE", name: "Branch Store", description: "Store workflow access with branch transfer and audit modules", isCustom: 0 },
   { key: "FULL_ERP", name: "Full ERP", description: "All currently available ERP modules", isCustom: 0 },
   { key: "CUSTOM", name: "Custom", description: "Company-specific module selection", isCustom: 1 }
@@ -8643,6 +8760,7 @@ const ERP_PLAN_MODULES = {
   STORE_SYSTEM: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING", "PARTY_METAL_ACCOUNT"],
   PRODUCTION_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "PRODUCTION", "PROCESS", "STICKER", "MATERIAL_STOCK", "PRODUCTION_REPORTS", "ANALYTICS"],
   STORE_ONLY: ["DASHBOARD", "SETTINGS", "STAFF_MANAGEMENT", "STORE", "STOCK", "STICKER", "BILLING", "INVOICE", "SALES", "RETURN", "DAILY_REPORT", "CUSTOMER_DUE", "EXPENSE", "TRANSACTION", "CUSTOMER_LEDGER", "BRANCH_CASH_BOOK", "TRANSACTION_REPORTS", "TRANSACTION_REVERSAL", "PAYMENT_ACCOUNTS", "DAILY_CLOSING", "PARTY_METAL_ACCOUNT"],
+  COLOUR_PLANT_SYSTEM: ["COLOUR_PLANT"],
   BRANCH_STORE: [
     "DASHBOARD",
     "SETTINGS",
@@ -8697,13 +8815,22 @@ async function seedSaasModuleCatalog() {
       (module_key, module_name, category, description, is_system, default_enabled, sort_order, created_at, updated_at)
       VALUES (?, ?, ?, ?, 1, ?, ?, NOW(), NOW())
       ON DUPLICATE KEY UPDATE
+        updated_at = IF(
+          NOT (module_name <=> VALUES(module_name)) OR
+          NOT (category <=> VALUES(category)) OR
+          NOT (description <=> VALUES(description)) OR
+          NOT (is_system <=> VALUES(is_system)) OR
+          NOT (default_enabled <=> VALUES(default_enabled)) OR
+          NOT (sort_order <=> VALUES(sort_order)),
+          NOW(),
+          updated_at
+        ),
         module_name = VALUES(module_name),
         category = VALUES(category),
         description = VALUES(description),
         is_system = VALUES(is_system),
         default_enabled = VALUES(default_enabled),
-        sort_order = VALUES(sort_order),
-        updated_at = NOW()
+        sort_order = VALUES(sort_order)
       `,
       [
         moduleConfig.key,
@@ -8731,11 +8858,18 @@ async function seedSaasPlans() {
       (plan_key, plan_name, description, is_custom, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'ACTIVE', NOW(), NOW())
       ON DUPLICATE KEY UPDATE
+        updated_at = IF(
+          NOT (plan_name <=> VALUES(plan_name)) OR
+          NOT (description <=> VALUES(description)) OR
+          NOT (is_custom <=> VALUES(is_custom)) OR
+          NOT (status <=> VALUES(status)),
+          NOW(),
+          updated_at
+        ),
         plan_name = VALUES(plan_name),
         description = VALUES(description),
         is_custom = VALUES(is_custom),
-        status = VALUES(status),
-        updated_at = NOW()
+        status = VALUES(status)
       `,
       [planConfig.key, planConfig.name, planConfig.description, Number(planConfig.isCustom || 0)]
     );
@@ -8756,14 +8890,24 @@ async function seedSaasPlanModules() {
     const planId = Number(planRows[0]?.id || 0);
     if (!planId) continue;
 
+    const desiredModulePlaceholders = moduleKeys.map(() => "?").join(", ");
+    await pool.query(
+      `UPDATE erp_plan_modules
+       SET updated_at = NOW(), enabled = 0
+       WHERE plan_id = ?
+         AND enabled <> 0
+         AND module_key NOT IN (${desiredModulePlaceholders})`,
+      [planId, ...moduleKeys]
+    );
+
     for (const moduleKey of moduleKeys) {
       const [result] = await pool.query(
         `
         INSERT INTO erp_plan_modules (plan_id, module_key, enabled, created_at, updated_at)
         VALUES (?, ?, 1, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
-          enabled = VALUES(enabled),
-          updated_at = NOW()
+          updated_at = IF(NOT (enabled <=> VALUES(enabled)), NOW(), updated_at),
+          enabled = VALUES(enabled)
         `,
         [planId, moduleKey]
       );
@@ -8773,6 +8917,63 @@ async function seedSaasPlanModules() {
   }
 
   return inserted;
+}
+
+async function reconcileColourPlantSystemEntitlements() {
+  if (
+    !(await tableExists("company_plan_assignments")) ||
+    !(await tableExists("company_module_access")) ||
+    !(await tableExists("erp_plans"))
+  ) {
+    return { inserted: 0, updated: 0 };
+  }
+
+  const [insertResult] = await pool.query(
+    `
+    INSERT IGNORE INTO company_module_access
+      (company_id, module_key, enabled, source, reason, updated_by, updated_at)
+    SELECT
+      cpa.company_id,
+      'COLOUR_PLANT',
+      1,
+      'PLAN',
+      'Colour Plant top-level system entitlement reconciliation',
+      NULL,
+      NOW()
+    FROM company_plan_assignments cpa
+    LEFT JOIN erp_plans ep ON ep.id = cpa.plan_id
+    WHERE COALESCE(NULLIF(UPPER(ep.plan_key), ''), UPPER(cpa.plan_key_snapshot), 'FULL_ERP')
+      IN ('FULL_ERP', 'COLOUR_PLANT_SYSTEM')
+    `
+  );
+
+  const [result] = await pool.query(
+    `
+    UPDATE company_module_access cma
+    JOIN company_plan_assignments cpa ON cpa.company_id = cma.company_id
+    LEFT JOIN erp_plans ep ON ep.id = cpa.plan_id
+    SET cma.enabled = CASE
+          WHEN COALESCE(NULLIF(UPPER(ep.plan_key), ''), UPPER(cpa.plan_key_snapshot), 'FULL_ERP') IN ('FULL_ERP', 'COLOUR_PLANT_SYSTEM') THEN 1
+          ELSE 0
+        END,
+        cma.reason = 'Colour Plant top-level system entitlement reconciliation',
+        cma.updated_at = NOW()
+    WHERE cma.module_key = 'COLOUR_PLANT'
+      AND UPPER(COALESCE(cma.source, 'PLAN')) = 'PLAN'
+      AND (
+        NOT (cma.enabled <=> CASE
+          WHEN COALESCE(NULLIF(UPPER(ep.plan_key), ''), UPPER(cpa.plan_key_snapshot), 'FULL_ERP') IN ('FULL_ERP', 'COLOUR_PLANT_SYSTEM') THEN 1
+          ELSE 0
+        END)
+        OR NOT (cma.reason <=> 'Colour Plant top-level system entitlement reconciliation')
+      )
+    `
+  );
+
+  return {
+    inserted: Number(insertResult?.affectedRows || 0),
+    updated: Number(result?.affectedRows || 0)
+  };
 }
 
 async function backfillCompanySaasAccess() {
@@ -8935,12 +9136,14 @@ async function ensureSaasModuleAccessFoundation() {
   const planInsertCount = await seedSaasPlans();
   const planModuleInsertCount = await seedSaasPlanModules();
   const backfillResult = await backfillCompanySaasAccess();
+  const colourPlantEntitlementResult = await reconcileColourPlantSystemEntitlements();
   const phase3AccountingBackfillResult = await backfillPhase3AccountingModuleAccess();
   await auditPhase3AccountingBackfillSafe(phase3AccountingBackfillResult);
 
   console.log(
     `SaaS module foundation ensured: ${moduleInsertCount} module(s), ${planInsertCount} plan(s), ${planModuleInsertCount} plan-module row(s) inserted; ` +
       `${backfillResult.planAssignmentsInserted} company plan assignment(s), ${backfillResult.moduleAccessInserted} company module access row(s) backfilled across ${backfillResult.companyCount} compan${backfillResult.companyCount === 1 ? "y" : "ies"}; ` +
+      `${colourPlantEntitlementResult.inserted} Colour Plant entitlement row(s) inserted, ${colourPlantEntitlementResult.updated} reconciled; ` +
       `${phase3AccountingBackfillResult.moduleAccessInserted} Phase 3 accounting module access row(s) backfilled across ${phase3AccountingBackfillResult.companyCount} eligible compan${phase3AccountingBackfillResult.companyCount === 1 ? "y" : "ies"}`
   );
 }
@@ -8963,6 +9166,7 @@ function normalizePlanKey(value = "") {
     .slice(0, 80);
   if (clean === "PRODUCTION_ONLY") return "PRODUCTION_SYSTEM";
   if (clean === "STORE_ONLY") return "STORE_SYSTEM";
+  if (clean === "COLOUR_PLANT_ONLY") return "COLOUR_PLANT_SYSTEM";
   return clean;
 }
 
@@ -9280,6 +9484,8 @@ const MODULE_PREVIEW_ROUTE_RULES = [
   { moduleKey: "RETURN", pattern: /^\/(?:saveReturn|getReturns|getReturnSummary)(?:\/|$)/i },
   { moduleKey: "MATERIAL_STOCK", pattern: /^\/material-stock(?:\.html)?$/i },
   { moduleKey: "MATERIAL_STOCK", pattern: /^\/materialStock(?:\/|$)/i },
+  { moduleKey: "COLOUR_PLANT", pattern: /^\/colour-plant(?:\.html)?$/i },
+  { moduleKey: "COLOUR_PLANT", pattern: /^\/colour-jobs(?:\/|$)/i },
   { moduleKey: "BRANCH", pattern: /^\/branch-management(?:\.html)?$/i },
   { moduleKey: "BRANCH", pattern: /^\/branches(?:\/|$)/i },
   { moduleKey: "BRANCH", pattern: /^\/branch-context$/i },
@@ -10604,6 +10810,42 @@ async function ensureSchema() {
     )
   `);
 
+  // Phase 8C: inert website-origin identity only. No route or executor consumes it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS website_sale_execution_identities (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL,
+      source VARCHAR(32) NOT NULL DEFAULT 'WEBSITE',
+      external_execution_id VARCHAR(128) NOT NULL,
+      external_website_order_id VARCHAR(128) NOT NULL,
+      canonical_digest CHAR(64) NOT NULL,
+      execution_state VARCHAR(32) NOT NULL DEFAULT 'INERT',
+      branch_id INT DEFAULT NULL,
+      execution_attempt_id VARCHAR(128) DEFAULT NULL,
+      execution_lease_expires_at DATETIME DEFAULT NULL,
+      execution_started_at DATETIME DEFAULT NULL,
+      execution_completed_at DATETIME DEFAULT NULL,
+      sale_id BIGINT DEFAULT NULL,
+      invoice_number VARCHAR(100) DEFAULT NULL,
+      result_digest CHAR(64) DEFAULT NULL,
+      failure_code VARCHAR(96) DEFAULT NULL,
+      last_reconciled_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_website_sale_execution (company_id, source, external_execution_id),
+      UNIQUE KEY uq_website_sale_order (company_id, source, external_website_order_id)
+    )
+  `);
+  await addColumnIfMissing("website_sale_execution_identities", "branch_id", "INT DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "execution_attempt_id", "VARCHAR(128) DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "execution_lease_expires_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "execution_started_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "execution_completed_at", "DATETIME DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "result_digest", "CHAR(64) DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "failure_code", "VARCHAR(96) DEFAULT NULL");
+  await addColumnIfMissing("website_sale_execution_identities", "last_reconciled_at", "DATETIME DEFAULT NULL");
+  await addIndexIfMissing("website_sale_execution_identities", "idx_website_sale_execution_lifecycle", "(company_id, source, execution_state, execution_lease_expires_at)");
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -10715,6 +10957,7 @@ async function ensureSchema() {
       from_branch_id INT NOT NULL,
       to_branch_id INT NOT NULL,
       status VARCHAR(40) DEFAULT 'CREATED',
+      idempotency_key VARCHAR(120) DEFAULT '',
       challan_no VARCHAR(80) NULL,
       notes TEXT NULL,
       created_by INT NULL,
@@ -10953,6 +11196,55 @@ async function ensureSchema() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  // Phase 8F-A2 private configuration/master-data authority; no sale tables are touched.
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_integration_party_mappings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, external_party_ref VARCHAR(128) NOT NULL,
+    party_id INT NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_integration_party_ref (company_id, external_party_ref),
+    UNIQUE KEY uq_erp_integration_party_target (company_id, party_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_gst_tax_profiles (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, tax_profile_ref VARCHAR(128) NOT NULL,
+    gst_rate_percent DECIMAL(7,4) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1,
+    effective_from DATE DEFAULT NULL, effective_to DATE DEFAULT NULL, created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_gst_tax_profile_ref (company_id, tax_profile_ref)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_integration_products (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, integration_product_ref VARCHAR(128) NOT NULL,
+    identity_digest CHAR(64) NOT NULL, product_name VARCHAR(255) NOT NULL, sku VARCHAR(100) DEFAULT '', purity VARCHAR(50) DEFAULT '', size VARCHAR(100) DEFAULT '',
+    tax_profile_id BIGINT DEFAULT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_integration_product_ref (company_id, integration_product_ref),
+    UNIQUE KEY uq_erp_integration_product_identity (company_id, identity_digest)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_integration_product_mappings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, external_product_ref VARCHAR(128) NOT NULL, external_variant_ref VARCHAR(128) NOT NULL,
+    integration_product_id BIGINT NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1, created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_integration_product_mapping (company_id, external_product_ref, external_variant_ref),
+    INDEX idx_erp_integration_product_target (company_id, integration_product_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_integration_stock_bindings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, branch_id INT NOT NULL, external_line_ref VARCHAR(128) NOT NULL,
+    integration_product_id BIGINT NOT NULL, stock_id INT NOT NULL, barcode VARCHAR(255) NOT NULL, active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_integration_stock_line (company_id, external_line_ref),
+    UNIQUE KEY uq_erp_integration_stock_target (company_id, stock_id),
+    INDEX idx_erp_integration_stock_product (company_id, branch_id, integration_product_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS erp_party_tax_profiles (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY, company_id INT NOT NULL, party_id INT NOT NULL, supply_state VARCHAR(120) NOT NULL,
+    gst_registration_status VARCHAR(40) NOT NULL DEFAULT 'UNREGISTERED', gstin_reference VARCHAR(100) DEFAULT '', active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by INT DEFAULT NULL, updated_by INT DEFAULT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_erp_party_tax_profile (company_id, party_id)
+  )`);
+
+  // Phase 8F-A10A configuration authority only; this is not a sale table and
+  // does not enable CreateWebsiteSale execution.
+  await ensureStockCostBasisSchema(pool);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS party_opening_balance (
@@ -11394,6 +11686,7 @@ async function ensureSchema() {
       stock_item_id INT DEFAULT NULL,
       issue_stock_movement_id INT DEFAULT NULL,
       return_stock_movement_id INT DEFAULT NULL,
+      idempotency_key VARCHAR(120) DEFAULT NULL,
       status VARCHAR(30) DEFAULT 'ISSUED',
       issued_by INT DEFAULT NULL,
       issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -12260,6 +12553,7 @@ async function ensureSchema() {
     await addColumnIfMissing("process_step_additive_issues", "stock_item_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "issue_stock_movement_id", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "return_stock_movement_id", "INT DEFAULT NULL");
+    await addColumnIfMissing("process_step_additive_issues", "idempotency_key", "VARCHAR(120) DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "status", "VARCHAR(30) DEFAULT 'ISSUED'");
     await addColumnIfMissing("process_step_additive_issues", "issued_by", "INT DEFAULT NULL");
     await addColumnIfMissing("process_step_additive_issues", "issued_at", "DATETIME DEFAULT CURRENT_TIMESTAMP");
@@ -12476,6 +12770,7 @@ async function ensureSchema() {
     await addColumnIfMissing("expenses", "updated_by", "INT DEFAULT NULL");
     await addColumnIfMissing("expenses", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
     await addColumnIfMissing("expenses", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    await ensureExpenseIdempotencyUniqueIndexSafe();
   }
 
   if (await tableExists("invoice_drafts")) {
@@ -12761,9 +13056,11 @@ async function ensureSchema() {
   }
 
   if (await tableExists("branch_transfers")) {
+    await addColumnIfMissingSafe("branch_transfers", "idempotency_key", "VARCHAR(120) DEFAULT ''");
     await addIndexIfMissing("branch_transfers", "idx_branch_transfers_scope_status", "(company_id, from_branch_id, to_branch_id, status)");
     await addIndexIfMissing("branch_transfers", "idx_branch_transfers_transfer_no", "(company_id, transfer_no)");
     await ensureBranchTransferNumberUniqueIndexSafe();
+    await ensureBranchTransferIdempotencyUniqueIndexSafe();
   }
 
   if (await tableExists("branch_transfer_items")) {
@@ -12875,6 +13172,7 @@ async function ensureSchema() {
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_stock_item", "(company_id, stock_item_id)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_issue_movement", "(issue_stock_movement_id)");
     await addIndexIfMissing("process_step_additive_issues", "idx_additive_issues_return_movement", "(return_stock_movement_id)");
+    await addUniqueIndexIfMissing("process_step_additive_issues", "uq_additive_issues_company_idempotency", "(company_id, idempotency_key)");
   }
 
   if (await tableExists("process_job_slips")) {
@@ -13042,6 +13340,7 @@ async function ensureSchema() {
     await addIndexIfMissing("metal_ledger", "idx_metal_branch_date", "(company_id, branch_id, entry_date)");
   }
 
+  await ensureColourPlantSchema(pool);
   await seedDefaultProcessTemplatesForCompanies();
   await backfillSolderingAdditiveTemplateMetadata();
   await seedInvoiceSequencesFromSalesHistory();
@@ -14624,6 +14923,7 @@ async function ensureSuperAdminExists() {
     console.log("[STARTUP] SuperAdmin synced.");
   } catch (error) {
     console.error("SuperAdmin create error:", error);
+    throw error;
   }
 }
 
@@ -14684,39 +14984,34 @@ app.get("/health", async (req, res) => {
   return res.status(200).json({
     success: true,
     app: "ok",
-    status: "live"
+    status: startupStatus.shuttingDown ? "shutting_down" : "live"
   });
 });
 
 app.get("/ready", async (req, res) => {
-  try {
-    await testDbConnection();
-    return res.status(200).json({
-      success: true,
-      app: "ok",
-      status: "ready",
-      db: startupStatus.db,
-      smtp: startupStatus.smtp,
-      port: startupStatus.port
-    });
-  } catch (error) {
-    console.error("Readiness check error:", error);
-    return res.status(500).json({
-      success: false,
-      app: "ok",
-      status: "not_ready",
-      db: "failed",
-      smtp: startupStatus.smtp,
-      port: startupStatus.port,
-      error: getErrorDetail(error)
-    });
+  const initial = getReadinessSnapshot(startupStatus);
+  if (!initial.ready) {
+    return res.status(initial.httpStatus).json(initial.body);
   }
 
-  if (await tableExists("expenses")) {
-    await addIndexIfMissingSafe("expenses", "idx_expenses_company_transaction", "(company_id, transaction_id)");
-    await addIndexIfMissingSafe("expenses", "idx_expenses_company_branch", "(company_id, branch_id)");
-    await addIndexIfMissingSafe("expenses", "idx_expenses_company_idempotency", "(company_id, idempotency_key)");
-    await ensureExpenseIdempotencyUniqueIndexSafe();
+  try {
+    await testDbConnection();
+    const ready = getReadinessSnapshot(startupStatus);
+    return res.status(ready.httpStatus).json({
+      ...ready.body,
+      smtp: startupStatus.smtp
+    });
+  } catch (error) {
+    console.warn("Readiness database check failed:", error?.code || error?.name || "DB_UNAVAILABLE");
+    return res.status(503).json({
+      success: false,
+      app: "not_ready",
+      status: "not_ready",
+      db: "failed",
+      schema: startupStatus.schema,
+      smtp: startupStatus.smtp,
+      compatibilityId: startupStatus.compatibilityId
+    });
   }
 });
 
@@ -14793,7 +15088,8 @@ function getBackupRetentionCount() {
 }
 
 function isAutoBackupEnabled() {
-  return String(process.env.BACKUP_AUTO_ENABLED || "true").trim().toLowerCase() !== "false";
+  if (isProductionRuntime()) return false;
+  return parseEnvBoolean(process.env.BACKUP_AUTO_ENABLED, false);
 }
 
 function listBackupFiles() {
@@ -14974,6 +15270,9 @@ app.get("/backup/download", authMiddleware, checkRole(["OWNER"]), async (req, re
 });
 
 app.post("/backup/restore", authMiddleware, checkRole(["OWNER"]), async (req, res) => {
+  if (isProductionRuntime()) {
+    return res.status(404).json({ success: false, message: "Route not found" });
+  }
   if (isSuperAdminUser(req.user)) return sendSuperAdminReadOnlyError(res);
   if (String(req.body?.confirm || req.body?.CONFIRM_RESTORE || "").trim().toUpperCase() !== "YES") {
     return res.status(400).json({ success: false, message: "Restore blocked. Set confirm=YES to continue." });
@@ -18038,19 +18337,21 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   const cleanLot = normalizeProcessLotNo(lotNo);
   if (!cleanLot) return { ok: true };
 
-  const stickerWeight = toNumber(nextWeight);
+  const stickerWeightMillis = decimalToThousandths(nextWeight);
   const stickerQty = toNumber(nextQty);
-  if (stickerWeight < 0) {
+  if (stickerWeightMillis === null || stickerWeightMillis <= 0) {
     return {
       ok: false,
-      message: "Weight cannot be negative"
+      message: stickerWeightMillis === 0
+        ? "Sticker weight must be greater than zero"
+        : "Sticker weight must be a positive number with at most 3 decimal places"
     };
   }
 
-  if (stickerQty <= 0) {
+  if (!Number.isInteger(stickerQty) || stickerQty <= 0) {
     return {
       ok: false,
-      message: "Sticker quantity must be greater than zero"
+      message: "Sticker quantity must be a positive whole number"
     };
   }
 
@@ -18058,35 +18359,36 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   if (!allowance.ok) return allowance;
   if (allowance.isManualLot) return { ok: true, ...allowance };
 
-  const totalWeight = allowance.usedStickerWeight + stickerWeight;
+  const usedWeightMillis = decimalToThousandths(format3(allowance.usedStickerWeight)) || 0;
+  const allowedWeightMillis = decimalToThousandths(format3(allowance.billableAllowedWeight)) || 0;
+  const totalWeightMillis = usedWeightMillis + stickerWeightMillis;
   const totalQty = allowance.usedQty + stickerQty;
-  const allowedWeight = allowance.billableAllowedWeight;
   const allowedQty = allowance.allowedQty;
-  const remainingBillableWeight = Math.max(allowedWeight - allowance.usedStickerWeight, 0);
+  const remainingBillableWeight = thousandthsToNumber(Math.max(allowedWeightMillis - usedWeightMillis, 0));
 
   if (allowedQty > 0 && !qtyProvided) {
     return {
+      ...allowance,
       ok: false,
       message: "Sticker quantity is required when quantity tracking is active",
-      ...allowance,
       remainingBillableWeight
     };
   }
 
-  if (allowedWeight > 0 && totalWeight > allowedWeight + 0.0005) {
+  if (allowedWeightMillis > 0 && totalWeightMillis > allowedWeightMillis) {
     return {
+      ...allowance,
       ok: false,
-      message: `Sticker weight exceeds ${allowance.laminationGainWeight > 0 ? "approved lamination billable allowance" : "final process output"} for lot ${cleanLot}. Allowed ${allowedWeight.toFixed(3)}g, attempted ${totalWeight.toFixed(3)}g.`,
-      ...allowance,
+      message: `Sticker weight exceeds ${allowance.laminationGainWeight > 0 ? "approved lamination billable allowance" : "final process output"} for lot ${cleanLot}. Allowed ${thousandthsToNumber(allowedWeightMillis).toFixed(3)}g, attempted ${thousandthsToNumber(totalWeightMillis).toFixed(3)}g.`,
       remainingBillableWeight
     };
   }
 
-  if (allowedQty > 0 && totalQty > allowedQty + 0.0005) {
+  if (allowedQty > 0 && totalQty > allowedQty) {
     return {
+      ...allowance,
       ok: false,
       message: `Sticker quantity exceeds final process output for lot ${cleanLot}. Allowed ${allowedQty}, attempted ${totalQty}.`,
-      ...allowance,
       remainingBillableWeight
     };
   }
@@ -18110,6 +18412,7 @@ async function getStickerBillableAllowance(connection, companyId, lotNo, exclude
       AND lot_no = ?
       AND UPPER(COALESCE(status, 'OPEN')) = 'COMPLETED'
     ORDER BY id ASC
+    FOR UPDATE
     `,
     [companyId, cleanLot]
   );
@@ -18174,21 +18477,31 @@ async function getStickerBillableAllowance(connection, companyId, lotNo, exclude
 
   const [usageRows] = await connection.query(
     `
-    SELECT COALESCE(SUM(COALESCE(NULLIF(billable_weight, 0), weight)), 0) AS used_weight,
-      COALESCE(SUM(COALESCE(NULLIF(actual_weight, 0), weight)), 0) AS used_actual_weight,
-      COALESCE(SUM(qty), 0) AS used_qty
+    SELECT
+      COALESCE(NULLIF(billable_weight, 0), weight) AS used_weight,
+      COALESCE(NULLIF(actual_weight, 0), weight) AS used_actual_weight,
+      COALESCE(qty, 0) AS used_qty
     FROM stock
     WHERE company_id = ?
       AND lot_number = ?
       AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
       ${excludeSql}
+    FOR UPDATE
     `,
     params
   );
 
-  const usedWeight = toNumber(usageRows[0]?.used_weight);
-  const usedActualWeight = toNumber(usageRows[0]?.used_actual_weight);
-  const usedQty = toNumber(usageRows[0]?.used_qty);
+  const usedWeightMillis = usageRows.reduce(
+    (total, row) => total + (decimalToThousandths(format3(row.used_weight)) || 0),
+    0
+  );
+  const usedActualWeightMillis = usageRows.reduce(
+    (total, row) => total + (decimalToThousandths(format3(row.used_actual_weight)) || 0),
+    0
+  );
+  const usedWeight = thousandthsToNumber(usedWeightMillis);
+  const usedActualWeight = thousandthsToNumber(usedActualWeightMillis);
+  const usedQty = usageRows.reduce((total, row) => total + toNumber(row.used_qty), 0);
   return {
     ok: true,
     isManualLot: false,
@@ -19068,6 +19381,13 @@ async function getNextProcessStepContext(connection, companyId, lotNo, workCateg
 
   const openStep = await getOpenProcessStep(connection, companyId, processLot.id, excludeStepId);
   if (openStep) {
+    if (toNumber(openStep.input_weight) <= 0) {
+      return {
+        ok: false,
+        message: "Open process step has invalid input weight. Correct it from the previous completed step before continuing.",
+        processLot
+      };
+    }
     return {
       ok: false,
       message: "Previous process step is still OPEN. Complete it before starting the next step.",
@@ -19097,12 +19417,26 @@ async function getNextProcessStepContext(connection, companyId, lotNo, workCateg
     };
   }
 
+  const inheritedInputWeight = lastCompletedStep
+    ? toNumber(lastCompletedStep.output_weight)
+    : toNumber(processLot.raw_weight);
+  if (inheritedInputWeight <= 0) {
+    return {
+      ok: false,
+      message: lastCompletedStep
+        ? "Previous completed process step must have output weight greater than zero before starting the next step."
+        : "Process lot raw weight must be greater than zero before starting the first step.",
+      processLot,
+      lastCompletedStep
+    };
+  }
+
   return {
     ok: true,
     processLot,
     lastCompletedStep,
     nextStepNo,
-    inputWeight: lastCompletedStep ? toNumber(lastCompletedStep.output_weight) : toNumber(processLot.raw_weight),
+    inputWeight: inheritedInputWeight,
     inputQty: lastCompletedStep ? toNumber(lastCompletedStep.output_qty) : toNumber(processLot.expected_total_qty),
     source: lastCompletedStep ? "PREVIOUS_PROCESS_OUTPUT" : "PROCESS_LOT_RAW_WEIGHT"
   };
@@ -19261,11 +19595,7 @@ app.get("/process/recovery-stock", authMiddleware, async (req, res) => {
 
 app.get("/process/additive-issues", authMiddleware, async (req, res) => {
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: true
-    });
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
 
     if (!access.ok) {
       return sendAccessError(res, access);
@@ -19322,7 +19652,9 @@ app.get("/process/additive-issues", authMiddleware, async (req, res) => {
     const totalGiven = issues.reduce((sum, issue) => sum + issue.givenWeight, 0);
     const totalReturned = issues.reduce((sum, issue) => sum + issue.returnedWeight, 0);
     const usedAdditiveWeight = Math.max(totalGiven - totalReturned, 0);
-    const additiveStockItem = await findAdditiveStockItemForCompany(pool, access.companyScope, requestedMaterialType);
+    const additiveStockItem = await findAdditiveStockItemForCompany(pool, access.companyScope, requestedMaterialType, {
+      branchId: access.isBranchLocked ? access.userBranchId : null
+    });
     const availableAdditiveStock = toNumber(additiveStockItem?.weight);
 
     return res.json({
@@ -19353,11 +19685,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: true
-    });
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
 
     if (!access.ok) {
       return sendAccessError(res, access);
@@ -19373,6 +19701,9 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     const karigarName = normalizeKarigarName(req.body.karigar || req.body.karigarName || req.body.karigar_name || "");
     const requestedMaterialLabel = String(req.body.materialLabel || req.body.material_label || req.body.additiveMaterialLabel || "").trim();
     const notes = String(req.body.notes || req.body.note || "").trim();
+    const idempotencyKey = String(
+      req.body.idempotencyKey || req.body.idempotency_key || req.get("x-idempotency-key") || ""
+    ).trim().slice(0, 120) || null;
 
     if (!stepId) {
       return res.status(400).json({
@@ -19446,7 +19777,10 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
     const materialLabel = materialType;
     const finalKarigarId = karigarId ?? step.karigar_id ?? null;
     const finalKarigarName = karigarName || step.karigar_name || "";
-    const additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, { forUpdate: true });
+    const additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, {
+      forUpdate: true,
+      branchId: access.isBranchLocked ? access.userBranchId : null
+    });
     const availableAdditiveStockBefore = toNumber(additiveStockItem?.weight);
 
     if (!additiveStockItem) {
@@ -19455,6 +19789,50 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         success: false,
         message: `Only 0.000g ${materialType} available. ${parsedGiven.value.toFixed(3)}g shortage.`
       });
+    }
+
+    if (idempotencyKey) {
+      const [existingIssueRows] = await connection.query(
+        `
+        SELECT *
+        FROM process_step_additive_issues
+        WHERE company_id = ?
+          AND idempotency_key = ?
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [access.companyScope, idempotencyKey]
+      );
+
+      if (existingIssueRows.length) {
+        const existingIssue = normalizeAdditiveIssueRow(existingIssueRows[0]);
+        if (
+          Number(existingIssue.process_step_id || 0) !== stepId ||
+          Math.abs(Number(existingIssue.givenWeight || 0) - parsedGiven.value) > 0.0005 ||
+          normalizeAdditiveMaterialType(existingIssue.materialLabel) !== materialType
+        ) {
+          await connection.rollback();
+          return res.status(409).json({
+            success: false,
+            message: "This additive issue request key was already used for different data"
+          });
+        }
+
+        const totals = await getProcessStepAdditiveIssueTotals(connection, access.companyScope, stepId);
+        await connection.commit();
+        return res.json({
+          success: true,
+          reused: true,
+          message: `${materialType} issue already saved`,
+          issue: existingIssue,
+          materialType,
+          materialLabel,
+          availableAdditiveStock: availableAdditiveStockBefore,
+          availableKdmStock: materialType === "KDM" ? availableAdditiveStockBefore : 0,
+          usedAdditiveWeight: totals.additiveUsedWeight,
+          projectedAllowedOutput: toNumber(step.input_weight) + totals.additiveUsedWeight
+        });
+      }
     }
 
     if (availableAdditiveStockBefore + 0.0005 < parsedGiven.value) {
@@ -19473,10 +19851,10 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
       INSERT INTO process_step_additive_issues
       (
         company_id, process_step_id, lot_no, karigar_id, karigar_name,
-        material_label, given_weight, returned_weight, used_weight, stock_item_id, status,
+        material_label, given_weight, returned_weight, used_weight, stock_item_id, idempotency_key, status,
         issued_by, issued_at, notes
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, ?, ?, 'ISSUED', ?, NOW(), ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0.000, ?, ?, ?, 'ISSUED', ?, NOW(), ?)
       `,
       [
         access.companyScope,
@@ -19488,6 +19866,7 @@ app.post("/process/steps/:id/additive-issue", authMiddleware, checkRole(["SUPERA
         parsedGiven.value,
         parsedGiven.value,
         Number(additiveStockItem.id || 0),
+        idempotencyKey,
         access.actingUserId,
         notes
       ]
@@ -19569,11 +19948,7 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
   let connection;
 
   try {
-    const access = await resolveAccessContext(req, {
-      requireActingUser: true,
-      requireCompanyScope: true,
-      allowSuperAdminAll: true
-    });
+    const access = await resolveBranchAccessContext(req, { requireCompanyScope: true });
 
     if (!access.ok) {
       return sendAccessError(res, access);
@@ -19688,10 +20063,16 @@ app.put("/process/additive-issues/:id/return", authMiddleware, checkRole(["SUPER
     }
 
     let additiveStockItem = issue.stockItemId
-      ? await getAdditiveStockItemById(connection, access.companyScope, issue.stockItemId, materialType, { forUpdate: true })
+      ? await getAdditiveStockItemById(connection, access.companyScope, issue.stockItemId, materialType, {
+          forUpdate: true,
+          branchId: access.isBranchLocked ? access.userBranchId : null
+        })
       : null;
     if (!additiveStockItem) {
-      additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, { forUpdate: true });
+      additiveStockItem = await findAdditiveStockItemForCompany(connection, access.companyScope, materialType, {
+        forUpdate: true,
+        branchId: access.isBranchLocked ? access.userBranchId : null
+      });
     }
 
     if (!additiveStockItem) {
@@ -20348,6 +20729,46 @@ app.post("/process/steps", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "ST
         message: context.message,
         openStep: context.openStep || null
       });
+    }
+
+    const templateContext = await getProcessTemplateStepsForLot(connection, companyId, context.processLot);
+    const templateSteps = templateContext.steps || [];
+    if (templateSteps.length) {
+      const [completedStepRows] = await connection.query(
+        `
+        SELECT process_name
+        FROM process_steps
+        WHERE company_id = ?
+          AND process_lot_id = ?
+          AND status = 'COMPLETED'
+        ORDER BY step_no ASC, id ASC
+        `,
+        [companyId, context.processLot.id]
+      );
+      const completedNameSet = new Set(
+        completedStepRows
+          .map((row) => normalizeTemplateStepName(row.process_name))
+          .filter(Boolean)
+      );
+      const expectedTemplateStep = templateSteps.find((step) => {
+        return !completedNameSet.has(normalizeTemplateStepName(step.stepName));
+      }) || null;
+
+      if (!expectedTemplateStep) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "All configured process steps are already completed for this lot"
+        });
+      }
+
+      if (normalizeTemplateStepName(processName) !== normalizeTemplateStepName(expectedTemplateStep.stepName)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Complete process step "${expectedTemplateStep.stepName}" next`
+        });
+      }
     }
 
     let selectedRecoveryRows = [];
@@ -23599,6 +24020,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
     const refundCashAmount = toNumber(preview.estimatedRefundCashAmount);
     const refundMetalWeight = toNumber(preview.estimatedRefundMetalWeight);
     const refundModeHint = String(preview.refundModeHint || "UNKNOWN").trim().toUpperCase();
+    const payableStatus = getInitialRefundPayableStatus(refundCashAmount, refundMetalWeight);
     const nextStockStatus = returnType === "RETURN_TO_STOCK" ? "IN_STOCK" : "DAMAGED_RETURN";
 
     if (returnType === "RETURN_TO_STOCK") {
@@ -23661,7 +24083,8 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
       branchId: persistedBranchId,
       refundCashAmount,
       refundMetalWeight,
-      refundModeHint
+      refundModeHint,
+      payableStatus
     });
 
     const [returnInsert] = await connection.query(
@@ -23734,7 +24157,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
         created_at,
         updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, 'OPEN', ?, ?, NOW(), NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, ?, ?, NOW(), NOW())
       `,
       [
         finalCompanyId,
@@ -23750,6 +24173,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
         refundMetalWeight,
         refundMetalWeight,
         refundModeHint,
+        payableStatus,
         preview.settlementSummary?.paymentStatus || "",
         access.actingUserId
       ]
@@ -23822,7 +24246,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
         refundCashAmount,
         refundMetalWeight,
         refundModeHint,
-        payableStatus: "OPEN"
+        payableStatus
       },
       sourceTable: "return_refund_payables",
       sourceId: payableInsert.insertId,
@@ -23860,7 +24284,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
         refundCashAmount,
         refundMetalWeight,
         refundModeHint,
-        payableStatus: "OPEN",
+        payableStatus,
         stockStatus: nextStockStatus,
         stockState: nextStockStatus
       }
@@ -23870,7 +24294,9 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
 
     return res.status(201).json({
       success: true,
-      message: "Refund payable created successfully. No refund payout has been posted.",
+      message: payableStatus === "SETTLED"
+        ? "Paid sale return saved successfully. No cash or metal refund is due."
+        : "Refund payable created successfully. No refund payout has been posted.",
       returnId: returnInsert.insertId,
       payableId: payableInsert.insertId,
       transactionId: transactionPosting.transactionId,
@@ -23885,7 +24311,7 @@ app.post("/returns/create-refund-payable", authMiddleware, checkRole(["SUPERADMI
         settled_metal_weight: 0,
         remaining_metal_weight: refundMetalWeight,
         refund_mode_hint: refundModeHint,
-        payable_status: "OPEN"
+        payable_status: payableStatus
       }
     });
   } catch (error) {
@@ -25824,14 +26250,20 @@ function normalizeStickerSaveItem(item = {}, index = 0) {
   }
 
   const parsedWeight = parseRequiredNumber(item.weight, `${rowLabel} weight`);
-  if (!parsedWeight.ok || parsedWeight.value < 0) {
-    throw createStickerBulkError(`${rowLabel}: ${parsedWeight.ok ? "Weight cannot be negative" : parsedWeight.message}`);
+  const weightMillis = decimalToThousandths(item.weight);
+  if (!parsedWeight.ok || weightMillis === null || weightMillis <= 0) {
+    const message = !parsedWeight.ok
+      ? parsedWeight.message
+      : weightMillis === 0
+        ? "Sticker weight must be greater than zero"
+        : "Sticker weight must be a positive number with at most 3 decimal places";
+    throw createStickerBulkError(`${rowLabel}: ${message}`);
   }
 
   const qtyProvided = hasProvidedValue(item.qty);
   const parsedQty = parseOptionalNumber(item.qty, `${rowLabel} quantity`, 1);
-  if (!parsedQty.ok || parsedQty.value <= 0) {
-    throw createStickerBulkError(`${rowLabel}: ${parsedQty.ok ? "Sticker quantity must be greater than zero" : parsedQty.message}`);
+  if (!parsedQty.ok || !Number.isInteger(parsedQty.value) || parsedQty.value <= 0) {
+    throw createStickerBulkError(`${rowLabel}: ${parsedQty.ok ? "Sticker quantity must be a positive whole number" : parsedQty.message}`);
   }
 
   return {
@@ -25843,7 +26275,8 @@ function normalizeStickerSaveItem(item = {}, index = 0) {
     sku,
     mm,
     size,
-    weight: Number(format3(parsedWeight.value)),
+    weight: thousandthsToNumber(weightMillis),
+    weightMillis,
     qty: parsedQty.value,
     qtyProvided,
     lot,
@@ -25876,10 +26309,9 @@ async function validateStickerSaveItemAgainstStock(connection, companyId, item, 
   const [dupLotSerial] = await connection.query(
     `
     SELECT id FROM stock
-    WHERE lot_number = ?
-      AND serial = ?
+    WHERE UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
+      AND UPPER(TRIM(COALESCE(serial, ''))) = UPPER(TRIM(?))
       AND company_id = ?
-      AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
     LIMIT 1
     FOR UPDATE
     `,
@@ -25985,7 +26417,8 @@ async function insertStickerStockRow(connection, item, {
     },
     sourceTable: "stock",
     sourceId: stockId,
-    createdBy: userId
+    createdBy: userId,
+    strict: true
   });
 
   return stockId;
@@ -26027,8 +26460,6 @@ app.get("/stickers/check-serial", authMiddleware, async (req, res) => {
       WHERE company_id = ?
         AND UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
         AND UPPER(TRIM(COALESCE(serial, ''))) = UPPER(TRIM(?))
-        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
-        AND deleted_at IS NULL
         ${ignoreSql}
       LIMIT 1
       `,
@@ -26074,8 +26505,6 @@ app.get("/stickers/next-serial", authMiddleware, async (req, res) => {
       WHERE company_id = ?
         AND UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
         AND TRIM(COALESCE(serial, '')) <> ''
-        AND UPPER(COALESCE(status, 'IN_STOCK')) <> 'DELETED'
-        AND deleted_at IS NULL
       `,
       [access.companyScope, lot]
     );
@@ -26156,11 +26585,11 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
       const lotKey = normalizeProcessLotNo(item.lot);
       const total = lotTotals.get(lotKey) || {
         lot: item.lot,
-        weight: 0,
+        weightMillis: 0,
         qty: 0,
         qtyProvided: true
       };
-      total.weight += item.weight;
+      total.weightMillis += item.weightMillis;
       total.qty += item.qty;
       total.qtyProvided = total.qtyProvided && item.qtyProvided;
       lotTotals.set(lotKey, total);
@@ -26178,17 +26607,16 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
       throw createStickerBulkError(activeStockBranch.message || "Branch is inactive", activeStockBranch.status || 400);
     }
 
-    for (const item of normalizedItems) {
-      await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item, { req, access });
-    }
-
     const stickerAllowanceByLot = new Map();
-    for (const total of lotTotals.values()) {
+    const orderedLotTotals = [...lotTotals.values()].sort((left, right) =>
+      normalizeProcessLotNo(left.lot).localeCompare(normalizeProcessLotNo(right.lot))
+    );
+    for (const total of orderedLotTotals) {
       const stickerLimit = await validateStickerAgainstProcessOutput(
         connection,
         finalCompanyId,
         total.lot,
-        Number(format3(total.weight)),
+        thousandthsToNumber(total.weightMillis),
         total.qty,
         null,
         total.qtyProvided
@@ -26197,6 +26625,10 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
         throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
       }
       stickerAllowanceByLot.set(normalizeProcessLotNo(total.lot), stickerLimit);
+    }
+
+    for (const item of normalizedItems) {
+      await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item, { req, access });
     }
 
     const processLotByLot = new Map();
@@ -26242,6 +26674,8 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
 });
 
 app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+
   try {
     const access = await resolveBranchAccessContext(req, {
       requireCompanyScope: true
@@ -26256,210 +26690,46 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
     const stockPermission = await requireBranchOperationalPermission(pool, req, res, access, "canMutateStock", "ADD_STICKER");
     if (!stockPermission.ok) return;
 
-    const {
-      serial,
-      productName,
-      purity,
-      sku,
-      mm,
-      size,
-      weight,
-      lot,
-      metalType,
-      processType,
-      barcode,
-      qty,
-      companyId
-    } = req.body;
-
     const finalCompanyId = access.companyScope;
     const finalUserId = access.actingUserId ?? getRequestedUserId(req);
-    const stockBranch = await resolveStockCreationBranch(pool, access, req);
+    const item = normalizeStickerSaveItem(req.body || {}, 0);
 
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const stockBranch = await resolveStockCreationBranch(connection, access, req);
     if (!stockBranch.ok) {
-      return res.status(stockBranch.status || 400).json({
-        success: false,
-        message: stockBranch.message || "Stock branch could not be resolved"
-      });
+      throw createStickerBulkError(stockBranch.message || "Stock branch could not be resolved", stockBranch.status || 400);
     }
-    const activeStockBranch = await requireActiveBranchForCompany(pool, finalCompanyId, stockBranch.branchId);
+    const activeStockBranch = await requireActiveBranchForCompany(connection, finalCompanyId, stockBranch.branchId);
     if (!activeStockBranch.ok) {
-      return res.status(activeStockBranch.status || 400).json({
-        success: false,
-        message: activeStockBranch.message || "Branch is inactive"
-      });
-    }
-
-    if (!serial || !productName || !purity || !sku || !size || !hasProvidedValue(weight) || !lot || !barcode) {
-      return res.json({
-        success: false,
-        message: "Serial, product, purity, SKU, size, weight, lot, and barcode are required"
-      });
-    }
-
-    const cleanLot = String(lot).trim();
-    const cleanSerial = String(serial).trim();
-    const cleanBarcode = String(barcode).trim();
-    await ensureSingleStockBarcode(finalCompanyId, cleanBarcode);
-
-    const parsedWeight = parseRequiredNumber(weight, "Sticker weight");
-    if (!parsedWeight.ok || parsedWeight.value < 0) {
-      return res.json({
-        success: false,
-        message: parsedWeight.ok ? "Weight cannot be negative" : parsedWeight.message
-      });
-    }
-
-    const qtyProvided = hasProvidedValue(qty);
-    const parsedQty = parseOptionalNumber(qty, "Sticker quantity", 1);
-    if (!parsedQty.ok || parsedQty.value <= 0) {
-      return res.json({
-        success: false,
-        message: parsedQty.ok ? "Sticker quantity must be greater than zero" : parsedQty.message
-      });
-    }
-
-    const [dupLotSerial] = await pool.query(
-      `
-      SELECT id FROM stock
-      WHERE lot_number = ?
-        AND serial = ?
-        AND company_id = ?
-        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
-      LIMIT 1
-      `,
-      [cleanLot, cleanSerial, finalCompanyId]
-    );
-
-    if (dupLotSerial.length > 0) {
-      return res.json({
-        success: false,
-        message: `Serial ${cleanSerial} already exists in lot ${cleanLot}`
-      });
+      throw createStickerBulkError(activeStockBranch.message || "Branch is inactive", activeStockBranch.status || 400);
     }
 
     const stickerLimit = await validateStickerAgainstProcessOutput(
-      pool,
+      connection,
       finalCompanyId,
-      cleanLot,
-      Number(format3(parsedWeight.value)),
-      parsedQty.value,
+      item.lot,
+      item.weight,
+      item.qty,
       null,
-      qtyProvided
+      item.qtyProvided
     );
     if (!stickerLimit.ok) {
-      return res.json({
-        success: false,
-        message: stickerLimit.message,
-        stickerAllowance: stickerLimit
-      });
+      throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
     }
 
-    const stickerProcessLot = await getProcessLotForSteps(pool, finalCompanyId, cleanLot);
-    const isManualStickerLot = isManualProcessLot(stickerProcessLot);
-    const commercialWeights = getStickerCommercialWeights({ weight: Number(format3(parsedWeight.value)) }, stickerLimit);
+    await validateStickerSaveItemAgainstStock(connection, finalCompanyId, item, { req, access });
 
-    await assertActiveBarcodeAvailable(finalCompanyId, {
-      barcode: cleanBarcode,
-      status: "IN_STOCK",
-      stock_state: "IN_STOCK",
-      source: isManualStickerLot ? "MANUAL_ENTRY" : "",
-      process_type: String(processType || "").trim(),
-      product_name: String(productName).trim(),
-      invoice_number: "",
-      deleted_at: null
-    }, {
-      db: pool,
-      req,
-      access,
-      context: "ADD_STICKER"
-    });
-
-    const [insertResult] = await pool.query(
-      `
-      INSERT INTO stock (
-        serial,
-        product_name,
-        purity,
-        sku,
-        mm,
-        size,
-        weight,
-        actual_weight,
-        billable_weight,
-        lamination_gain_weight,
-        qty,
-        lot_number,
-        barcode,
-        metal_type,
-        process_type,
-        source,
-        manual_lot_id,
-        status,
-        stock_state,
-        current_branch_id,
-        company_id,
-        created_by,
-        deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        cleanSerial,
-        String(productName).trim(),
-        String(purity).trim(),
-        String(sku).trim(),
-        String(mm || "").trim(),
-        String(size).trim(),
-        Number(format3(parsedWeight.value)),
-        commercialWeights.actualWeight,
-        commercialWeights.billableWeight,
-        commercialWeights.laminationGainWeight,
-        parsedQty.value,
-        cleanLot,
-        cleanBarcode,
-        String(metalType || "").trim(),
-        String(processType || "").trim(),
-        isManualStickerLot ? "MANUAL_ENTRY" : "",
-        isManualStickerLot ? Number(stickerProcessLot.id || 0) || null : null,
-        "IN_STOCK",
-        "IN_STOCK",
-        stockBranch.branchId,
-        finalCompanyId,
-        finalUserId,
-        null
-      ]
-    );
-
-    const stockId = Number(insertResult?.insertId || 0) || null;
-    await appendBarcodeLifecycleEvent(pool, {
+    const stickerProcessLot = await getProcessLotForSteps(connection, finalCompanyId, item.lot);
+    await insertStickerStockRow(connection, item, {
       companyId: finalCompanyId,
-      barcode: cleanBarcode,
-      stockId,
-      lotNo: cleanLot,
-      serial: cleanSerial,
-      processLotId: isManualStickerLot ? null : stickerProcessLot?.id,
+      userId: finalUserId,
       branchId: stockBranch.branchId,
-      eventType: BARCODE_LIFECYCLE_EVENT_TYPES.STICKER_CREATED,
-      eventTitle: "Sticker Created",
-      eventDescription: "Sticker stock row created",
-      eventPayload: {
-        productName: String(productName).trim(),
-        sku: String(sku).trim(),
-        purity: String(purity).trim(),
-        size: String(size).trim(),
-        weight: Number(format3(parsedWeight.value)),
-        actualWeight: commercialWeights.actualWeight,
-        billableWeight: commercialWeights.billableWeight,
-        laminationGainWeight: commercialWeights.laminationGainWeight,
-        qty: parsedQty.value,
-        metalType: String(metalType || "").trim(),
-        processType: String(processType || "").trim(),
-        source: isManualStickerLot ? "MANUAL_ENTRY" : "PROCESS_STICKER"
-      },
-      sourceTable: "stock",
-      sourceId: stockId,
-      createdBy: finalUserId
+      processLot: stickerProcessLot,
+      stickerAllowance: stickerLimit
     });
+    await connection.commit();
 
     return res.json({
       success: true,
@@ -26467,12 +26737,21 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       stickerAllowance: stickerLimit
     });
   } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
     console.error("Add sticker error:", err);
-    return res.status(getBarcodeSafetyStatus(err)).json({
+    const status = err?.isStickerBulkError ? Number(err.status || 400) : getBarcodeSafetyStatus(err);
+    return res.status(status).json({
       success: false,
-      message: getBarcodeSafetyMessage(err, "Add sticker failed"),
-      error: err.message
+      message: err?.isStickerBulkError ? err.message : getBarcodeSafetyMessage(err, "Add sticker failed"),
+      stickerAllowance: err?.isStickerBulkError ? err.details || null : null,
+      error: getErrorDetail(err)
     });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -26594,11 +26873,10 @@ app.put("/updateSticker/:barcode", authMiddleware, checkRole(["SUPERADMIN", "OWN
     const [dupLotSerial] = await pool.query(
       `
       SELECT id FROM stock
-      WHERE lot_number = ?
-        AND serial = ?
+      WHERE UPPER(TRIM(COALESCE(lot_number, ''))) = UPPER(TRIM(?))
+        AND UPPER(TRIM(COALESCE(serial, ''))) = UPPER(TRIM(?))
         AND company_id = ?
         AND id <> ?
-        AND UPPER(COALESCE(status, 'IN_STOCK')) = 'IN_STOCK'
       LIMIT 1
       `,
       [cleanLot, cleanSerial, finalCompanyId, currentId]
@@ -27718,6 +27996,90 @@ app.get("/invoice-drafts/:id/billing", authMiddleware, async (req, res) => {
 /* =========================
    SAVE INVOICE
 ========================= */
+function getPrivateCreateWebsiteSaleTransportConfig() {
+  const ttlSeconds = Number(process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_TTL_SECONDS || "60");
+  return {
+    environment: isProductionRuntime() ? "production" : "development",
+    enabled: process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_ENABLED === "true",
+    secret: String(process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_SECRET || ""),
+    issuer: String(process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_ISSUER || "commerce-adapter"),
+    audience: String(process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_AUDIENCE || "erp-create-website-sale"),
+    keyId: String(process.env.ERP_CREATE_WEBSITE_SALE_VALIDATION_KEY_ID || "create-website-sale-validate-v1"),
+    ttlMs: Number.isInteger(ttlSeconds) && ttlSeconds >= 1 && ttlSeconds <= 300 ? ttlSeconds * 1000 : 0,
+    clockSkewMs: 30_000
+  };
+}
+
+const websiteSaleIdentityReadRepository = Object.freeze({
+  async findByExecution(companyId, externalExecutionId) {
+    const [rows] = await pool.query(
+      `SELECT company_id, source, external_execution_id, external_website_order_id, canonical_digest,
+              execution_state, execution_attempt_id, execution_lease_expires_at, execution_started_at,
+              execution_completed_at, sale_id, invoice_number, result_digest, failure_code,
+              last_reconciled_at, created_at, updated_at
+       FROM website_sale_execution_identities
+       WHERE company_id = ? AND source = 'WEBSITE' AND external_execution_id = ?
+       LIMIT 1`,
+      [companyId, externalExecutionId]
+    );
+    return rows[0] || null;
+  },
+  async findByWebsiteOrder(companyId, websiteOrderId) {
+    const [rows] = await pool.query(
+      `SELECT company_id, source, external_execution_id, external_website_order_id, canonical_digest,
+              execution_state, execution_attempt_id, execution_lease_expires_at, execution_started_at,
+              execution_completed_at, sale_id, invoice_number, result_digest, failure_code,
+              last_reconciled_at, created_at, updated_at
+       FROM website_sale_execution_identities
+       WHERE company_id = ? AND source = 'WEBSITE' AND external_website_order_id = ?
+       LIMIT 1`,
+      [companyId, websiteOrderId]
+    );
+    return rows[0] || null;
+  }
+});
+
+const privateWebsiteSaleTransport = createPrivateCreateWebsiteSaleTransport({
+  config: getPrivateCreateWebsiteSaleTransportConfig(),
+  identities: websiteSaleIdentityReadRepository
+});
+
+function sendPrivateCreateWebsiteSaleError(res, error) {
+  if (error instanceof PrivateCreateWebsiteSaleError) {
+    return res.status(error.status).json({ success: false, code: error.code, message: error.message });
+  }
+  console.error("Private CreateWebsiteSale transport error:", error);
+  return res.status(500).json({ success: false, code: "CREATE_WEBSITE_SALE_TRANSPORT_ERROR", message: "Private transport unavailable" });
+}
+
+app.post("/internal/integration/create-website-sale/validate", async (req, res) => {
+  try {
+    const result = await privateWebsiteSaleTransport.validate({
+      assertion: req.get("x-erp-create-website-sale-assertion"),
+      requestId: req.get("x-request-id") || "",
+      origin: req.get("origin"),
+      payload: req.body
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    return sendPrivateCreateWebsiteSaleError(res, error);
+  }
+});
+
+app.post("/internal/integration/create-website-sale/reconciliation", async (req, res) => {
+  try {
+    const result = await privateWebsiteSaleTransport.reconcile({
+      assertion: req.get("x-erp-create-website-sale-assertion"),
+      requestId: req.get("x-request-id") || "",
+      origin: req.get("origin"),
+      payload: req.body
+    });
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    return sendPrivateCreateWebsiteSaleError(res, error);
+  }
+});
+
 app.post("/saveInvoice", authMiddleware, checkRole(["SUPERADMIN", "OWNER"]), async (req, res) => {
   return res.status(410).json({
     success: false,
@@ -35204,6 +35566,9 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
     const toBranchId = parsePositiveInteger(req.body?.to_branch_id ?? req.body?.toBranchId);
     const challanNo = String(req.body?.challan_no ?? req.body?.challanNo ?? "").trim().slice(0, 80);
     const notes = String(req.body?.notes ?? "").trim();
+    const idempotencyKey = String(
+      req.body?.idempotency_key ?? req.body?.idempotencyKey ?? req.body?.request_id ?? req.body?.requestId ?? ""
+    ).trim().slice(0, 120);
 
     if (!fromBranchId || !toBranchId) {
       return res.status(400).json({
@@ -35228,6 +35593,30 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
+
+    if (idempotencyKey) {
+      const [existingRows] = await connection.query(
+        `
+        SELECT id
+        FROM branch_transfers
+        WHERE company_id = ?
+          AND idempotency_key = ?
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [access.companyScope, idempotencyKey]
+      );
+      if (existingRows.length) {
+        const existingTransfer = await getTransferForAccess(connection, access, existingRows[0].id);
+        await connection.commit();
+        return res.json({
+          success: true,
+          reused: true,
+          message: "Transfer draft already created",
+          transfer: existingTransfer
+        });
+      }
+    }
 
     const fromBranch = await getBranchForCompany(connection, access.companyScope, fromBranchId);
     const toBranch = await getBranchForCompany(connection, access.companyScope, toBranchId);
@@ -35265,19 +35654,21 @@ app.post("/branch-transfers", authMiddleware, async (req, res) => {
             from_branch_id,
             to_branch_id,
             status,
+            idempotency_key,
             challan_no,
             notes,
             created_by,
             created_at,
             updated_at
           )
-          VALUES (?, ?, ?, ?, 'CREATED', ?, ?, ?, NOW(), NOW())
+          VALUES (?, ?, ?, ?, 'CREATED', ?, ?, ?, ?, NOW(), NOW())
           `,
           [
             access.companyScope,
             transferNo,
             fromBranchId,
             toBranchId,
+            idempotencyKey,
             challanNo || null,
             notes || null,
             access.actingUserId ?? null
@@ -37313,6 +37704,53 @@ app.get("/branches", authMiddleware, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Branches fetch failed",
+      error: getErrorDetail(error)
+    });
+  }
+});
+
+app.get("/branches/transfer-options", authMiddleware, async (req, res) => {
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+
+    if (!access.ok) {
+      return sendAccessError(res, access);
+    }
+
+    const transferPermission = await requireBranchOperationalPermission(
+      pool,
+      req,
+      res,
+      access,
+      "canCreateTransfer",
+      "VIEW_BRANCH_TRANSFER_OPTIONS"
+    );
+    if (!transferPermission.ok) return;
+
+    const [rows] = await pool.query(
+      `
+      SELECT id, branch_code, branch_name, branch_type, status
+      FROM branches
+      WHERE company_id = ?
+        AND UPPER(COALESCE(status, 'ACTIVE')) = 'ACTIVE'
+      ORDER BY branch_type ASC, branch_name ASC, id ASC
+      `,
+      [access.companyScope]
+    );
+
+    return res.json({
+      success: true,
+      branches: rows,
+      branch_locked: access.isBranchLocked,
+      source_branch_id: access.isBranchLocked ? access.userBranchId : null
+    });
+  } catch (error) {
+    console.error("Branch transfer options fetch error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Branch transfer options fetch failed",
       error: getErrorDetail(error)
     });
   }
@@ -40927,6 +41365,7 @@ function appendTransactionReportBranchScope(whereParts, params, branchScope, ali
       )
     )
   `);
+
   params.push(branchScope.branchId, branchScope.branchId, branchScope.branchId);
 }
 
@@ -46707,6 +47146,19 @@ app.get("/transaction/reports/metal-ledger", authMiddleware, async (req, res) =>
   }
 });
 
+registerColourPlantRoutes({
+  app,
+  pool,
+  authMiddleware,
+  checkRole,
+  resolveBranchAccessContext,
+  resolveOperationalBranchScope,
+  getRequestedBranchScopeValue,
+  sendAccessError,
+  logActivitySafe,
+  normalizeRoleValue
+});
+
 /* =========================
    404
 ========================= */
@@ -46732,35 +47184,7 @@ app.use((err, req, res, next) => {
 /* =========================
    START SERVER
 ========================= */
-let server = null;
-
-async function runBackgroundStartupTasks() {
-  try {
-    validateDbStartupEnv();
-    validateSuperAdminStartupEnv();
-    validateJwtStartupEnv();
-    console.log("[STARTUP] Verifying MySQL connection...");
-    await testDbConnection();
-    startupStatus.db = "connected";
-    console.log("[STARTUP] DB connection successful");
-
-    console.log("[STARTUP] Ensuring schema...");
-    await ensureSchema();
-    console.log(
-      "[STARTUP] Schema ready: users, companies, stock, sales_history, sales_items"
-    );
-
-    console.log("[STARTUP] Ensuring SuperAdmin account...");
-    await ensureSuperAdminExists();
-    console.log("[STARTUP] SuperAdmin startup sync completed");
-    scheduleDailyBackups();
-  } catch (error) {
-    startupStatus.db = "failed";
-    console.error("[STARTUP] Fatal DB/schema startup failure:", error);
-    console.error("[STARTUP] Fatal DB/schema error message:", error?.message || error);
-    return;
-  }
-
+async function initializeOptionalSmtp() {
   try {
     await testSmtpConnection();
     if (startupStatus.smtp === "pending") {
@@ -46776,28 +47200,122 @@ async function runBackgroundStartupTasks() {
   }
 }
 
+function hasMaintenanceConfirmation() {
+  return process.argv.slice(3).includes("--confirm");
+}
+
+async function runMigrationCommand() {
+  if (!hasMaintenanceConfirmation()) {
+    throw new Error("Migration not run. Re-run the explicit migration command with --confirm after reviewing the target database.");
+  }
+
+  assertDisposableDatabaseTarget(process.env);
+  validateWebStartupConfiguration();
+  console.log("[MIGRATION] Verifying target database connection.");
+  await testDbConnection();
+  console.log("[MIGRATION] Running the preserved ERP schema and data migration flow.");
+  await ensureSchema();
+  await verifySchemaCompatibility(pool);
+  console.log("[MIGRATION] Schema compatibility verification passed.");
+}
+
+async function runSuperAdminBootstrapCommand() {
+  if (!hasMaintenanceConfirmation()) {
+    throw new Error("SuperAdmin bootstrap not run. Re-run the explicit bootstrap command with --confirm after reviewing the target database.");
+  }
+
+  assertDisposableDatabaseTarget(process.env);
+  validateWebStartupConfiguration();
+  validateSuperAdminStartupEnv();
+  console.log("[ADMIN] Verifying target database and schema compatibility.");
+  await testDbConnection();
+  await verifySchemaCompatibility(pool);
+  await ensureSuperAdminExists();
+  console.log("[ADMIN] Explicit SuperAdmin bootstrap completed.");
+}
+
+async function runMaintenanceCommand(command) {
+  try {
+    if (command === "migrate") {
+      await runMigrationCommand();
+      return;
+    }
+    if (command === "bootstrap-superadmin") {
+      await runSuperAdminBootstrapCommand();
+      return;
+    }
+    throw new Error(`Unknown maintenance command: ${command}`);
+  } finally {
+    await pool.end();
+  }
+}
+
+function listenForTraffic() {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server = app.listen(PORT, "0.0.0.0", () => {
+      server.off("error", onError);
+      resolve();
+    });
+    server.once("error", onError);
+  });
+}
+
 async function bootstrapServer() {
   logPortStartupConfig();
   logDbStartupConfig();
   logSmtpStartupConfig();
   logEnvStatus();
 
-  server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[STARTUP] Server running on port ${PORT}`);
-    runBackgroundStartupTasks().catch((error) => {
-      startupStatus.db = "failed";
-      console.error("[STARTUP] Unhandled background startup failure:", error);
-    });
+  shutdownController = createGracefulShutdownController({
+    getServer: () => server,
+    pool,
+    startupStatus
   });
 
-  server.on("error", (error) => {
-    console.error("[STARTUP] Server failed to start:", error);
-    process.exit(1);
-  });
+  process.once("SIGTERM", () => shutdownController.shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdownController.shutdown("SIGINT"));
+
+  try {
+    validateWebStartupConfiguration();
+    startupStatus.config = "valid";
+
+    await listenForTraffic();
+    console.log(`[STARTUP] Liveness available on port ${PORT}; ERP traffic remains gated until ready.`);
+
+    console.log("[STARTUP] Verifying MySQL connection.");
+    await testDbConnection();
+    startupStatus.db = "connected";
+
+    console.log("[STARTUP] Verifying schema compatibility without modifying it.");
+    await verifySchemaCompatibility(pool);
+    startupStatus.schema = "compatible";
+
+    await initializeOptionalSmtp();
+    startupStatus.ready = true;
+    console.log(`[STARTUP] Server ready on port ${PORT}`);
+
+    if (isAutoBackupEnabled()) scheduleDailyBackups();
+  } catch (error) {
+    startupStatus.ready = false;
+    if (startupStatus.config === "pending") startupStatus.config = "invalid";
+    if (startupStatus.db === "pending") startupStatus.db = "failed";
+    if (startupStatus.schema === "pending" && startupStatus.db === "connected") startupStatus.schema = "incompatible";
+    console.error(`[STARTUP] Startup blocked: ${error?.name || "Error"}: ${error?.message || "Unknown startup failure"}`);
+    await shutdownController.shutdown("startup failure", 1);
+  }
 }
 
-bootstrapServer().catch((error) => {
-  startupStatus.db = "failed";
-  console.error("[STARTUP] Unhandled bootstrap failure:", error);
-  process.exit(1);
+async function main() {
+  const command = String(process.argv[2] || "serve").trim().toLowerCase();
+  if (command === "serve") {
+    await bootstrapServer();
+    return;
+  }
+  await runMaintenanceCommand(command);
+}
+
+main().catch((error) => {
+  console.error(`[STARTUP] Command failed: ${error?.name || "Error"}: ${error?.message || "Unknown failure"}`);
+  process.exitCode = 1;
 });

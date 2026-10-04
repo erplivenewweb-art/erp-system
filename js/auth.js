@@ -13,6 +13,7 @@ const ERP_PAGE_PERMISSION_MAP = {
   sticker: ["SUPERADMIN", "OWNER", "STAFF"],
   stock: ["SUPERADMIN", "OWNER", "STAFF"],
   "material-stock": ["SUPERADMIN", "OWNER", "STAFF"],
+  "colour-plant": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   "daily-report": ["SUPERADMIN", "OWNER", "ACCOUNTS"],
   "sales-history": ["SUPERADMIN", "OWNER", "STAFF", "ACCOUNTS"],
   invoice: ["SUPERADMIN", "OWNER", "STAFF"],
@@ -65,6 +66,7 @@ const ERP_MENU_PAGE_BY_HREF = {
   "sticker.html": "sticker",
   "stock.html": "stock",
   "material-stock.html": "material-stock",
+  "colour-plant.html": "colour-plant",
   "daily-report.html": "daily-report",
   "sales-history.html": "sales-history",
   "invoice.html": "invoice",
@@ -114,7 +116,7 @@ const ERP_MODULE_PREVIEW_EVENT = "erp:module-preview-context";
 const ERP_MODULE_BLOCKED_STORAGE_KEY = "erpModuleAccessBlocked";
 const ERP_ADMIN_ALL_COMPANY_PAGES = new Set(["admin-approval"]);
 const ERP_SUPERADMIN_ALWAYS_VISIBLE_PAGES = new Set(["admin-approval", "company-plans", "company-package-enforcement", "enforcement-qa-dashboard"]);
-const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "transaction-center", "transaction", "transaction-reports", "customer-ledger", "branch-cash-book", "transaction-summary-dashboard", "transaction-reversal", "payment-accounts", "account-ledger", "daily-closing", "party-metal-account", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
+const ERP_COMPANY_REQUIRED_PAGES = new Set(["process", "billing", "stock", "sticker", "colour-plant", "transaction-center", "transaction", "transaction-reports", "customer-ledger", "branch-cash-book", "transaction-summary-dashboard", "transaction-reversal", "payment-accounts", "account-ledger", "daily-closing", "party-metal-account", "branch-management", "reconciliation-dashboard", "lot-commercial-analytics", "barcode-lifecycle"]);
 const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "sales-dashboard",
   "stock",
@@ -132,6 +134,7 @@ const ERP_BRANCH_MANAGER_PAGE_KEYS = new Set([
   "daily-closing",
   "party-metal-account",
   "profit-report",
+  "colour-plant",
   "branch-receive",
   "branch-transfer-history"
 ]);
@@ -143,6 +146,10 @@ const ERP_NAVIGATION_MODES = {
   sales: {
     label: "Store",
     defaultHref: "sales-dashboard.html"
+  },
+  colour: {
+    label: "Colour Plant",
+    defaultHref: "colour-plant.html#dashboard"
   }
 };
 const ERP_NAVIGATION_GROUPS = {
@@ -197,7 +204,16 @@ const ERP_NAVIGATION_ITEMS = [
   { mode: "sales", group: "branch", pageKey: "branch-snapshots", href: "branch-snapshots.html", label: "Branch Snapshots", icon: "fas fa-camera-retro", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", group: "branch", pageKey: "branch-reconciliation-runs", href: "branch-reconciliation-runs.html", label: "Reconciliation Runs", icon: "fas fa-clipboard-check", moduleKey: "BRANCH_AUDIT" },
   { mode: "sales", group: "branch", pageKey: "branch-exception-queue", href: "branch-exception-queue.html", label: "Exception Queue", icon: "fas fa-list-check", moduleKey: "BRANCH_AUDIT" },
-  { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" }
+  { mode: "sales", pageKey: "settings", href: "settings.html", label: "Settings", icon: "fas fa-gear", moduleKey: "SETTINGS" },
+  { mode: "colour", pageKey: "colour-plant", section: "dashboard", href: "colour-plant.html#dashboard", label: "Dashboard", icon: "fas fa-chart-pie", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "receive", href: "colour-plant.html#receive", label: "Receive Material", icon: "fas fa-inbox", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "jobs", href: "colour-plant.html#jobs", label: "Jobs", icon: "fas fa-clipboard-list", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "work-status", href: "colour-plant.html#work-status", label: "Work Status / Ready Jobs", icon: "fas fa-list-check", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "ready", href: "colour-plant.html#ready", label: "Ready / Delivery", icon: "fas fa-box-open", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "payments", href: "colour-plant.html#payments", label: "Payments", icon: "fas fa-wallet", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "history", href: "colour-plant.html#history", label: "Job History", icon: "fas fa-clock-rotate-left", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "reports", href: "colour-plant.html#reports", label: "Reports", icon: "fas fa-chart-line", moduleKey: "COLOUR_PLANT" },
+  { mode: "colour", pageKey: "colour-plant", section: "settings", href: "colour-plant.html#settings", label: "Settings", icon: "fas fa-sliders", moduleKey: "COLOUR_PLANT" }
 ];
 const ERP_PAGE_MODULE_KEYS = {
   dashboard: "DASHBOARD"
@@ -326,30 +342,26 @@ function isAdminUser(user = null) {
 }
 
 function getAllowedNavigationModes(user = getLoggedInUser()) {
-  if (!user) return ["production", "sales"];
-  if (isBranchManagerProfile(user)) return ["sales"];
-  if (isSuperAdmin(user) || isAdminUser(user)) return ["production", "sales"];
+  let roleModes = ["production", "sales", "colour"];
+  if (!user) return roleModes;
+  if (isBranchManagerProfile(user)) roleModes = ["sales", "colour"];
+  else if (isSuperAdmin(user) || isAdminUser(user)) roleModes = ["production", "sales", "colour"];
 
   const normalizedRole = getNormalizedRole(user);
   const rawRole = String(user?.role || "").trim().toLowerCase();
 
-  if (normalizedRole === "accounts") {
-    return ["production", "sales"];
-  }
+  if (normalizedRole === "accounts") roleModes = ["production", "sales", "colour"];
+  else if (["billing", "invoice"].includes(rawRole)) roleModes = ["sales", "colour"];
+  else if (["process", "sticker"].includes(rawRole)) roleModes = ["production", "colour"];
+  else if (rawRole === "stock") roleModes = ["sales", "colour"];
 
-  if (["billing", "invoice"].includes(rawRole)) {
-    return ["sales"];
-  }
-
-  if (["process", "sticker"].includes(rawRole)) {
-    return ["production"];
-  }
-
-  if (rawRole === "stock") {
-    return ["sales"];
-  }
-
-  return ["production", "sales"];
+  const modules = getCompanyModulePreviewContext()?.modules;
+  if (!modules) return roleModes;
+  const entitledModes = [];
+  if (modules.PRODUCTION === true) entitledModes.push("production");
+  if (modules.STORE === true) entitledModes.push("sales");
+  if (modules.COLOUR_PLANT === true) entitledModes.push("colour");
+  return roleModes.filter((mode) => entitledModes.includes(mode));
 }
 
 function getPageNavigationMode(pageKey = getCurrentPageKey()) {
@@ -386,6 +398,7 @@ function getCurrentNavigationMode(user = getLoggedInUser()) {
 
 function switchErpNavigationMode(mode) {
   if (!ERP_NAVIGATION_MODES[mode]) return;
+  if (!getAllowedNavigationModes().includes(mode)) return;
   setNavigationMode(mode);
 
   const currentPageMode = getPageNavigationMode();
@@ -1005,8 +1018,16 @@ function injectNavigationModeStyles() {
       --erp-mode-border: #decfb8;
       --erp-mode-ink: #2b2a27;
     }
+    body.erp-mode-colour {
+      --erp-mode-accent: #8b5fbf;
+      --erp-mode-accent-dark: #4f2f75;
+      --erp-mode-soft: #faf7ff;
+      --erp-mode-border: #dfd2ee;
+      --erp-mode-ink: #2f2340;
+    }
     body.erp-mode-production .topbar,
-    body.erp-mode-sales .topbar {
+    body.erp-mode-sales .topbar,
+    body.erp-mode-colour .topbar {
       border-bottom: 1px solid var(--erp-mode-border);
     }
     body.erp-mode-production .topbar {
@@ -1015,18 +1036,24 @@ function injectNavigationModeStyles() {
     body.erp-mode-sales .topbar {
       background: linear-gradient(180deg, #fffaf1 0%, #ffffff 100%);
     }
+    body.erp-mode-colour .topbar {
+      background: linear-gradient(180deg, #faf6ff 0%, #ffffff 100%);
+    }
     body.erp-mode-production .title p,
-    body.erp-mode-sales .title p {
+    body.erp-mode-sales .title p,
+    body.erp-mode-colour .title p {
       color: var(--erp-mode-accent-dark);
       font-weight: 700;
     }
     body.erp-mode-production .menu a.active,
-    body.erp-mode-sales .menu a.active {
+    body.erp-mode-sales .menu a.active,
+    body.erp-mode-colour .menu a.active {
       background: rgba(255, 255, 255, 0.16);
       border-left: 4px solid var(--erp-mode-accent);
     }
     body.erp-mode-production .menu a:hover,
     body.erp-mode-sales .menu a:hover,
+    body.erp-mode-colour .menu a:hover,
     body.erp-mode-sales .menu .erp-nav-group-toggle:hover {
       background: rgba(255, 255, 255, 0.12);
     }
@@ -1114,9 +1141,9 @@ function injectNavigationModeStyles() {
       display: none !important;
     }
     .erp-mode-switch {
-      display: inline-grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4px;
+      display: inline-flex;
+      flex-wrap: nowrap;
+      gap: 3px;
       padding: 4px;
       border: 1px solid var(--erp-mode-border);
       border-radius: 999px;
@@ -1134,7 +1161,7 @@ function injectNavigationModeStyles() {
       cursor: pointer;
       font-size: 12px;
       font-weight: 900;
-      padding: 0 13px;
+      padding: 0 10px;
       white-space: nowrap;
     }
     .erp-mode-btn.active {
@@ -1152,7 +1179,11 @@ function injectNavigationModeStyles() {
         width: 100%;
       }
       .erp-mode-btn {
+        flex: 1 1 0;
+        min-width: 0;
         min-height: 38px;
+        padding: 0 6px;
+        font-size: 11px;
       }
       .erp-module-preview-warning {
         margin: 0 12px 14px;
@@ -1189,7 +1220,7 @@ function renderNavigationModeSwitch(mode, allowedModes) {
   switcher.style.display = "";
   switcher.innerHTML = allowedModes.map((itemMode) => `
     <button class="erp-mode-btn ${itemMode === mode ? "active" : ""}" type="button" onclick="switchErpNavigationMode('${itemMode}')">
-      ${itemMode === "production" ? "Production" : "Store"}
+      ${ERP_NAVIGATION_MODES[itemMode]?.label || itemMode}
     </button>
   `).join("");
 }
@@ -1197,7 +1228,7 @@ function renderNavigationModeSwitch(mode, allowedModes) {
 function updateSidebarModeLabel(mode) {
   const brandText = document.querySelector(".sidebar .brand p");
   if (!brandText) return;
-  brandText.textContent = mode === "sales" ? "Store Mode" : "Production Mode";
+  brandText.textContent = mode === "sales" ? "Store System" : mode === "colour" ? "Colour Plant System" : "Production System";
 }
 
 function getNavGroupStorageKey(groupKey) {
@@ -1227,9 +1258,13 @@ function renderNavigationItem(item, currentPage) {
   const moduleKeys = getNavigationItemModuleKeys(item);
   const moduleKey = moduleKeys[0] || "";
   const disabled = Boolean(isModulePreviewDebugMode() && moduleKeys.length && !isAnyNavigationModuleEnabled(item));
+  const currentSection = currentPage === "colour-plant"
+    ? String(window.location.hash || "#dashboard").replace(/^#/, "").trim().toLowerCase()
+    : "";
+  const isActive = item.pageKey === currentPage && (!item.section || item.section === currentSection);
   return `
     <li>
-      <a href="${item.href}" class="${item.pageKey === currentPage ? "active" : ""} ${disabled ? "erp-module-preview-disabled" : ""}" data-module-key="${moduleKey}">
+      <a href="${item.href}" class="${isActive ? "active" : ""} ${disabled ? "erp-module-preview-disabled" : ""}" data-module-key="${moduleKey}">
         <i class="${item.icon}"></i> ${item.label}
         ${disabled ? `<span class="erp-module-disabled-badge">Disabled</span>` : ""}
       </a>
@@ -1294,6 +1329,7 @@ function filterSidebarMenuByRole() {
 
   document.body.classList.toggle("erp-mode-production", mode === "production");
   document.body.classList.toggle("erp-mode-sales", mode === "sales");
+  document.body.classList.toggle("erp-mode-colour", mode === "colour");
   document.body.dataset.erpNavigationMode = mode;
   injectNavigationModeStyles();
   renderNavigationModeSwitch(mode, allowedModes);
