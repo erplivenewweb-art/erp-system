@@ -22,6 +22,10 @@ const {
 const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
 const {
+  PAGE_SIZE: STOCK_LOT_PAGE_SIZE,
+  buildPagination: buildStockLotPagination
+} = require("../stock-pagination");
+const {
   ensureColourPlantSchema,
   registerColourPlantRoutes
 } = require("./colourPlant");
@@ -186,6 +190,17 @@ app.use(
     },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
+    exposedHeaders: [
+      "X-ERP-Limit",
+      "X-ERP-Offset",
+      "X-ERP-Total-Count",
+      "X-ERP-Total-Weight",
+      "X-ERP-In-Stock-Count",
+      "X-ERP-Sold-Count",
+      "X-ERP-Returned-Count",
+      "X-ERP-Other-State-Count",
+      "X-Branch-Scope"
+    ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
   })
 );
@@ -17742,6 +17757,7 @@ app.get("/getDailyReport", authMiddleware, async (req, res) => {
 ========================= */
 app.get("/getStock", authMiddleware, async (req, res) => {
   try {
+    const wantsPaginatedResponse = String(req.query.format || "").trim().toLowerCase() === "paginated";
     const access = await resolveBranchAccessContext(req, {
       requireCompanyScope: false
     });
@@ -17772,10 +17788,66 @@ app.get("/getStock", authMiddleware, async (req, res) => {
       whereParts.push("UPPER(TRIM(COALESCE(s.lot_number, ''))) = UPPER(TRIM(?))");
       params.push(lotFilter);
     }
+    const skuFilter = String(req.query.sku ?? "").trim();
+    const sizeFilter = String(req.query.size ?? "").trim();
+    const barcodeFilter = String(req.query.barcode ?? "").trim();
+    const serialFilter = String(req.query.serial ?? req.query.serialNumber ?? req.query.serial_number ?? "").trim();
+    const productFilter = String(req.query.product ?? req.query.productName ?? req.query.product_name ?? "").trim();
+    const statusFilter = String(req.query.status ?? "").trim().toUpperCase();
+    if (skuFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.sku, ''))) LIKE UPPER(?)");
+      params.push(`%${skuFilter}%`);
+    }
+    if (sizeFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.size, ''))) LIKE UPPER(?)");
+      params.push(`%${sizeFilter}%`);
+    }
+    if (barcodeFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.barcode, ''))) LIKE UPPER(?)");
+      params.push(`%${barcodeFilter}%`);
+    }
+    if (serialFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.serial, ''))) LIKE UPPER(?)");
+      params.push(`%${serialFilter}%`);
+    }
+    if (productFilter) {
+      whereParts.push("UPPER(TRIM(COALESCE(s.product_name, ''))) LIKE UPPER(?)");
+      params.push(`%${productFilter}%`);
+    }
+    if (statusFilter && statusFilter !== "ALL") {
+      whereParts.push("UPPER(COALESCE(s.status, 'IN_STOCK')) = ?");
+      params.push(statusFilter);
+    }
     appendBranchScopeFilter(whereParts, params, branchScope, { alias: "s" });
-    appendOperationalStockVisibilityFilter(whereParts, { alias: "s" });
+    appendOperationalStockVisibilityFilter(whereParts, { alias: "s", includeSold: wantsPaginatedResponse });
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
-    const pagination = getPagination(req, { defaultLimit: 100, maxLimit: 2000 });
+
+    const [summaryRows] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_count,
+        COALESCE(SUM(COALESCE(s.weight, 0)), 0) AS total_weight,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'IN_STOCK' THEN 1 ELSE 0 END) AS in_stock_count,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) = 'SOLD' THEN 1 ELSE 0 END) AS sold_count,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) IN ('RETURNED', 'RETURN_TO_STOCK', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS returned_count,
+        SUM(CASE WHEN UPPER(COALESCE(NULLIF(TRIM(s.stock_state), ''), s.status, 'IN_STOCK')) NOT IN ('IN_STOCK', 'SOLD', 'RETURNED', 'RETURN_TO_STOCK', 'DAMAGED_RETURN') THEN 1 ELSE 0 END) AS other_state_count
+      FROM stock s
+      ${whereClause}
+      `,
+      params
+    );
+    const stockSummary = summaryRows[0] || {};
+    const totalItems = Number(stockSummary.total_count || 0);
+    const pageMetadata = wantsPaginatedResponse
+      ? buildStockLotPagination(totalItems, req.query.page)
+      : null;
+    const pagination = wantsPaginatedResponse
+      ? {
+          limit: STOCK_LOT_PAGE_SIZE,
+          offset: (pageMetadata.page - 1) * STOCK_LOT_PAGE_SIZE,
+          sql: `LIMIT ${STOCK_LOT_PAGE_SIZE} OFFSET ${(pageMetadata.page - 1) * STOCK_LOT_PAGE_SIZE}`
+        }
+      : getPagination(req, { defaultLimit: 100, maxLimit: 2000 });
 
     const [rows] = await pool.query(
       `
@@ -17800,7 +17872,27 @@ app.get("/getStock", authMiddleware, async (req, res) => {
     );
 
     setPaginationHeaders(res, pagination);
+    res.setHeader("X-ERP-Total-Count", String(Number(stockSummary.total_count || 0)));
+    res.setHeader("X-ERP-Total-Weight", String(stockSummary.total_weight || 0));
+    res.setHeader("X-ERP-In-Stock-Count", String(Number(stockSummary.in_stock_count || 0)));
+    res.setHeader("X-ERP-Sold-Count", String(Number(stockSummary.sold_count || 0)));
+    res.setHeader("X-ERP-Returned-Count", String(Number(stockSummary.returned_count || 0)));
+    res.setHeader("X-ERP-Other-State-Count", String(Number(stockSummary.other_state_count || 0)));
     res.setHeader("X-Branch-Scope", JSON.stringify(getBranchScopeResponse(branchScope)));
+    if (wantsPaginatedResponse) {
+      return res.json({
+        rows,
+        pagination: pageMetadata,
+        summary: {
+          totalItems,
+          totalWeight: String(stockSummary.total_weight || 0),
+          inStock: Number(stockSummary.in_stock_count || 0),
+          sold: Number(stockSummary.sold_count || 0),
+          returned: Number(stockSummary.returned_count || 0),
+          other: Number(stockSummary.other_state_count || 0)
+        }
+      });
+    }
     return res.json(rows);
   } catch (error) {
     console.error("Get stock error:", error);
