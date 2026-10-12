@@ -80,7 +80,9 @@ function getRequestToken(req) {
 }
 
 function verifyToken(token) {
-  return jwt.verify(String(token || "").trim(), getJwtSecret());
+  return jwt.verify(String(token || "").trim(), getJwtSecret(), {
+    algorithms: ["HS256"]
+  });
 }
 
 async function validateAuthenticatedRequest(req) {

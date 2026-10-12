@@ -6,6 +6,7 @@ require("dotenv").config({ path: LOCAL_ENV_FILE });
 
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const rateLimit = require("express-rate-limit");
@@ -35,6 +36,15 @@ const {
 } = require("./privateCreateWebsiteSaleTransport");
 const { ensureStockCostBasisSchema } = require("./stockCostAuthority");
 const {
+  CSRF_COOKIE_NAME,
+  createCsrfProtection,
+  createCsrfToken,
+  getClearCsrfCookieOptions,
+  getCsrfCookieOptions,
+  getHelmetOptions,
+  getRequestAuthToken
+} = require("./securityMiddleware");
+const {
   calculateReturnRefundAllocation,
   getInitialRefundPayableStatus
 } = require("./returnPolicy");
@@ -50,6 +60,7 @@ const {
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.set("trust proxy", 1);
+app.use(helmet(getHelmetOptions({ production: isProductionRuntime() })));
 app.use((req, res, next) => {
   if (req.path === "/health" || req.path === "/ready") return next();
 
@@ -189,7 +200,7 @@ app.use(
       return callback(new Error("CORS origin not allowed"));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token"],
     exposedHeaders: [
       "X-ERP-Limit",
       "X-ERP-Offset",
@@ -207,6 +218,18 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(attachUserIfPresent);
+app.use(createCsrfProtection({
+  authCookieName: AUTH_COOKIE_NAME,
+  getSecret: () => process.env.JWT_SECRET,
+  ignoredPaths: [
+    "/login",
+    "/requestCompanySignup",
+    "/requestStaffJoin",
+    "/otp/request",
+    "/otp/verify",
+    "/auth/reset-password"
+  ]
+}));
 app.use(modulePreviewEnforcementMiddleware);
 
 function isOperationalMutationPath(pathname = "") {
@@ -10262,6 +10285,16 @@ function getClearAuthCookieOptions() {
   const options = getAuthCookieOptions();
   delete options.maxAge;
   return options;
+}
+
+function setCsrfCookieForToken(res, authToken) {
+  const csrfToken = createCsrfToken(authToken, process.env.JWT_SECRET);
+  res.cookie(
+    CSRF_COOKIE_NAME,
+    csrfToken,
+    getCsrfCookieOptions({ production: isProductionRuntime() })
+  );
+  return csrfToken;
 }
 
 const CATEGORY_PROCESS_TEMPLATES = {
@@ -39744,6 +39777,17 @@ app.get("/superadmin/audit-log", authMiddleware, checkRole(["SUPERADMIN"]), asyn
 /* =========================
    LOGIN
 ========================= */
+app.get("/auth/csrf", authMiddleware, (req, res) => {
+  const authToken = getRequestAuthToken(req, AUTH_COOKIE_NAME);
+  if (!authToken) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  const csrfToken = setCsrfCookieForToken(res, authToken);
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ success: true, csrfToken });
+});
+
 app.post("/login", loginRateLimiter, async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
@@ -39876,6 +39920,7 @@ app.post("/login", loginRateLimiter, async (req, res) => {
     const token = signAuthToken(user);
 
     res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions());
+    setCsrfCookieForToken(res, token);
 
     await logActivitySafe(pool, req, null, {
       companyId: user.company_id ?? null,
@@ -39958,6 +40003,10 @@ app.post("/auth/logout", async (req, res) => {
   }
 
   res.clearCookie(AUTH_COOKIE_NAME, getClearAuthCookieOptions());
+  res.clearCookie(
+    CSRF_COOKIE_NAME,
+    getClearCsrfCookieOptions(getCsrfCookieOptions({ production: isProductionRuntime() }))
+  );
 
   return res.json({
     success: true
