@@ -893,6 +893,32 @@ function thousandthsToNumber(value) {
   return Number((Number(value || 0) / 1000).toFixed(3));
 }
 
+function parseOptionalWeightThousandths(value, fieldName, fallbackMillis = 0) {
+  if (!hasProvidedValue(value)) {
+    return {
+      ok: true,
+      value: thousandthsToNumber(fallbackMillis),
+      millis: fallbackMillis,
+      provided: false
+    };
+  }
+
+  const millis = decimalToThousandths(value);
+  if (millis === null) {
+    return {
+      ok: false,
+      message: `${fieldName} must be a valid number with at most 3 decimal places`
+    };
+  }
+
+  return {
+    ok: true,
+    value: thousandthsToNumber(millis),
+    millis,
+    provided: true
+  };
+}
+
 function normalizeReturnType(value) {
   const clean = String(value || "").trim().toUpperCase();
   if (clean === "RETURN_TO_STOCK") return "RETURN_TO_STOCK";
@@ -18476,6 +18502,7 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   if (!Number.isInteger(stickerQty) || stickerQty <= 0) {
     return {
       ok: false,
+      validationCode: "STICKER_QUANTITY_INVALID",
       message: "Sticker quantity must be a positive whole number"
     };
   }
@@ -18489,22 +18516,24 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   const totalWeightMillis = usedWeightMillis + stickerWeightMillis;
   const totalQty = allowance.usedQty + stickerQty;
   const allowedQty = allowance.allowedQty;
+  const processOutputMillis = decimalToThousandths(format3(allowance.actualProcessWeight)) || 0;
+  const requiredAdditionalWeightMillis = Math.max(totalWeightMillis - processOutputMillis, 0);
+  const additionalWeightApproval = {
+    lotNo: cleanLot,
+    processOutputWeight: thousandthsToNumber(processOutputMillis),
+    enteredStickerTotal: thousandthsToNumber(totalWeightMillis),
+    calculatedAdditionalWeight: thousandthsToNumber(requiredAdditionalWeightMillis),
+    requiresAdditionalWeightApproval: requiredAdditionalWeightMillis > 0
+  };
   const remainingBillableWeight = thousandthsToNumber(Math.max(allowedWeightMillis - usedWeightMillis, 0));
 
   if (allowedQty > 0 && !qtyProvided) {
     return {
       ...allowance,
       ok: false,
+      validationCode: "STICKER_QUANTITY_REQUIRED",
       message: "Sticker quantity is required when quantity tracking is active",
-      remainingBillableWeight
-    };
-  }
-
-  if (allowedWeightMillis > 0 && totalWeightMillis > allowedWeightMillis) {
-    return {
-      ...allowance,
-      ok: false,
-      message: `Sticker weight exceeds ${allowance.laminationGainWeight > 0 ? "approved lamination billable allowance" : "final process output"} for lot ${cleanLot}. Allowed ${thousandthsToNumber(allowedWeightMillis).toFixed(3)}g, attempted ${thousandthsToNumber(totalWeightMillis).toFixed(3)}g.`,
+      ...additionalWeightApproval,
       remainingBillableWeight
     };
   }
@@ -18513,7 +18542,22 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
     return {
       ...allowance,
       ok: false,
+      validationCode: "STICKER_QUANTITY_EXCEEDS_OUTPUT",
       message: `Sticker quantity exceeds final process output for lot ${cleanLot}. Allowed ${allowedQty}, attempted ${totalQty}.`,
+      ...additionalWeightApproval,
+      remainingBillableWeight
+    };
+  }
+
+  if (allowedWeightMillis > 0 && totalWeightMillis > allowedWeightMillis) {
+    const additionMillis = decimalToThousandths(format3(allowance.laminationGainWeight)) || 0;
+    const differenceMillis = totalWeightMillis - allowedWeightMillis;
+    return {
+      ...allowance,
+      ok: false,
+      validationCode: "STICKER_WEIGHT_EXCEEDS_ALLOWANCE",
+      message: `Sticker weight exceeds the allowed total for lot ${cleanLot}. Process output: ${thousandthsToNumber(processOutputMillis).toFixed(3)}g. Declared lamination/addition: ${thousandthsToNumber(additionMillis).toFixed(3)}g. Allowed total: ${thousandthsToNumber(allowedWeightMillis).toFixed(3)}g. Entered sticker total: ${thousandthsToNumber(totalWeightMillis).toFixed(3)}g. Difference: ${thousandthsToNumber(differenceMillis).toFixed(3)}g.`,
+      ...additionalWeightApproval,
       remainingBillableWeight
     };
   }
@@ -18521,6 +18565,7 @@ async function validateStickerAgainstProcessOutput(connection, companyId, lotNo,
   return {
     ok: true,
     ...allowance,
+    ...additionalWeightApproval,
     remainingBillableWeight
   };
 }
@@ -18634,6 +18679,7 @@ async function getStickerBillableAllowance(connection, companyId, lotNo, exclude
     actualProcessWeight,
     laminationGainWeight,
     billableAllowedWeight,
+    laminationRecordId: Number(laminationRecord?.id || 0) || null,
     usedStickerWeight: usedWeight,
     usedActualWeight,
     usedQty,
@@ -18668,6 +18714,230 @@ function getStickerCommercialWeights(item = {}, allowance = {}) {
     billableWeight,
     laminationGainWeight: Number(format3(Math.max(billableWeight - actualWeight, 0)))
   };
+}
+
+const STICKER_ADDITIONAL_WEIGHT_CONFIRMATION = "APPROVE";
+const STICKER_ADDITIONAL_WEIGHT_CONFIRMATION_MESSAGE = "Approval not confirmed. Type APPROVE exactly to continue.";
+
+function getSubmittedStickerAdditionalWeightApproval(body = {}, lotNo = "") {
+  const cleanLot = normalizeProcessLotNo(lotNo);
+  const approvals = Array.isArray(body.additionalWeightApprovals)
+    ? body.additionalWeightApprovals
+    : body.additionalWeightApproval
+      ? [body.additionalWeightApproval]
+      : [];
+  return approvals.find((entry) => normalizeProcessLotNo(entry?.lotNo ?? entry?.lot_no) === cleanLot) || null;
+}
+
+function getStickerAdditionalWeightApprovalDetails(stickerLimit = {}) {
+  return {
+    requiresAdditionalWeightApproval: Boolean(stickerLimit.requiresAdditionalWeightApproval),
+    approvalCode: "STICKER_ADDITIONAL_WEIGHT_APPROVAL_REQUIRED",
+    lotNo: normalizeProcessLotNo(stickerLimit.lotNo),
+    processOutputWeight: thousandthsToNumber(decimalToThousandths(format3(stickerLimit.processOutputWeight)) || 0),
+    stickerTotalWeight: thousandthsToNumber(decimalToThousandths(format3(stickerLimit.enteredStickerTotal)) || 0),
+    calculatedAdditionalWeight: thousandthsToNumber(decimalToThousandths(format3(stickerLimit.calculatedAdditionalWeight)) || 0)
+  };
+}
+
+function assertStickerAdditionalWeightApprovalMatches(approval, details) {
+  if (!approval || String(approval.confirmation ?? "") !== STICKER_ADDITIONAL_WEIGHT_CONFIRMATION) {
+    throw createStickerBulkError(
+      STICKER_ADDITIONAL_WEIGHT_CONFIRMATION_MESSAGE,
+      400,
+      details
+    );
+  }
+
+  const submittedProcessMillis = decimalToThousandths(approval.processOutputWeight);
+  const submittedTotalMillis = decimalToThousandths(approval.stickerTotalWeight);
+  const submittedAdditionalMillis = decimalToThousandths(approval.calculatedAdditionalWeight);
+  const expectedProcessMillis = decimalToThousandths(format3(details.processOutputWeight));
+  const expectedTotalMillis = decimalToThousandths(format3(details.stickerTotalWeight));
+  const expectedAdditionalMillis = decimalToThousandths(format3(details.calculatedAdditionalWeight));
+
+  if (
+    normalizeProcessLotNo(approval.lotNo ?? approval.lot_no) !== details.lotNo ||
+    submittedProcessMillis === null ||
+    submittedTotalMillis === null ||
+    submittedAdditionalMillis === null ||
+    submittedProcessMillis !== expectedProcessMillis ||
+    submittedTotalMillis !== expectedTotalMillis ||
+    submittedAdditionalMillis !== expectedAdditionalMillis
+  ) {
+    throw createStickerBulkError(
+      "Sticker weights changed after confirmation. Type APPROVE again for the current weights.",
+      409,
+      details
+    );
+  }
+}
+
+function parseAuditJsonValue(value) {
+  if (value && typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value || "{}"));
+  } catch (_) {
+    return {};
+  }
+}
+
+async function hasDurableStickerAdditionalWeightApproval(connection, access, stickerLimit, branchId) {
+  if (!stickerLimit?.requiresAdditionalWeightApproval || stickerLimit.laminationStatus !== "APPROVED") {
+    return false;
+  }
+
+  const details = getStickerAdditionalWeightApprovalDetails(stickerLimit);
+  const recordId = Number(stickerLimit.laminationRecordId || 0);
+  const processLotId = Number(stickerLimit.processLotId || 0);
+  if (!recordId || !processLotId) return false;
+
+  const actualMillis = decimalToThousandths(format3(stickerLimit.actualProcessWeight));
+  const gainMillis = decimalToThousandths(format3(stickerLimit.laminationGainWeight));
+  const billableMillis = decimalToThousandths(format3(stickerLimit.billableAllowedWeight));
+  const expectedActualMillis = decimalToThousandths(format3(details.processOutputWeight));
+  const expectedGainMillis = decimalToThousandths(format3(details.calculatedAdditionalWeight));
+  const expectedBillableMillis = decimalToThousandths(format3(details.stickerTotalWeight));
+  if (
+    actualMillis !== expectedActualMillis ||
+    gainMillis !== expectedGainMillis ||
+    billableMillis !== expectedBillableMillis
+  ) {
+    return false;
+  }
+
+  const [rows] = await connection.query(
+    `
+    SELECT after_data
+    FROM audit_log
+    WHERE company_id = ?
+      AND action_type = 'STICKER_ADDITIONAL_WEIGHT_CONFIRMED'
+      AND entity_type = 'process_lamination_weight'
+      AND entity_id = ?
+      AND status = 'success'
+    ORDER BY id DESC
+    LIMIT 20
+    `,
+    [access.companyScope, String(recordId)]
+  );
+
+  return rows.some((row) => {
+    const data = parseAuditJsonValue(row.after_data);
+    return (
+      data.confirmationVerified === true &&
+      Number(data.branchId || 0) === Number(branchId || 0) &&
+      Number(data.processLotId || 0) === processLotId &&
+      normalizeProcessLotNo(data.lotNo) === details.lotNo &&
+      decimalToThousandths(data.processOutputWeight) === expectedActualMillis &&
+      decimalToThousandths(data.stickerTotalWeight) === expectedBillableMillis &&
+      decimalToThousandths(data.calculatedAdditionalWeight) === expectedGainMillis
+    );
+  });
+}
+
+async function authorizeStickerAdditionalWeightForSave(connection, req, access, stickerLimit, branchId, {
+  nextWeight,
+  nextQty,
+  qtyProvided = true,
+  allowApprovalMutation = false
+} = {}) {
+  if (!stickerLimit?.requiresAdditionalWeightApproval) return stickerLimit;
+
+  const details = getStickerAdditionalWeightApprovalDetails(stickerLimit);
+  if (await hasDurableStickerAdditionalWeightApproval(connection, access, stickerLimit, branchId)) {
+    return stickerLimit;
+  }
+
+  if (!allowApprovalMutation) {
+    throw createStickerBulkError(
+      STICKER_ADDITIONAL_WEIGHT_CONFIRMATION_MESSAGE,
+      400,
+      details
+    );
+  }
+
+  const approval = getSubmittedStickerAdditionalWeightApproval(req.body || {}, details.lotNo);
+  assertStickerAdditionalWeightApprovalMatches(approval, details);
+
+  const processLotId = Number(stickerLimit.processLotId || 0);
+  if (!processLotId) {
+    throw createStickerBulkError("Completed Process lot could not be resolved for additional-weight approval", 400, details);
+  }
+
+  const requiredGainMillis = decimalToThousandths(format3(details.calculatedAdditionalWeight)) || 0;
+  const approvedGainMillis = stickerLimit.laminationStatus === "APPROVED"
+    ? (decimalToThousandths(format3(stickerLimit.laminationGainWeight)) || 0)
+    : 0;
+  let approvalRecordId = Number(stickerLimit.laminationRecordId || 0) || null;
+
+  if (approvedGainMillis !== requiredGainMillis) {
+    await connection.query(
+      `
+      UPDATE process_lamination_weights
+      SET status = 'CANCELLED',
+          updated_at = NOW()
+      WHERE company_id = ?
+        AND process_lot_id = ?
+        AND UPPER(COALESCE(status, 'DRAFT')) IN ('DRAFT', 'APPROVED')
+      `,
+      [access.companyScope, processLotId]
+    );
+
+    const [insertResult] = await connection.query(
+      `
+      INSERT INTO process_lamination_weights
+      (
+        company_id, process_lot_id, lot_no, actual_process_weight,
+        lamination_gain_weight, billable_weight, status, remarks,
+        created_by, approved_by, approved_at, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?, NOW(), NOW(), NOW())
+      `,
+      [
+        access.companyScope,
+        processLotId,
+        details.lotNo,
+        details.processOutputWeight,
+        details.calculatedAdditionalWeight,
+        details.stickerTotalWeight,
+        "Typed approval during Sticker Save",
+        access.actingUserId || null,
+        access.actingUserId || null
+      ]
+    );
+    approvalRecordId = Number(insertResult.insertId || 0) || null;
+  }
+
+  await logActivitySafe(connection, req, access, {
+    actionType: "STICKER_ADDITIONAL_WEIGHT_CONFIRMED",
+    entityType: "process_lamination_weight",
+    entityId: String(approvalRecordId || processLotId),
+    moduleName: "sticker",
+    status: "success",
+    message: "Additional Sticker weight confirmed with typed approval",
+    afterData: {
+      ...details,
+      branchId: Number(branchId || 0) || null,
+      processLotId,
+      confirmationVerified: true,
+      approvedBy: access.actingUserId || null,
+      laminationRecordId: approvalRecordId
+    }
+  });
+
+  const refreshedLimit = await validateStickerAgainstProcessOutput(
+    connection,
+    access.companyScope,
+    details.lotNo,
+    nextWeight,
+    nextQty,
+    null,
+    qtyProvided
+  );
+  if (!(await hasDurableStickerAdditionalWeightApproval(connection, access, refreshedLimit, branchId))) {
+    throw createStickerBulkError("Additional-weight approval audit could not be verified", 500, details);
+  }
+  return refreshedLimit;
 }
 
 async function countRowsForTestLotDelete(connection, sql, params = []) {
@@ -22647,7 +22917,11 @@ app.post("/process/lots/:lotNo/lamination", authMiddleware, checkRole(["SUPERADM
 
     const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
     const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
-    const parsedGain = parseOptionalNumber(req.body.laminationGainWeight ?? req.body.lamination_gain_weight, "Lamination gain weight", 0);
+    const parsedGain = parseOptionalWeightThousandths(
+      req.body.laminationGainWeight ?? req.body.lamination_gain_weight,
+      "Lamination gain weight",
+      0
+    );
     const remarks = String(req.body.remarks || "").trim();
     if (!parsedGain.ok) return res.status(400).json({ success: false, message: parsedGain.message });
     if (parsedGain.value < 0) return res.status(400).json({ success: false, message: "Lamination gain weight cannot be negative" });
@@ -22670,7 +22944,12 @@ app.post("/process/lots/:lotNo/lamination", authMiddleware, checkRole(["SUPERADM
       });
     }
 
-    const billableWeight = Number(format3(context.actualProcessWeight + parsedGain.value));
+    const actualProcessWeightMillis = decimalToThousandths(format3(context.actualProcessWeight));
+    if (actualProcessWeightMillis === null) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Completed process output must use at most 3 decimal places" });
+    }
+    const billableWeight = thousandthsToNumber(actualProcessWeightMillis + parsedGain.millis);
     let recordId = activeRecord?.id || null;
     if (recordId) {
       await connection.query(
@@ -22783,7 +23062,13 @@ app.post("/process/lots/:lotNo/lamination/approve", authMiddleware, checkRole(["
       return res.json({ success: true, message: "Lamination commercial weight already approved", lamination: activeRecord });
     }
 
-    const billableWeight = Number(format3(context.actualProcessWeight + activeRecord.laminationGainWeight));
+    const actualProcessWeightMillis = decimalToThousandths(format3(context.actualProcessWeight));
+    const laminationGainMillis = decimalToThousandths(format3(activeRecord.laminationGainWeight));
+    if (actualProcessWeightMillis === null || laminationGainMillis === null) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Lamination weights must use at most 3 decimal places" });
+    }
+    const billableWeight = thousandthsToNumber(actualProcessWeightMillis + laminationGainMillis);
     await connection.query(
       `
       UPDATE process_lamination_weights
@@ -22843,7 +23128,7 @@ app.post("/process/lots/:lotNo/lamination/approve-detected", authMiddleware, che
 
     const lotNo = normalizeProcessLotNo(req.params.lotNo || req.body.lotNo || req.body.lot_no);
     const workCategory = normalizeWorkCategory(req.query.workCategory || req.query.work_category || req.body.workCategory || req.body.work_category || "REGULAR_SANKHA");
-    const detectedGain = parseOptionalNumber(
+    const detectedGain = parseOptionalWeightThousandths(
       req.body.laminationGainWeight ?? req.body.lamination_gain_weight ?? req.body.detectedGainWeight ?? req.body.detected_gain_weight,
       "Detected lamination gain weight",
       0
@@ -22866,8 +23151,15 @@ app.post("/process/lots/:lotNo/lamination/approve-detected", authMiddleware, che
       return res.json({ success: true, message: "Lamination commercial weight already approved", lamination: activeRecord });
     }
 
-    const gainWeight = detectedGain.value || toNumber(activeRecord?.laminationGainWeight || 0);
-    const billableWeight = Number(format3(context.actualProcessWeight + gainWeight));
+    const activeGainMillis = decimalToThousandths(format3(activeRecord?.laminationGainWeight || 0)) || 0;
+    const gainWeightMillis = detectedGain.provided ? detectedGain.millis : activeGainMillis;
+    const gainWeight = thousandthsToNumber(gainWeightMillis);
+    const actualProcessWeightMillis = decimalToThousandths(format3(context.actualProcessWeight));
+    if (actualProcessWeightMillis === null) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Completed process output must use at most 3 decimal places" });
+    }
+    const billableWeight = thousandthsToNumber(actualProcessWeightMillis + gainWeightMillis);
     let recordId = activeRecord?.id || null;
 
     if (recordId) {
@@ -26651,6 +26943,148 @@ app.get("/stickers/next-serial", authMiddleware, async (req, res) => {
   }
 });
 
+app.post("/stickers/approve-additional-weight", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
+  let connection;
+  try {
+    const access = await resolveBranchAccessContext(req, {
+      requireCompanyScope: true
+    });
+    if (!access.ok) return sendAccessError(res, access);
+    if (access.isSuperAdmin) return sendSuperAdminReadOnlyError(res);
+
+    const stockPermission = await requireBranchOperationalPermission(
+      pool,
+      req,
+      res,
+      access,
+      "canMutateStock",
+      "APPROVE_STICKER_ADDITIONAL_WEIGHT"
+    );
+    if (!stockPermission.ok) return;
+
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const submittedApproval = req.body?.additionalWeightApproval || null;
+    const approvalLot = normalizeProcessLotNo(submittedApproval?.lotNo ?? submittedApproval?.lot_no);
+    if (!items.length || !approvalLot) {
+      return res.status(400).json({
+        success: false,
+        message: STICKER_ADDITIONAL_WEIGHT_CONFIRMATION_MESSAGE
+      });
+    }
+
+    let normalizedItems;
+    try {
+      normalizedItems = items.map((item, index) => normalizeStickerSaveItem(item, index));
+    } catch (error) {
+      error.stickerErrorScope = "STICKER_SAVE";
+      throw error;
+    }
+    const lotItems = normalizedItems.filter((item) => normalizeProcessLotNo(item.lot) === approvalLot);
+    if (!lotItems.length) {
+      return res.status(400).json({ success: false, message: "Approval lot does not match the current Sticker List" });
+    }
+
+    const weightMillis = lotItems.reduce((total, item) => total + item.weightMillis, 0);
+    const qty = lotItems.reduce((total, item) => total + item.qty, 0);
+    const qtyProvided = lotItems.every((item) => item.qtyProvided);
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const stockBranch = await resolveStockCreationBranch(connection, access, req);
+    if (!stockBranch.ok) {
+      throw createStickerBulkError(stockBranch.message || "Stock branch could not be resolved", stockBranch.status || 400);
+    }
+    const activeStockBranch = await requireActiveBranchForCompany(connection, access.companyScope, stockBranch.branchId);
+    if (!activeStockBranch.ok) {
+      throw createStickerBulkError(activeStockBranch.message || "Branch is inactive", activeStockBranch.status || 400);
+    }
+
+    const seenBarcodes = new Set();
+    const seenLotSerials = new Set();
+    for (const item of normalizedItems) {
+      if (seenBarcodes.has(item.normalizedBarcode)) {
+        const error = createStickerBulkError(`${item.rowLabel}: Duplicate barcode ${item.barcode} in this save batch`);
+        error.stickerErrorScope = "STICKER_SAVE";
+        throw error;
+      }
+      seenBarcodes.add(item.normalizedBarcode);
+      const lotSerialKey = `${item.lot}\u0000${item.serial}`;
+      if (seenLotSerials.has(lotSerialKey)) {
+        const error = createStickerBulkError(`${item.rowLabel}: Duplicate serial ${item.serial} in lot ${item.lot} in this save batch`);
+        error.stickerErrorScope = "STICKER_SAVE";
+        throw error;
+      }
+      seenLotSerials.add(lotSerialKey);
+    }
+
+    let stickerLimit = await validateStickerAgainstProcessOutput(
+      connection,
+      access.companyScope,
+      approvalLot,
+      thousandthsToNumber(weightMillis),
+      qty,
+      null,
+      qtyProvided
+    );
+    if (!stickerLimit.requiresAdditionalWeightApproval) {
+      throw createStickerBulkError("The current Sticker List does not require additional-weight approval", 400, stickerLimit);
+    }
+    if (!stickerLimit.ok && stickerLimit.validationCode !== "STICKER_WEIGHT_EXCEEDS_ALLOWANCE") {
+      const error = createStickerBulkError(stickerLimit.message, 400, stickerLimit);
+      error.stickerErrorScope = "STICKER_SAVE";
+      throw error;
+    }
+
+    try {
+      for (const item of normalizedItems) {
+        await validateStickerSaveItemAgainstStock(connection, access.companyScope, item, { req, access });
+      }
+    } catch (error) {
+      error.stickerErrorScope = "STICKER_SAVE";
+      throw error;
+    }
+
+    stickerLimit = await authorizeStickerAdditionalWeightForSave(
+      connection,
+      req,
+      access,
+      stickerLimit,
+      stockBranch.branchId,
+      {
+        nextWeight: thousandthsToNumber(weightMillis),
+        nextQty: qty,
+        qtyProvided,
+        allowApprovalMutation: true
+      }
+    );
+    if (!stickerLimit.ok) {
+      throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
+    }
+
+    await connection.commit();
+    return res.json({
+      success: true,
+      message: "Additional Sticker weight approved",
+      approval: getStickerAdditionalWeightApprovalDetails(stickerLimit),
+      approvalRecognized: true
+    });
+  } catch (error) {
+    if (connection) await connection.rollback().catch(() => {});
+    console.error("Approve Sticker additional weight error:", error);
+    const status = error?.isStickerBulkError ? Number(error.status || 400) : getBarcodeSafetyStatus(error);
+    return res.status(status).json({
+      success: false,
+      message: error?.isStickerBulkError ? error.message : getBarcodeSafetyMessage(error, "Additional Sticker weight approval failed"),
+      stickerAllowance: error?.isStickerBulkError ? error.details || null : null,
+      errorScope: error?.stickerErrorScope || "APPROVAL",
+      error: getErrorDetail(error)
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+});
+
 app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF"]), async (req, res) => {
   let connection;
 
@@ -26737,7 +27171,7 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
       normalizeProcessLotNo(left.lot).localeCompare(normalizeProcessLotNo(right.lot))
     );
     for (const total of orderedLotTotals) {
-      const stickerLimit = await validateStickerAgainstProcessOutput(
+      let stickerLimit = await validateStickerAgainstProcessOutput(
         connection,
         finalCompanyId,
         total.lot,
@@ -26746,6 +27180,20 @@ app.post("/addStickersBulk", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "
         null,
         total.qtyProvided
       );
+      if (stickerLimit.requiresAdditionalWeightApproval) {
+        stickerLimit = await authorizeStickerAdditionalWeightForSave(
+          connection,
+          req,
+          access,
+          stickerLimit,
+          stockBranch.branchId,
+          {
+            nextWeight: thousandthsToNumber(total.weightMillis),
+            nextQty: total.qty,
+            qtyProvided: total.qtyProvided
+          }
+        );
+      }
       if (!stickerLimit.ok) {
         throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
       }
@@ -26831,7 +27279,7 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       throw createStickerBulkError(activeStockBranch.message || "Branch is inactive", activeStockBranch.status || 400);
     }
 
-    const stickerLimit = await validateStickerAgainstProcessOutput(
+    let stickerLimit = await validateStickerAgainstProcessOutput(
       connection,
       finalCompanyId,
       item.lot,
@@ -26840,6 +27288,20 @@ app.post("/addSticker", authMiddleware, checkRole(["SUPERADMIN", "OWNER", "STAFF
       null,
       item.qtyProvided
     );
+    if (stickerLimit.requiresAdditionalWeightApproval) {
+      stickerLimit = await authorizeStickerAdditionalWeightForSave(
+        connection,
+        req,
+        access,
+        stickerLimit,
+        stockBranch.branchId,
+        {
+          nextWeight: item.weight,
+          nextQty: item.qty,
+          qtyProvided: item.qtyProvided
+        }
+      );
+    }
     if (!stickerLimit.ok) {
       throw createStickerBulkError(stickerLimit.message, 400, stickerLimit);
     }

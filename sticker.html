@@ -267,6 +267,98 @@
       min-width: 760px;
     }
 
+    .sticker-approval-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, 0.68);
+    }
+
+    .sticker-approval-modal.show {
+      display: flex;
+    }
+
+    .sticker-approval-dialog {
+      width: min(520px, 100%);
+      max-height: calc(100vh - 36px);
+      overflow-y: auto;
+      border: 1px solid #ecd5a5;
+      border-radius: 16px;
+      background: #fffdf8;
+      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.3);
+      padding: 20px;
+    }
+
+    .sticker-approval-dialog h3 {
+      margin: 0 0 8px;
+      color: #7c2d12;
+    }
+
+    .sticker-approval-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 14px;
+      margin: 14px 0;
+      padding: 12px;
+      border-radius: 12px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+    }
+
+    .sticker-approval-grid span {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .sticker-approval-grid strong {
+      display: block;
+      color: #1e293b;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .sticker-approval-instruction {
+      margin: 12px 0 8px;
+      color: #9a3412;
+      font-weight: 900;
+    }
+
+    .sticker-approval-error {
+      min-height: 20px;
+      margin-top: 7px;
+      color: #b91c1c;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .sticker-approval-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .sticker-approval-actions button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    #stickerListBody tr.sticker-row-invalid {
+      outline: 2px solid #dc2626;
+      outline-offset: -2px;
+      background: #fef2f2;
+    }
+
+    #stickerListBody tr.sticker-row-invalid input[data-invalid-field="true"] {
+      border-color: #dc2626 !important;
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+    }
+
     @media screen and (max-width: 900px) {
       .sticker-pro-box > .form-grid {
         grid-template-columns: 1fr !important;
@@ -417,6 +509,15 @@
 
       .table-wrap > table {
         min-width: 680px;
+      }
+
+      .sticker-approval-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .sticker-approval-actions {
+        align-items: stretch;
+        flex-direction: column-reverse;
       }
 
       table th,
@@ -586,6 +687,11 @@
               <input id="stickerWeight" placeholder="1.500" />
             </div>
 
+            <div class="input-box">
+              <label for="stickerQty">Pair Quantity</label>
+              <input id="stickerQty" type="number" min="1" step="1" value="1" />
+            </div>
+
             <div class="btn-row" style="margin-top:10px;">
               <button class="mini-btn add-btn" type="button" onclick="addStickerItem()">Add Item</button>
             </div>
@@ -601,8 +707,8 @@
             </div>
 
             <div class="print-action-row">
-              <button id="saveAllStickersBtn" class="primary-btn save-btn" type="button" onclick="savePendingToServer()">Save All</button>
-              <button class="primary-btn" type="button" onclick="printStickerSheet()">Print Sticker</button>
+              <button id="saveAllStickersBtn" class="primary-btn save-btn" type="button" onclick="requestStickerOperation('SAVE')">Save All</button>
+              <button class="primary-btn" type="button" onclick="requestStickerOperation('PRINT')">Print Sticker</button>
             </div>
 
             <div class="pending-note">
@@ -624,6 +730,7 @@
                     <th>MM</th>
                     <th>Size</th>
                     <th>Weight</th>
+                    <th>Qty</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -647,6 +754,36 @@
     </main>
   </div>
 
+  <div id="stickerAdditionalWeightApprovalModal" class="sticker-approval-modal" role="dialog" aria-modal="true" aria-labelledby="stickerAdditionalWeightApprovalTitle">
+    <div class="sticker-approval-dialog">
+      <h3 id="stickerAdditionalWeightApprovalTitle">Additional Weight Approval Required</h3>
+      <p>This Sticker List exceeds the completed Process output. Review the server-calculated values before continuing.</p>
+
+      <div class="sticker-approval-grid">
+        <div><span>Lot Number</span><strong id="approvalLotNumber">-</strong></div>
+        <div><span>Process Completed Weight</span><strong id="approvalProcessWeight">0.000 g</strong></div>
+        <div><span>Sticker List Total Weight</span><strong id="approvalStickerTotalWeight">0.000 g</strong></div>
+        <div><span>Automatically Calculated Additional Weight</span><strong id="approvalAdditionalWeight">+0.000 g</strong></div>
+        <div><span>Actual Sticker Items</span><strong id="approvalStickerRowCount">0</strong></div>
+        <div><span>Actual Pair Quantity</span><strong id="approvalPairQuantity">0</strong></div>
+        <div style="grid-column:1 / -1;"><span>Current Logged-in Approver</span><strong id="approvalCurrentUser">-</strong></div>
+      </div>
+
+      <p><strong>Warning:</strong> This approval will be auditable and tied to the logged-in operator.</p>
+      <p class="sticker-approval-instruction">To approve this additional weight, type APPROVE below.</p>
+      <div class="input-box">
+        <label for="stickerAdditionalWeightConfirmation">Typed Confirmation</label>
+        <input id="stickerAdditionalWeightConfirmation" type="text" autocomplete="off" spellcheck="false" />
+      </div>
+      <div id="stickerAdditionalWeightApprovalError" class="sticker-approval-error" role="alert"></div>
+
+      <div class="sticker-approval-actions">
+        <button id="cancelStickerAdditionalWeightApprovalButton" class="secondary-btn" type="button" onclick="cancelStickerAdditionalWeightApproval()">Cancel</button>
+        <button id="confirmStickerAdditionalWeightApprovalButton" class="primary-btn" type="button" onclick="confirmStickerAdditionalWeightAndContinue()" disabled>Approve Additional Weight &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const API_BASE = window.ERP_API_BASE;
 
@@ -657,6 +794,16 @@
     let lotOptions = [];
     let processLotStatusMap = new Map();
     let processLotInfoMap = new Map();
+    let stickerSaveInProgress = false;
+    let stickerApprovalRequestInProgress = false;
+    let stickerPrintContinuationInProgress = false;
+    let stickerInvalidRowBarcode = "";
+    let stickerInvalidRowField = "";
+    let stickerAdditionalWeightApprovalState = {
+      snapshot: "",
+      currentDetails: null,
+      pendingAction: null
+    };
 
     function getLoggedInUser() {
       try {
@@ -988,6 +1135,9 @@
     window.addEventListener("resize", syncSidebarUi);
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeSidebarMobile();
+      if (event.key === "Escape" && document.getElementById("stickerAdditionalWeightApprovalModal")?.classList.contains("show")) {
+        cancelStickerAdditionalWeightApproval();
+      }
     });
 
     function format3(value) {
@@ -1370,6 +1520,7 @@
     }
 
     function handleLotInputChange() {
+      clearStickerAdditionalWeightApproval();
       const lotValue = document.getElementById("lotSelector")?.value.trim() || "";
       syncLotPreview();
 
@@ -1381,6 +1532,7 @@
     }
 
     function setQuickLot(lotNo) {
+      clearStickerAdditionalWeightApproval();
       const lotSelector = document.getElementById("lotSelector");
       if (lotSelector) lotSelector.value = String(lotNo).trim();
 
@@ -1398,6 +1550,7 @@
         mm: document.getElementById("stickerMM")?.value.trim() || "",
         size: document.getElementById("stickerSize")?.value.trim() || "",
         weight: format3(document.getElementById("stickerWeight")?.value || 0),
+        qty: document.getElementById("stickerQty")?.value ?? "",
         lot: document.getElementById("lotSelector")?.value.trim() || "",
         metalType: document.getElementById("metalTypeSelector")?.value || "",
         processType: document.getElementById("processTypeSelector")?.value || "",
@@ -1416,9 +1569,11 @@
 
     function clearStickerFormForNext() {
       const weightInput = document.getElementById("stickerWeight");
+      const qtyInput = document.getElementById("stickerQty");
       const barcodeInput = document.getElementById("stickerBarcode");
 
       if (weightInput) weightInput.value = "";
+      if (qtyInput) qtyInput.value = "1";
       if (barcodeInput) barcodeInput.value = "";
 
       generateBarcodeNow(true);
@@ -1610,6 +1765,14 @@
         return;
       }
 
+      const stickerQtyValue = Number(data.qty);
+      if (String(data.qty ?? "") === "" || !Number.isInteger(stickerQtyValue) || stickerQtyValue <= 0) {
+        showToast("Sticker quantity must be a positive whole number.", "error");
+        document.getElementById("stickerQty")?.focus();
+        logStickerDebug("addStickerItem failed", { reason: "INVALID_QUANTITY", lot: data.lot, qty: data.qty });
+        return;
+      }
+
       if (!data.productName || !data.purity || !data.sku || !data.size || !hasStickerWeight) {
         const missingFields = [];
         if (!data.serial) missingFields.push("Serial");
@@ -1678,6 +1841,7 @@
         mm: data.mm,
         size: data.size,
         weight: format3(data.weight),
+        qty: stickerQtyValue,
         lot: data.lot,
         lot_number: data.lot,
         metalType: data.metalType,
@@ -1704,8 +1868,295 @@
       showToast("The item has been added to the sticker list.", "success");
     }
 
-    async function savePendingToServer() {
+    function getUnsavedStickerSaveItems(companyId) {
+      return pendingStickerItems
+        .filter((item) => !item.saved_to_server)
+        .map((item) => ({
+          serial: item.serial,
+          productName: item.product_name || item.productName || "",
+          purity: item.purity || "",
+          sku: item.sku || "",
+          mm: item.mm || "",
+          size: item.size || "",
+          weight: getFinalStickerWeight(item),
+          qty: Object.prototype.hasOwnProperty.call(item, "qty") ? item.qty : 1,
+          lot: item.lot_number || item.lot || "",
+          metalType: item.metal_type || item.metalType || "Silver",
+          processType: item.process_type || item.processType || "",
+          barcode: item.barcode || "",
+          companyId,
+          userId: getCurrentUserId()
+        }));
+    }
+
+    function getStickerSaveSnapshot(items = []) {
+      return JSON.stringify(items.map((item) => ({
+        lot: String(item.lot || ""),
+        serial: String(item.serial || ""),
+        barcode: String(item.barcode || ""),
+        weight: String(item.weight || ""),
+        qty: String(item.qty ?? "")
+      })));
+    }
+
+    function validateStickerSaveItemsClient(items = []) {
+      const seenBarcodes = new Set();
+      const seenLotSerials = new Set();
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index] || {};
+        const required = [
+          ["serial", item.serial, "Serial is required"],
+          ["product_name", item.productName, "Product is required"],
+          ["purity", item.purity, "Purity is required"],
+          ["sku", item.sku, "SKU is required"],
+          ["size", item.size, "Size is required"],
+          ["lot_number", item.lot, "Lot number is required"],
+          ["barcode", item.barcode, "Barcode is required"]
+        ];
+        const missing = required.find(([, value]) => String(value ?? "").trim() === "");
+        if (missing) return { ok: false, index, field: missing[0], message: `Sticker row ${index + 1}: ${missing[2]}` };
+
+        const qty = Number(item.qty);
+        if (String(item.qty ?? "") === "" || !Number.isInteger(qty) || qty <= 0) {
+          return { ok: false, index, field: "qty", message: `Sticker row ${index + 1}: Sticker quantity must be a positive whole number` };
+        }
+        const weightText = String(item.weight ?? "");
+        const weight = Number(weightText);
+        if (!/^\d+(?:\.\d{1,3})?$/.test(weightText) || !Number.isFinite(weight) || weight <= 0) {
+          return { ok: false, index, field: "weight", message: `Sticker row ${index + 1}: Sticker weight must be a positive number with at most 3 decimal places` };
+        }
+
+        const barcodeKey = String(item.barcode).trim().toUpperCase();
+        if (seenBarcodes.has(barcodeKey)) {
+          return { ok: false, index, field: "barcode", message: `Sticker row ${index + 1}: Duplicate barcode ${item.barcode} in this save batch` };
+        }
+        seenBarcodes.add(barcodeKey);
+
+        const serialKey = `${String(item.lot).trim().toUpperCase()}\u0000${String(item.serial).trim().toUpperCase()}`;
+        if (seenLotSerials.has(serialKey)) {
+          return { ok: false, index, field: "serial", message: `Sticker row ${index + 1}: Duplicate serial ${item.serial} in lot ${item.lot}` };
+        }
+        seenLotSerials.add(serialKey);
+      }
+      return { ok: true };
+    }
+
+    function showStickerSaveValidationError(validation, items = []) {
+      const message = String(validation?.message || "Sticker row validation failed");
+      const parsedRow = message.match(/Sticker row\s+(\d+)/i);
+      const index = Number(validation?.index ?? (parsedRow ? Number(parsedRow[1]) - 1 : -1));
+      const item = index >= 0 ? items[index] : null;
+      stickerInvalidRowBarcode = String(item?.barcode || "");
+      stickerInvalidRowField = String(validation?.field || (
+        /quantity/i.test(message) ? "qty" :
+        /weight/i.test(message) ? "weight" :
+        /serial/i.test(message) ? "serial" :
+        /barcode/i.test(message) ? "barcode" : ""
+      ));
+      if (stickerInvalidRowBarcode) editingPendingBarcode = stickerInvalidRowBarcode;
+      hideStickerAdditionalWeightApprovalModal();
+      renderStickerList();
+      showToast(message, "error");
+      setTimeout(() => {
+        const row = [...document.querySelectorAll("#stickerListBody tr[data-list-barcode]")]
+          .find((candidate) => candidate.dataset.listBarcode === stickerInvalidRowBarcode);
+        row?.scrollIntoView({ behavior: "smooth", block: "center" });
+        const field = [...(row?.querySelectorAll("[data-field]") || [])]
+          .find((candidate) => candidate.dataset.field === stickerInvalidRowField);
+        if (field) {
+          field.dataset.invalidField = "true";
+          field.focus();
+        }
+      }, 0);
+    }
+
+    function getCurrentApproverLabel() {
+      const user = getLoggedInUser() || {};
+      const name = String(user.name || user.full_name || user.email || "Logged-in user").trim();
+      const email = String(user.email || "").trim();
+      const role = String(user.role || "").trim();
+      return [name, email && email !== name ? email : "", role].filter(Boolean).join(" | ");
+    }
+
+    function setAdditionalWeightApprovalError(message = "") {
+      const errorEl = document.getElementById("stickerAdditionalWeightApprovalError");
+      if (errorEl) errorEl.textContent = String(message || "");
+    }
+
+    function updateAdditionalWeightApprovalButton() {
+      const input = document.getElementById("stickerAdditionalWeightConfirmation");
+      const button = document.getElementById("confirmStickerAdditionalWeightApprovalButton");
+      const cancelButton = document.getElementById("cancelStickerAdditionalWeightApprovalButton");
+      if (button) {
+        button.disabled = stickerSaveInProgress || stickerApprovalRequestInProgress || String(input?.value ?? "") !== "APPROVE";
+      }
+      if (cancelButton) cancelButton.disabled = stickerApprovalRequestInProgress;
+      if (String(input?.value ?? "") === "APPROVE") setAdditionalWeightApprovalError("");
+    }
+
+    function hideStickerAdditionalWeightApprovalModal() {
+      document.getElementById("stickerAdditionalWeightApprovalModal")?.classList.remove("show");
+    }
+
+    function clearStickerAdditionalWeightApproval({ hide = true, message = "" } = {}) {
+      stickerAdditionalWeightApprovalState = {
+        snapshot: "",
+        currentDetails: null,
+        pendingAction: null
+      };
+      const input = document.getElementById("stickerAdditionalWeightConfirmation");
+      if (input) input.value = "";
+      setAdditionalWeightApprovalError(message);
+      if (hide) hideStickerAdditionalWeightApprovalModal();
+      updateAdditionalWeightApprovalButton();
+    }
+
+    function cancelStickerAdditionalWeightApproval() {
+      if (stickerApprovalRequestInProgress) return false;
+      clearStickerAdditionalWeightApproval();
+      showToast("Additional-weight approval cancelled. No stickers were saved.", "info");
+      return true;
+    }
+
+    function openStickerAdditionalWeightApproval(details, items, pendingAction = "SAVE") {
+      const snapshot = getStickerSaveSnapshot(items);
+      if (stickerAdditionalWeightApprovalState.snapshot && stickerAdditionalWeightApprovalState.snapshot !== snapshot) {
+        clearStickerAdditionalWeightApproval();
+      }
+      stickerAdditionalWeightApprovalState.snapshot = snapshot;
+      stickerAdditionalWeightApprovalState.pendingAction = pendingAction === "PRINT" ? "PRINT" : "SAVE";
+      stickerAdditionalWeightApprovalState.currentDetails = {
+        lotNo: String(details?.lotNo || ""),
+        processOutputWeight: format3(details?.processOutputWeight || 0),
+        stickerTotalWeight: format3(details?.stickerTotalWeight ?? details?.enteredStickerTotal ?? 0),
+        calculatedAdditionalWeight: format3(details?.calculatedAdditionalWeight || 0)
+      };
+
+      const current = stickerAdditionalWeightApprovalState.currentDetails;
+      document.getElementById("approvalLotNumber").textContent = current.lotNo || "-";
+      document.getElementById("approvalProcessWeight").textContent = `${current.processOutputWeight} g`;
+      document.getElementById("approvalStickerTotalWeight").textContent = `${current.stickerTotalWeight} g`;
+      document.getElementById("approvalAdditionalWeight").textContent = `+${current.calculatedAdditionalWeight} g`;
+      document.getElementById("approvalStickerRowCount").textContent = String(items.length);
+      document.getElementById("approvalPairQuantity").textContent = String(items.reduce((total, item) => total + Number(item.qty || 0), 0));
+      document.getElementById("approvalCurrentUser").textContent = getCurrentApproverLabel();
+
+      const input = document.getElementById("stickerAdditionalWeightConfirmation");
+      if (input) input.value = "";
+      setAdditionalWeightApprovalError("");
+      document.getElementById("stickerAdditionalWeightApprovalModal")?.classList.add("show");
+      updateAdditionalWeightApprovalButton();
+      setTimeout(() => input?.focus(), 50);
+    }
+
+    async function confirmStickerAdditionalWeightAndContinue() {
+      if (stickerApprovalRequestInProgress || stickerSaveInProgress) return false;
+      const input = document.getElementById("stickerAdditionalWeightConfirmation");
+      if (String(input?.value ?? "") !== "APPROVE") {
+        setAdditionalWeightApprovalError("Approval not confirmed. Type APPROVE exactly to continue.");
+        if (input) input.value = "";
+        updateAdditionalWeightApprovalButton();
+        input?.focus();
+        return false;
+      }
+
       const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      const items = getUnsavedStickerSaveItems(companyId);
+      const validation = validateStickerSaveItemsClient(items);
+      if (!validation.ok) {
+        clearStickerAdditionalWeightApproval();
+        showStickerSaveValidationError(validation, items);
+        return false;
+      }
+      const snapshot = getStickerSaveSnapshot(items);
+      if (!items.length || snapshot !== stickerAdditionalWeightApprovalState.snapshot) {
+        clearStickerAdditionalWeightApproval({
+          hide: false,
+          message: "Sticker weights changed after confirmation. Type APPROVE again for the current weights."
+        });
+        return false;
+      }
+
+      const details = stickerAdditionalWeightApprovalState.currentDetails;
+      const pendingAction = stickerAdditionalWeightApprovalState.pendingAction || "SAVE";
+      const approval = {
+        ...details,
+        confirmation: "APPROVE"
+      };
+      if (input) input.value = "";
+      stickerApprovalRequestInProgress = true;
+      updateAdditionalWeightApprovalButton();
+
+      try {
+        const response = await fetch(`${API_BASE}/stickers/approve-additional-weight`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId,
+            userId: getCurrentUserId(),
+            items,
+            additionalWeightApproval: approval
+          })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result?.success === false || result?.approvalRecognized !== true) {
+          if (result?.errorScope === "STICKER_SAVE") {
+            clearStickerAdditionalWeightApproval();
+            showStickerSaveValidationError({ message: result?.message }, items);
+            return false;
+          }
+          if (input) input.value = "";
+          setAdditionalWeightApprovalError(result?.message || "Additional-weight approval failed.");
+          updateAdditionalWeightApprovalButton();
+          input?.focus();
+          return false;
+        }
+
+        hideStickerAdditionalWeightApprovalModal();
+        return savePendingToServer({
+          expectedSnapshot: snapshot,
+          pendingAction,
+          approvedContext: approval
+        });
+      } catch (error) {
+        if (input) input.value = "";
+        setAdditionalWeightApprovalError(error?.message || "Additional-weight approval failed.");
+        updateAdditionalWeightApprovalButton();
+        input?.focus();
+        return false;
+      } finally {
+        stickerApprovalRequestInProgress = false;
+        updateAdditionalWeightApprovalButton();
+      }
+    }
+
+    function continueStickerPrintOnce() {
+      if (stickerPrintContinuationInProgress) return false;
+      stickerPrintContinuationInProgress = true;
+      try {
+        printStickerSheet();
+        return true;
+      } finally {
+        setTimeout(() => {
+          stickerPrintContinuationInProgress = false;
+        }, 1000);
+      }
+    }
+
+    function requestStickerOperation(action = "SAVE") {
+      const normalizedAction = action === "PRINT" ? "PRINT" : "SAVE";
+      if (stickerSaveInProgress || stickerApprovalRequestInProgress) return false;
+
+      const hasUnsaved = pendingStickerItems.some((item) => !item.saved_to_server);
+      if (normalizedAction === "PRINT" && !hasUnsaved) {
+        return continueStickerPrintOnce();
+      }
+      return savePendingToServer({ pendingAction: normalizedAction });
+    }
+
+    async function savePendingToServer(options = {}) {
+      const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+      const pendingAction = options.pendingAction === "PRINT" ? "PRINT" : "SAVE";
       logStickerDebug("savePendingToServer start", {
         isSuperAdmin: isSuperAdmin(),
         isAllCompanies: isSuperAdminAllCompaniesMode(),
@@ -1724,42 +2175,46 @@
         return;
       }
 
+      if (stickerSaveInProgress) return false;
+
       const unsavedItems = pendingStickerItems.filter(item => !item.saved_to_server);
 
       if (!unsavedItems.length) {
+        if (pendingAction === "PRINT") return continueStickerPrintOnce();
         showToast("There are no new unsaved items.", "info");
-        return;
+        return false;
       }
+
+      const items = getUnsavedStickerSaveItems(companyId);
+      const validation = validateStickerSaveItemsClient(items);
+      if (!validation.ok) {
+        clearStickerAdditionalWeightApproval();
+        showStickerSaveValidationError(validation, items);
+        return false;
+      }
+      const currentSnapshot = getStickerSaveSnapshot(items);
+      if (options.expectedSnapshot && options.expectedSnapshot !== currentSnapshot) {
+        clearStickerAdditionalWeightApproval();
+        showToast("Sticker weights changed after confirmation. Type APPROVE again for the current weights.", "error");
+        return false;
+      }
+
+      const saveButton = document.getElementById("saveAllStickersBtn");
+      stickerSaveInProgress = true;
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = "Saving...";
+      }
+      updateAdditionalWeightApprovalButton();
 
       try {
         const savedLots = [...new Set(unsavedItems.map((item) => normalizeText(item.lot_number || item.lot || "")).filter(Boolean))];
         for (const lot of savedLots) {
           if (!(await validateStickerLotCompleted(lot))) {
-            return;
+            clearStickerAdditionalWeightApproval();
+            return false;
           }
         }
-
-        const saveButton = document.getElementById("saveAllStickersBtn");
-        if (saveButton) {
-          saveButton.disabled = true;
-          saveButton.textContent = "Saving...";
-        }
-
-        const items = unsavedItems.map((item) => ({
-            serial: item.serial,
-            productName: item.product_name || item.productName || "",
-            purity: item.purity || "",
-            sku: item.sku || "",
-            mm: item.mm || "",
-            size: item.size || "",
-            weight: getFinalStickerWeight(item),
-            lot: item.lot_number || item.lot || "",
-            metalType: item.metal_type || item.metalType || "Silver",
-            processType: item.process_type || item.processType || "",
-            barcode: item.barcode || "",
-            companyId: companyId,
-            userId: getCurrentUserId()
-        }));
 
         const payload = {
           companyId: companyId,
@@ -1776,14 +2231,28 @@
         const result = await res.json();
 
         if (!res.ok || !result.success) {
-          showToast(result.message || "No stickers were saved.", "error");
+          const approvalDetails = result?.stickerAllowance;
+          const isApprovalRequired = approvalDetails?.approvalCode === "STICKER_ADDITIONAL_WEIGHT_APPROVAL_REQUIRED";
+          const sameApprovedContext = Boolean(
+            options.approvedContext &&
+            String(options.approvedContext.lotNo || "") === String(approvalDetails?.lotNo || "") &&
+            String(options.approvedContext.processOutputWeight || "") === format3(approvalDetails?.processOutputWeight || 0) &&
+            String(options.approvedContext.stickerTotalWeight || "") === format3(approvalDetails?.stickerTotalWeight || 0) &&
+            String(options.approvedContext.calculatedAdditionalWeight || "") === format3(approvalDetails?.calculatedAdditionalWeight || 0)
+          );
+          if (isApprovalRequired && !sameApprovedContext) {
+            openStickerAdditionalWeightApproval(approvalDetails, items, pendingAction);
+            return false;
+          }
+          clearStickerAdditionalWeightApproval();
+          showStickerSaveValidationError({ message: result.message || "No stickers were saved." }, items);
           logStickerDebug("savePendingToServer failed", {
             reason: "SERVER_REJECTED_SAVE",
             status: res.status,
             message: result?.message || "",
             unsavedCount: unsavedItems.length
           });
-          return;
+          return false;
         }
 
         pendingStickerItems = pendingStickerItems.map(item =>
@@ -1793,24 +2262,31 @@
         );
 
         savePendingItemsToLocal();
+        clearStickerAdditionalWeightApproval();
         await loadFromServer();
         renderStickerList();
         updateNextSerialForCurrentLot();
         logStickerDebug("savePendingToServer success", { savedCount: unsavedItems.length });
         showToast("All new items have been saved to stock.", "success");
-        if (savedLots.length) {
+        if (pendingAction === "PRINT") {
+          continueStickerPrintOnce();
+        } else if (savedLots.length) {
           window.location.href = `stock.html?lot=${encodeURIComponent(savedLots[0])}`;
         }
+        return true;
       } catch (err) {
         console.log("Bulk save error:", err);
+        clearStickerAdditionalWeightApproval();
         logStickerDebug("savePendingToServer failed", { reason: "SERVER_SAVE_ERROR", message: err?.message || String(err) });
         showToast(`Server save error: ${err?.message || "Sticker save failed"}`, "error");
+        return false;
       } finally {
-        const saveButton = document.getElementById("saveAllStickersBtn");
+        stickerSaveInProgress = false;
         if (saveButton) {
           saveButton.disabled = false;
           saveButton.textContent = "Save All";
         }
+        updateAdditionalWeightApprovalButton();
       }
     }
 
@@ -1833,6 +2309,7 @@
         mm: row.querySelector('[data-field="mm"]')?.value.trim() || "",
         size: row.querySelector('[data-field="size"]')?.value.trim() || "",
         weight: format3(row.querySelector('[data-field="weight"]')?.value.trim() || 0),
+        qty: row.querySelector('[data-field="qty"]')?.value ?? "",
         lot: row.querySelector('[data-field="lot_number"]')?.value.trim() || "",
         metalType: row.querySelector('[data-field="metal_type"]')?.value.trim() || "",
         processType: row.querySelector('[data-field="process_type"]')?.value.trim() || "",
@@ -1848,6 +2325,12 @@
 
       if (!data.serial || !data.productName || !data.purity || !data.sku || !data.size || !data.weight || !data.lot) {
       showToast("Serial, product, purity, SKU, size, weight, and lot number are required.", "error");
+        return;
+      }
+      const editedQty = Number(data.qty);
+      if (String(data.qty ?? "") === "" || !Number.isInteger(editedQty) || editedQty <= 0) {
+        showToast("Sticker quantity must be a positive whole number.", "error");
+        row.querySelector('[data-field="qty"]')?.focus();
         return;
       }
 
@@ -1893,6 +2376,7 @@
             mm: data.mm,
             size: data.size,
             weight: format3(data.weight),
+            qty: editedQty,
             lot: data.lot,
             lot_number: data.lot,
             metalType: data.metalType,
@@ -1907,6 +2391,8 @@
       });
 
       editingPendingBarcode = null;
+      stickerInvalidRowBarcode = "";
+      stickerInvalidRowField = "";
       savePendingItemsToLocal();
       renderStickerList();
       renderLotButtons();
@@ -1953,12 +2439,20 @@
       const totalWeightEl = document.getElementById("totalStickerWeight");
       if (!tbody) return;
 
+      if (stickerAdditionalWeightApprovalState.snapshot) {
+        const companyId = typeof getEffectiveCompanyId === "function" ? getEffectiveCompanyId() : getCurrentCompanyId();
+        const currentSnapshot = getStickerSaveSnapshot(getUnsavedStickerSaveItems(companyId));
+        if (currentSnapshot !== stickerAdditionalWeightApprovalState.snapshot) {
+          clearStickerAdditionalWeightApproval();
+        }
+      }
+
       tbody.innerHTML = "";
       let totalWeight = 0;
       const extraWeight = getStickerPrintExtraWeight();
 
       if (!pendingStickerItems.length) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;">No sticker items found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;">No sticker items found</td></tr>`;
       }
 
       pendingStickerItems.forEach((item, index) => {
@@ -1966,13 +2460,15 @@
         totalWeight += Number(finalWeight || 0);
         const itemBarcode = getBarcodeValue(item);
         const isEditing = editingPendingBarcode === itemBarcode;
+        const isInvalid = stickerInvalidRowBarcode === itemBarcode;
+        const rowClass = isInvalid ? "sticker-row-invalid" : "";
         const badge = item.saved_to_server
           ? `<span class="saved-badge">Saved</span>`
           : `<span class="unsaved-badge">Unsaved</span>`;
 
         if (isEditing) {
           tbody.innerHTML += `
-            <tr data-editing-barcode="${escapeHtml(itemBarcode)}">
+            <tr class="${rowClass}" data-editing-barcode="${escapeHtml(itemBarcode)}" data-list-barcode="${escapeHtml(itemBarcode)}">
               <td><input class="inline-edit" data-field="serial" type="number" value="${escapeHtml(item.serial || "")}"></td>
               <td><input class="inline-edit" data-field="product_name" value="${escapeHtml(item.product_name || item.productName || "")}"></td>
               <td><input class="inline-edit" data-field="purity" value="${escapeHtml(item.purity || "")}"></td>
@@ -1980,6 +2476,7 @@
               <td><input class="inline-edit" data-field="mm" value="${escapeHtml(item.mm || "")}"></td>
               <td><input class="inline-edit" data-field="size" value="${escapeHtml(item.size || "")}"></td>
               <td><input class="inline-edit" data-field="weight" type="number" step="0.001" value="${escapeHtml(format3(item.weight || 0))}"></td>
+              <td><input class="inline-edit" data-field="qty" type="number" min="1" step="1" value="${escapeHtml(String(Object.prototype.hasOwnProperty.call(item, "qty") ? item.qty : 1))}"></td>
               <td>
                 <input type="hidden" data-field="lot_number" value="${escapeHtml(item.lot_number || item.lot || "")}">
                 <input type="hidden" data-field="metal_type" value="${escapeHtml(item.metal_type || item.metalType || "Silver")}">
@@ -1994,7 +2491,7 @@
           `;
         } else {
           tbody.innerHTML += `
-            <tr>
+            <tr class="${rowClass}" data-list-barcode="${escapeHtml(itemBarcode)}">
               <td>${escapeHtml(item.serial || "")}</td>
               <td>${escapeHtml(item.product_name || item.productName || "")}${badge}</td>
               <td>${escapeHtml(item.purity || "")}</td>
@@ -2002,6 +2499,7 @@
               <td>${escapeHtml(item.mm || "")}</td>
               <td>${escapeHtml(item.size || "")}</td>
               <td>${escapeHtml(finalWeight)}${extraWeight ? `<br><span class="muted">Base ${escapeHtml(format3(item.weight || 0))}</span>` : ""}</td>
+              <td>${escapeHtml(String(Object.prototype.hasOwnProperty.call(item, "qty") ? item.qty : 1))}</td>
               <td>
                 <div class="action-wrap">
                   <button type="button" class="mini-btn edit-btn" onclick="startInlineEdit('${escapeHtml(itemBarcode)}')">Edit</button>
@@ -2365,6 +2863,32 @@
       moveNextOnEnter();
 
       document.getElementById("printExtraWeight")?.addEventListener("input", renderStickerList);
+
+      const approvalInput = document.getElementById("stickerAdditionalWeightConfirmation");
+      approvalInput?.addEventListener("input", () => {
+        const value = String(approvalInput.value ?? "");
+        setAdditionalWeightApprovalError(
+          value && value !== "APPROVE"
+            ? "Approval not confirmed. Type APPROVE exactly to continue."
+            : ""
+        );
+        updateAdditionalWeightApprovalButton();
+      });
+      approvalInput?.addEventListener("paste", (event) => {
+        event.preventDefault();
+        approvalInput.value = "";
+        setAdditionalWeightApprovalError("Approval not confirmed. Type APPROVE exactly to continue.");
+        updateAdditionalWeightApprovalButton();
+      });
+      approvalInput?.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (String(approvalInput.value ?? "") !== "APPROVE") {
+          approvalInput.value = "";
+          setAdditionalWeightApprovalError("Approval not confirmed. Type APPROVE exactly to continue.");
+          updateAdditionalWeightApprovalButton();
+        }
+      });
 
       document.getElementById("lotSelector")?.addEventListener("blur", function () {
         const lotValue = this.value.trim();

@@ -1668,6 +1668,37 @@
                     </button>
                   </div>
                 </div>
+
+                <div id="processLaminationCard" class="process-guide-card side-summary-section" style="display:none;">
+                  <h4>Post-Process Lamination / Addition</h4>
+                  <p class="additive-issue-note">This records weight added after process completion. It does not change the completed process output.</p>
+                  <div class="form-grid">
+                    <div class="input-box">
+                      <label>Completed Process Output</label>
+                      <input id="processLaminationActualWeight" type="text" value="0.000" readonly />
+                    </div>
+                    <div class="input-box">
+                      <label for="processLaminationGainWeight">Added Weight (g)</label>
+                      <input id="processLaminationGainWeight" type="number" min="0" step="0.001" value="0.000" inputmode="decimal" />
+                    </div>
+                    <div class="input-box">
+                      <label>Allowed Sticker Total</label>
+                      <input id="processLaminationAllowedWeight" type="text" value="0.000" readonly />
+                    </div>
+                    <div class="input-box">
+                      <label>Status</label>
+                      <input id="processLaminationStatus" type="text" value="NONE" readonly />
+                    </div>
+                    <div class="input-box" style="grid-column:1 / -1;">
+                      <label for="processLaminationRemarks">Reason / Remarks</label>
+                      <input id="processLaminationRemarks" type="text" placeholder="Example: Lamination/material added after completion" />
+                    </div>
+                  </div>
+                  <div class="btn-row" style="margin-top:10px;">
+                    <button id="saveProcessLaminationButton" class="secondary-btn" type="button" onclick="saveProcessLaminationDraft()">Save Draft</button>
+                  </div>
+                  <p class="additive-issue-note">Final approval requires typing APPROVE in the Sticker Save confirmation.</p>
+                </div>
               </div>
 
               <div id="processStepHintCard" class="sub-card">
@@ -1889,6 +1920,13 @@
     let baseProcessInputWeight = 0;
     let currentOpenProcessStep = null;
     let processGuideData = null;
+    let processLaminationData = {
+      loaded: false,
+      actualProcessWeight: 0,
+      billableWeight: 0,
+      lamination: null
+    };
+    let processLaminationRequestInProgress = false;
     let processLotCompletionInProgress = false;
     let additiveIssueInProgress = false;
     let additiveIssueRequestKey = "";
@@ -2813,6 +2851,7 @@
       renderOutsideKarigarStepNote();
       renderAdditiveMaterialFields();
       applyStepEntryMode();
+      renderProcessLaminationPanel();
     }
 
     async function loadProcessGuide(lotNo) {
@@ -4708,6 +4747,7 @@
         processStepData = [];
         currentOpenProcessStep = null;
         processGuideData = null;
+        resetProcessLaminationData();
         lotAdditiveStatus = { pendingWeight: 0, loaded: false };
         resetAdditiveIssueData();
         renderProcessStepTable();
@@ -4722,6 +4762,7 @@
       if (!selectedLot) {
         currentOpenProcessStep = null;
         processStepData = [];
+        resetProcessLaminationData();
         lotAdditiveStatus = { pendingWeight: 0, loaded: false };
         resetAdditiveIssueData();
         renderProcessStepTable();
@@ -4730,6 +4771,7 @@
         setProcessStepHint(`No ${activeCategory} lot found for ${lotNo}.`);
         return;
       }
+      resetProcessLaminationData();
       await loadProcessSteps(lotNo);
       await loadProcessLossSummary();
       await loadNextProcessInput(lotNo);
@@ -4737,6 +4779,7 @@
       await loadLotAdditiveStatus(lotNo);
       await loadAdditiveIssues(lotNo);
       await loadLotMaterialLedgerSummary(lotNo);
+      await loadProcessLamination(lotNo);
       await autoCompleteDirectStockLotIfReady();
     }
 
@@ -4819,6 +4862,154 @@
         renderProcessGuide();
       }
     }
+
+    function resetProcessLaminationData() {
+      processLaminationData = {
+        loaded: false,
+        actualProcessWeight: 0,
+        billableWeight: 0,
+        lamination: null
+      };
+      const gainInput = document.getElementById("processLaminationGainWeight");
+      const remarksInput = document.getElementById("processLaminationRemarks");
+      if (gainInput) gainInput.value = "0.000";
+      if (remarksInput) remarksInput.value = "";
+      renderProcessLaminationPanel();
+    }
+
+    function getProcessLaminationGainInput() {
+      const raw = String(document.getElementById("processLaminationGainWeight")?.value ?? "").trim();
+      if (!raw) return { ok: true, value: 0, normalized: "0.000" };
+      if (!/^\d+(?:\.\d{1,3})?$/.test(raw)) {
+        return { ok: false, message: "Added weight must be zero or a positive number with at most 3 decimal places." };
+      }
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 0) {
+        return { ok: false, message: "Added weight cannot be negative." };
+      }
+      return { ok: true, value, normalized: value.toFixed(3) };
+    }
+
+    function updateProcessLaminationAllowedPreview() {
+      const allowedInput = document.getElementById("processLaminationAllowedWeight");
+      const gain = getProcessLaminationGainInput();
+      if (!allowedInput) return;
+      allowedInput.value = gain.ok
+        ? formatProcessWeight(Number(processLaminationData.actualProcessWeight || 0) + gain.value)
+        : "INVALID";
+    }
+
+    function renderProcessLaminationPanel() {
+      const panel = document.getElementById("processLaminationCard");
+      if (!panel) return;
+
+      const lot = getSelectedProcessLot();
+      const isCompletedStickerLot = Boolean(
+        lot &&
+        !lot.isManualLot &&
+        String(lot.status || "").trim().toUpperCase() === "COMPLETED" &&
+        getWorkCategoryDestination(lot.workCategory || lot.work_category) === "STICKER"
+      );
+      panel.style.display = isCompletedStickerLot ? "" : "none";
+      if (!isCompletedStickerLot) return;
+
+      const record = processLaminationData.lamination;
+      const status = String(record?.status || "NONE").trim().toUpperCase();
+      const approved = status === "APPROVED";
+      const actualInput = document.getElementById("processLaminationActualWeight");
+      const statusInput = document.getElementById("processLaminationStatus");
+      const gainInput = document.getElementById("processLaminationGainWeight");
+      const remarksInput = document.getElementById("processLaminationRemarks");
+      const saveButton = document.getElementById("saveProcessLaminationButton");
+
+      if (actualInput) actualInput.value = formatProcessWeight(processLaminationData.actualProcessWeight);
+      if (statusInput) statusInput.value = status;
+      if (gainInput) gainInput.disabled = approved || processLaminationRequestInProgress;
+      if (remarksInput) remarksInput.disabled = approved || processLaminationRequestInProgress;
+      if (saveButton) saveButton.disabled = approved || processLaminationRequestInProgress;
+      updateProcessLaminationAllowedPreview();
+    }
+
+    async function loadProcessLamination(lotNo = "") {
+      const cleanLotNo = String(lotNo || document.getElementById("stepLotNo")?.value || "").trim();
+      const lot = getSelectedProcessLot();
+      if (
+        !cleanLotNo ||
+        !lot ||
+        lot.isManualLot ||
+        String(lot.status || "").trim().toUpperCase() !== "COMPLETED" ||
+        getWorkCategoryDestination(lot.workCategory || lot.work_category) !== "STICKER"
+      ) {
+        resetProcessLaminationData();
+        return;
+      }
+
+      try {
+        const params = buildAuthParams();
+        addWorkCategoryParam(params);
+        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(cleanLotNo)}/lamination?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) {
+          throw new Error(data?.message || "Lamination weight fetch failed");
+        }
+
+        processLaminationData = {
+          loaded: true,
+          actualProcessWeight: Number(data.actualProcessWeight || 0),
+          billableWeight: Number(data.billableWeight || data.actualProcessWeight || 0),
+          lamination: data.lamination || null
+        };
+        const gainInput = document.getElementById("processLaminationGainWeight");
+        const remarksInput = document.getElementById("processLaminationRemarks");
+        if (gainInput) gainInput.value = formatProcessWeight(data.lamination?.laminationGainWeight || 0);
+        if (remarksInput) remarksInput.value = String(data.lamination?.remarks || "");
+        renderProcessLaminationPanel();
+      } catch (error) {
+        console.log("Process lamination fetch error:", error);
+        resetProcessLaminationData();
+        showToast(error.message || "Lamination weight fetch failed", "error", "Lamination Weight");
+      }
+    }
+
+    async function saveProcessLaminationDraft() {
+      if (processLaminationRequestInProgress) return false;
+      const lotNo = document.getElementById("stepLotNo")?.value?.trim() || "";
+      const gain = getProcessLaminationGainInput();
+      if (!lotNo || !gain.ok) {
+        showToast(gain.message || "Please select a completed process lot.", "error", "Lamination Weight");
+        return false;
+      }
+
+      processLaminationRequestInProgress = true;
+      renderProcessLaminationPanel();
+      try {
+        const params = buildAuthParams();
+        addWorkCategoryParam(params);
+        const res = await fetch(`${API_BASE}/process/lots/${encodeURIComponent(lotNo)}/lamination?${params.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildAuthPayload({
+            workCategory: getActiveStepWorkCategory(),
+            laminationGainWeight: gain.normalized,
+            remarks: document.getElementById("processLaminationRemarks")?.value?.trim() || ""
+          }))
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.success === false) throw new Error(data?.message || "Lamination weight save failed");
+        showToast(data.message || "Lamination weight draft saved", "success", "Draft Saved");
+        await loadProcessLamination(lotNo);
+        return true;
+      } catch (error) {
+        showToast(error.message || "Lamination weight save failed", "error", "Save Failed");
+        return false;
+      } finally {
+        processLaminationRequestInProgress = false;
+        renderProcessLaminationPanel();
+      }
+    }
+
 
     async function autoCompleteDirectStockLotIfReady() {
       const workCategory = getActiveStepWorkCategory();
@@ -5579,6 +5770,7 @@
     });
     document.getElementById("stepAdditiveGivenWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
     document.getElementById("stepAdditiveReturnedWeight")?.addEventListener("input", updateAdditiveMaterialUsage);
+    document.getElementById("processLaminationGainWeight")?.addEventListener("input", updateProcessLaminationAllowedPreview);
     document.getElementById("stepRecoveryWeight")?.addEventListener("input", updateProcessStepLoss);
     document.getElementById("stepOutputQty")?.addEventListener("input", () => {
       updateProcessStepLoss();
